@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Local OpenAI-compatible bridge for DeepSeek Harness.
 
-Run this on the Windows machine that runs Harness.  Harness talks only to
-127.0.0.1; this process relays requests to the Colab worker through Supabase
-using outbound HTTPS.
+Run on the Windows machine that runs Harness. Harness talks only to 127.0.0.1;
+this process exchanges jobs with the Colab worker through Growing-Trader
+Supabase over ordinary outbound HTTPS.
 """
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import time
@@ -51,7 +52,7 @@ def _worker_or_503() -> dict[str, Any]:
     if not worker:
         raise HTTPException(
             status_code=503,
-            detail="No live Colab Qwen worker. Start the Colab relay notebook first.",
+            detail="No live Colab Qwen worker. Start the Colab notebook and wait for WORKER READY.",
         )
     return worker
 
@@ -93,7 +94,6 @@ def _error_sse(message: str) -> str:
 def _stream_job(job: dict[str, Any]) -> Iterator[str]:
     relay = store()
     job_id = str(job["id"])
-    request_path = job.get("request_path")
     last_seq = -1
     deadline = time.time() + JOB_TIMEOUT_SECONDS
     final_status: str | None = None
@@ -139,8 +139,6 @@ def _stream_job(job: dict[str, Any]) -> Iterator[str]:
                     if final_status == "cancelled":
                         return
                     if final_status == "done" and not rows:
-                        # Normally [DONE] arrives in the final chunk. If a client/library
-                        # stripped it, still terminate the OpenAI stream cleanly.
                         yield "data: [DONE]\n\n"
                         return
                 last_status_check = now
@@ -158,15 +156,13 @@ def _stream_job(job: dict[str, Any]) -> Iterator[str]:
         yield _error_sse(f"Bridge relay failure: {exc}")
         yield "data: [DONE]\n\n"
     finally:
-        # Give the worker a moment to observe cancellation/status before cleanup.
         if final_status in {"done", "error", "cancelled"}:
-            relay.cleanup_job(job_id, request_path)
+            relay.cleanup_job(job_id)
 
 
 def _wait_nonstream(job: dict[str, Any]) -> JSONResponse:
     relay = store()
     job_id = str(job["id"])
-    request_path = job.get("request_path")
     last_seq = -1
     deadline = time.time() + JOB_TIMEOUT_SECONDS
     try:
@@ -190,11 +186,9 @@ def _wait_nonstream(job: dict[str, Any]) -> JSONResponse:
                 )
             time.sleep(POLL_SECONDS)
         relay.cancel_job(job_id)
-        return JSONResponse(
-            {"error": {"message": "Relay job timed out"}}, status_code=504
-        )
+        return JSONResponse({"error": {"message": "Relay job timed out"}}, status_code=504)
     finally:
-        relay.cleanup_job(job_id, request_path)
+        relay.cleanup_job(job_id)
 
 
 @app.post("/v1/chat/completions")
@@ -210,8 +204,7 @@ async def chat_completions(request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Request body must be a JSON object")
 
-    # Harness must address the exact served model. Keep the rest of the OpenAI
-    # request untouched so tool calls, reasoning fields and sampling options pass through.
+    # Preserve Harness tool/reasoning/sampling fields; only normalize model ID.
     payload["model"] = MODEL_ID
     wants_stream = bool(payload.get("stream", False))
 
@@ -233,19 +226,34 @@ async def chat_completions(request: Request):
     return _wait_nonstream(job)
 
 
+def _ensure_relay_secret() -> None:
+    if (os.environ.get("QWEN_RELAY_SECRET") or "").strip():
+        return
+    print("QWEN_RELAY_SECRET is not set in this terminal.")
+    secret = getpass.getpass("Paste the dedicated Qwen relay secret (hidden): ").strip()
+    if not secret:
+        raise SystemExit("QWEN_RELAY_SECRET cannot be empty")
+    os.environ["QWEN_RELAY_SECRET"] = secret
+
+
 def main() -> None:
     from dotenv import load_dotenv
     import uvicorn
 
     load_dotenv()
+    _ensure_relay_secret()
+
     relay = store()
     relay.preflight()
-    print("\nQwen Harness bridge")
+    worker = relay.get_live_worker(max_age_seconds=30)
+
+    print("\nQwen Harness local bridge")
     print(f"  Base URL : http://{HOST}:{PORT}/v1")
     print(f"  API key  : {LOCAL_API_KEY or '(disabled)'}")
     print(f"  Model    : {MODEL_ID}")
+    print(f"  Context  : {CONTEXT_WINDOW:,}")
     print(f"  Relay ID : {relay.config.relay_id}")
-    print("  Colab    : waiting for worker heartbeat")
+    print(f"  Colab    : {'ONLINE ✅' if worker else 'not online yet'}")
     print("\nKeep this terminal open while using Harness.\n")
     uvicorn.run(app, host=HOST, port=PORT, log_level="info")
 
