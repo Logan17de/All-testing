@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "all-testing-llm"
+version = "0.1.0"
+description = "Colab-first LLM launchers from Logan17de/All-testing"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+py-modules = ["qwen3_8_27b_api_colab"]
