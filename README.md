@@ -1,8 +1,31 @@
-# All-testing — TTS Benchmarks
+# All-testing — AI Model Benchmarks & Colab Tests
 
-Colab-first experiments for evaluating speech models for AIKO.
+Colab-first experiments for testing AI models and serving local/open models through temporary APIs.
 
-## Notebooks
+## LLM API
+
+### Qwen3.8-27B
+
+- `llm/Qwen3_8_27B_API_Colab.ipynb` — one-click Colab launcher. Pulls the latest repo, detects GPU VRAM, downloads Qwen3.8-27B, starts an OpenAI-compatible vLLM API, creates a temporary HTTPS tunnel, generates an API key, and prints the connection details.
+- `llm/qwen3_8_27b_api_colab.py` — launcher used by the notebook.
+
+GPU selection is automatic:
+
+- ~80 GB VRAM → `Qwen/Qwen3.8-27B` (original BF16 checkpoint)
+- ~40 GB VRAM → `Qwen/Qwen3.8-27B-FP8` (official FP8 checkpoint)
+- <40 GB VRAM → exits instead of silently switching to an unofficial community quantization
+
+At the end of a successful run the notebook prints:
+
+```text
+API_URL : https://<temporary-id>.trycloudflare.com/v1
+API_KEY : sk-colab-<random-key>
+MODEL   : qwen3.8-27b
+```
+
+The URL and key work only while the Colab runtime remains alive. Never commit the generated API key to GitHub.
+
+## TTS Notebooks
 
 ### Qwen3-TTS
 
@@ -20,7 +43,7 @@ Colab-first experiments for evaluating speech models for AIKO.
 
 - `tts/Qwen_vs_Index_Benchmark.ipynb` — common AIKO Japanese test phrases and a results sheet.
 
-## Recommended order
+## Recommended TTS order
 
 1. Run `Qwen3_TTS_Colab.ipynb`.
 2. Start a **fresh Colab runtime** and run `Qwen3_TTS_Live_vLLM_Colab.ipynb`.
@@ -41,7 +64,7 @@ Colab-first experiments for evaluating speech models for AIKO.
 - emotional naturalness
 - speaker consistency
 
-## Models
+## TTS Models
 
 - Qwen: `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice`
 - Index: `IndexTeam/IndexTTS-2.5`
