@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "all-testing-llm"
-version = "0.2.0"
-description = "Colab-first LLM launchers and local Harness bridges from Logan17de/All-testing"
+version = "0.3.0"
+description = "Colab-first LLM workers and local Harness bridges from Logan17de/All-testing"
 requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.115",
@@ -16,11 +16,13 @@ dependencies = [
 
 [project.scripts]
 qwen-harness-bridge = "qwen_harness_bridge:main"
+qwen-relay-test-worker = "qwen_supabase_test_worker:main"
 
 [tool.setuptools]
 py-modules = [
   "qwen3_8_27b_api_colab",
   "qwen3_8_27b_supabase_colab",
   "qwen_supabase_relay",
+  "qwen_supabase_test_worker",
   "qwen_harness_bridge",
 ]
