@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Colab Qwen3.8-27B worker using an outbound-only Supabase relay.
+"""Colab Qwen3.8-27B worker using an outbound-only Growing-Trader relay.
 
-No public tunnel is created.  vLLM stays on 127.0.0.1:8000 inside Colab.  This
-worker polls a private Supabase job queue over HTTPS, downloads compressed
-requests from private Storage, streams them through local vLLM, and writes
-response chunks back through Supabase.
+vLLM stays private on 127.0.0.1:8000. Colab only makes ordinary outbound HTTPS
+calls to Supabase. No reverse tunnel or public Colab port is used.
 """
 
 from __future__ import annotations
@@ -67,27 +65,32 @@ def colab_secret(name: str) -> str | None:
 
 
 def load_relay_env() -> None:
-    """Read relay credentials before expensive model work."""
-    print("[0/7] Checking Supabase relay configuration...", flush=True)
-    url = colab_secret("SUPABASE_URL")
-    key = colab_secret("SUPABASE_SECRET_KEY") or colab_secret("SUPABASE_SERVICE_ROLE_KEY")
+    """Load only the dedicated relay secret; URL/publishable key are safe defaults."""
+    print("[0/7] Checking Growing-Trader Qwen relay...", flush=True)
+    secret = colab_secret("QWEN_RELAY_SECRET")
     relay_id = colab_secret("QWEN_RELAY_ID") or "qwen3-8-27b"
-    if not url:
-        raise RuntimeError("SUPABASE_URL is missing from Colab Secrets/environment")
-    if not key:
+    if not secret:
         raise RuntimeError(
-            "SUPABASE_SECRET_KEY is missing from Colab Secrets/environment "
-            "(legacy SUPABASE_SERVICE_ROLE_KEY also works)"
+            "QWEN_RELAY_SECRET is missing. In Colab open Secrets (key icon), add "
+            "QWEN_RELAY_SECRET, enable Notebook access, then rerun."
         )
-    os.environ["SUPABASE_URL"] = url
-    os.environ["SUPABASE_SECRET_KEY"] = key
+    os.environ["QWEN_RELAY_SECRET"] = secret
     os.environ["QWEN_RELAY_ID"] = relay_id
+
+    # Optional overrides. Normally not needed because the Growing-Trader URL and
+    # publishable key are intentionally embedded as non-secret defaults.
+    optional_url = colab_secret("SUPABASE_URL")
+    optional_key = colab_secret("SUPABASE_PUBLISHABLE_KEY")
+    if optional_url:
+        os.environ["SUPABASE_URL"] = optional_url
+    if optional_key:
+        os.environ["SUPABASE_PUBLISHABLE_KEY"] = optional_key
     print(f"      Relay ID: {relay_id}")
-    print("      Supabase URL/key: found ✅")
+    print("      QWEN_RELAY_SECRET: found ✅")
 
 
 def install_dependencies() -> None:
-    print("\n[1/7] Preparing Qwen3.8 + relay runtime...", flush=True)
+    print("\n[1/7] Preparing Qwen3.8 runtime...", flush=True)
     run([
         sys.executable, "-m", "pip", "install", "-U",
         f"vllm=={VLLM_VERSION}",
@@ -210,6 +213,8 @@ def try_reuse_server(model_id: str, max_model_len: int) -> tuple[int, str] | Non
             return None
         if int(state.get("max_model_len", 0)) != max_model_len:
             return None
+        if state.get("kv_cache_dtype") != KV_CACHE_DTYPE:
+            return None
         if not _pid_alive(pid) or not _port_open() or not _local_models(api_key):
             return None
         print(f"\n[4/7] Reusing existing vLLM server ✅ | PID {pid} | {gpu_memory_status()}")
@@ -231,10 +236,9 @@ def cleanup_old_server() -> None:
                 time.sleep(3)
         except Exception:
             pass
-    if _port_open():
-        if shutil.which("fuser"):
-            subprocess.run(["fuser", "-k", "-TERM", f"{PORT}/tcp"], check=False, capture_output=True)
-            time.sleep(3)
+    if _port_open() and shutil.which("fuser"):
+        subprocess.run(["fuser", "-k", "-TERM", f"{PORT}/tcp"], check=False, capture_output=True)
+        time.sleep(3)
     if _port_open():
         raise RuntimeError(f"Port {PORT} is still occupied after vLLM cleanup")
     SERVER_STATE_FILE.unlink(missing_ok=True)
@@ -331,10 +335,9 @@ class QwenRelayWorker:
         import requests
 
         job_id = str(job["id"])
-        request_path = str(job["request_path"])
         seq = 0
         try:
-            payload = self.store.download_request(request_path)
+            payload = self.store.decode_job_payload(job)
             payload["model"] = SERVED_MODEL_NAME
             wants_stream = bool(payload.get("stream", False))
 
@@ -393,11 +396,11 @@ class QwenRelayWorker:
             print(f"\n      Job {job_id} failed: {message}", flush=True)
 
     def run_forever(self) -> None:
-        print("\n[6/7] Connecting Colab worker to Supabase over outbound HTTPS...", flush=True)
+        print("\n[6/7] Registering Colab worker through outbound Supabase HTTPS...", flush=True)
         self.heartbeat("online", f"{gpu_memory_status()} | waiting for Harness")
         print(f"      Worker ID: {self.worker_id}")
         print(f"      Relay ID : {self.store.config.relay_id}")
-        print("      Inbound public ports/tunnels: NONE ✅")
+        print("      Public Colab ports/tunnels: NONE ✅")
         print("\n[7/7] WORKER READY — waiting for Harness jobs...\n", flush=True)
 
         idle_message_at = 0.0
@@ -406,7 +409,7 @@ class QwenRelayWorker:
                 self.heartbeat("online", f"{gpu_memory_status()} | ready")
                 job = self.store.claim_job(self.worker_id)
                 if job:
-                    print(f"      Claimed job {job['id']} — sending to local Qwen...", flush=True)
+                    print(f"\n      Claimed job {job['id']} — sending to local Qwen...", flush=True)
                     self.process(job)
                     print(f"      Job {job['id']} finished. Waiting for next job.", flush=True)
                     continue
@@ -424,16 +427,18 @@ class QwenRelayWorker:
 
 
 def main() -> None:
-    # Validate relay credentials and schema before using A100 time.
+    # Cell 1 installs the small relay dependency set. Validate credentials and
+    # Growing-Trader RPCs before installing vLLM or touching the A100.
     load_relay_env()
+    from qwen_supabase_relay import RelayStore
+
+    relay = RelayStore.from_env()
+    relay.preflight()
+    print("      Growing-Trader relay RPC/auth: OK ✅")
+
     install_dependencies()
 
-    from qwen_supabase_relay import RelayStore
-    relay = RelayStore.from_env()
-    print("\n[2/7] Verifying Supabase relay + GPU...", flush=True)
-    relay.preflight()
-    print("      Supabase relay schema/bucket: OK ✅")
-
+    print("\n[2/7] Verifying GPU...", flush=True)
     gpu_name, vram_mib = gpu_info()
     model_id, max_model_len = choose_model(vram_mib)
     print(f"      GPU: {gpu_name} ({vram_mib / 1024:.1f} GiB)")
@@ -445,8 +450,7 @@ def main() -> None:
 
     reused = try_reuse_server(model_id, max_model_len)
     if reused:
-        pid, api_key = reused
-        proc = None
+        _, api_key = reused
     else:
         cleanup_old_server()
         api_key = "sk-colab-" + secrets.token_urlsafe(32)
