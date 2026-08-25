@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Colab launcher for Qwen3.8-27B as an OpenAI-compatible API for DeepSeek Harness.
 
-All real setup logic lives in this GitHub module. The Colab notebook only installs
-this package from GitHub and calls main().
+All setup logic lives in this GitHub module. The Colab notebook only installs
+this package from GitHub, imports it, and calls main().
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ BF16_MODEL = "Qwen/Qwen3.8-27B"
 FP8_MODEL = "Qwen/Qwen3.8-27B-FP8"
 SERVED_MODEL_NAME = "qwen3.8-27b"
 
-# Stable versions verified for the current Colab Python 3.13 runtime and Qwen3.8.
 VLLM_VERSION = "0.27.1"
 TRANSFORMERS_VERSION = "5.15.0"
 
@@ -33,26 +32,20 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 PERCENT_RE = re.compile(r"(?:^|\s)(100|[1-9]?\d)%")
 
 
-def run(cmd: list[str], *, check: bool = True, capture: bool = False):
-    print("+", " ".join(cmd), flush=True)
+def run(cmd: list[str], *, check: bool = True, capture: bool = False, echo: bool = True):
+    if echo:
+        print("+", " ".join(cmd), flush=True)
     return subprocess.run(cmd, check=check, text=True, capture_output=capture)
 
 
 def install_dependencies() -> None:
-    print("\n[1/7] Installing Qwen3.8-compatible runtime...", flush=True)
-    print(f"      Python: {sys.version.split()[0]}", flush=True)
-    print(f"      vLLM: {VLLM_VERSION} (stable)", flush=True)
-    print(f"      Transformers: {TRANSFORMERS_VERSION}", flush=True)
+    print("\n[1/7] Preparing Qwen3.8-compatible runtime...", flush=True)
+    print(f"      Python: {sys.version.split()[0]}")
+    print(f"      vLLM: {VLLM_VERSION}")
+    print(f"      Transformers: {TRANSFORMERS_VERSION}")
 
-    # Qwen's current model card recommends the normal PyPI vLLM package.
-    # Avoid the nightly index here: it is unnecessary for Qwen3.8-27B and can
-    # fail dependency resolution on Colab even when stable vLLM works.
     run([
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "-U",
+        sys.executable, "-m", "pip", "install", "-U",
         f"vllm=={VLLM_VERSION}",
         f"transformers=={TRANSFORMERS_VERSION}",
         "huggingface_hub[hf_xet]",
@@ -60,30 +53,37 @@ def install_dependencies() -> None:
         "requests",
     ])
 
-    version = run([
-        sys.executable,
-        "-c",
+    # Colab can ship torchaudio/torchvision wheels compiled for a different CUDA
+    # version than the PyTorch wheel installed by vLLM. Transformers imports these
+    # optional packages during startup, which can crash vLLM before model loading.
+    # This Harness endpoint is text-only, so remove the optional multimedia wheels.
+    print("\n      Removing optional Colab multimedia packages that can conflict with vLLM...", flush=True)
+    run([
+        sys.executable, "-m", "pip", "uninstall", "-y",
+        "torchaudio", "torchvision", "torchtext",
+    ], check=False)
+
+    # Verify the exact failure point before we spend time starting the server.
+    print("\n      Verifying vLLM / Torch runtime...", flush=True)
+    verify = run([
+        sys.executable, "-c",
         (
-            "import vllm, transformers, torch; "
-            "print('vLLM:', vllm.__version__); "
-            "print('Transformers:', transformers.__version__); "
+            "import torch, transformers, vllm; "
             "print('Torch:', torch.__version__); "
+            "print('Torch CUDA:', torch.version.cuda); "
+            "print('Transformers:', transformers.__version__); "
+            "print('vLLM:', vllm.__version__); "
             "print('CUDA available:', torch.cuda.is_available())"
         ),
     ], capture=True)
-    print(version.stdout.strip(), flush=True)
+    print(verify.stdout.strip(), flush=True)
 
 
 def gpu_info() -> tuple[str, int]:
     if shutil.which("nvidia-smi") is None:
-        raise RuntimeError(
-            "No NVIDIA GPU detected. In Colab choose Runtime > Change runtime type > GPU."
-        )
-
+        raise RuntimeError("No NVIDIA GPU detected. In Colab choose Runtime > Change runtime type > GPU.")
     result = run([
-        "nvidia-smi",
-        "--query-gpu=name,memory.total",
-        "--format=csv,noheader,nounits",
+        "nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"
     ], capture=True)
     first = result.stdout.strip().splitlines()[0]
     name, mem_mib = [part.strip() for part in first.rsplit(",", 1)]
@@ -91,44 +91,26 @@ def gpu_info() -> tuple[str, int]:
 
 
 def choose_model(vram_mib: int) -> tuple[str, int]:
-    # BF16 weights are ~55.6 GB. An A100 80 GB leaves enough room for a
-    # practical 32K agent context plus runtime/KV cache.
     if vram_mib >= 70_000:
         return BF16_MODEL, 32768
-
-    # Official FP8 checkpoint is ~31 GB.
     if vram_mib >= 38_000:
         return FP8_MODEL, 16384
-
     raise RuntimeError(
         f"Detected only {vram_mib / 1024:.1f} GiB VRAM. "
         "Use >=40 GB for the official FP8 checkpoint or >=80 GB for BF16."
     )
 
 
-def get_hf_token() -> str | None:
-    # Qwen3.8 is public. Use a token only if the caller explicitly exported one.
-    # Do not query a missing Colab Secret, because Colab can block/warn while
-    # trying to fetch an unset secret.
-    return os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-
-
-def download_model(model_id: str, token: str | None) -> Path:
+def download_model(model_id: str) -> Path:
     print(f"\n[3/7] Preparing {model_id}...", flush=True)
     from huggingface_hub import snapshot_download
 
     MODEL_ROOT.mkdir(parents=True, exist_ok=True)
     local_dir = MODEL_ROOT / model_id.split("/")[-1]
-
     if local_dir.exists():
-        print(f"      Existing cache found: {local_dir}", flush=True)
-        print("      Verifying/reusing cached files; already-downloaded shards are not fetched again.", flush=True)
-
-    snapshot_download(
-        repo_id=model_id,
-        local_dir=str(local_dir),
-        token=token,
-    )
+        print(f"      Existing model directory found: {local_dir}")
+        print("      Verifying/reusing cached files; only missing files will download.")
+    snapshot_download(repo_id=model_id, local_dir=str(local_dir))
     print(f"Model ready at: {local_dir}", flush=True)
     return local_dir
 
@@ -136,9 +118,8 @@ def download_model(model_id: str, token: str | None) -> Path:
 def gpu_memory_status() -> str:
     try:
         result = subprocess.run([
-            "nvidia-smi",
-            "--query-gpu=memory.used,memory.total",
-            "--format=csv,noheader,nounits",
+            "nvidia-smi", "--query-gpu=memory.used,memory.total",
+            "--format=csv,noheader,nounits"
         ], text=True, capture_output=True, timeout=3)
         used, total = [int(x.strip()) for x in result.stdout.splitlines()[0].split(",")]
         return f"VRAM {used / 1024:.1f}/{total / 1024:.1f} GiB"
@@ -186,7 +167,7 @@ def _infer_stage(text: str, percent: int, stage: str) -> tuple[int, str]:
 
     stages = [
         (8, "Starting vLLM", ("api server", "vllm serve")),
-        (15, "Reading model config", ("model config", "architecture", "qwen3_5")),
+        (15, "Reading model config", ("model config", "architecture", "qwen")),
         (22, "Creating inference engine", ("engine core", "llm engine", "initializing")),
         (28, "Loading model weights", ("loading model", "loading weights", "safetensors")),
         (74, "Model weights loaded", ("loading weights took", "model loading took", "weights loaded")),
@@ -222,11 +203,10 @@ def start_vllm(model_dir: Path, api_key: str, max_model_len: int) -> subprocess.
         "--language-model-only",
     ]
 
-    # Never print the generated API key in the command line output.
-    safe_cmd = cmd.copy()
-    key_idx = safe_cmd.index("--api-key") + 1
-    safe_cmd[key_idx] = "***REDACTED***"
-    print("+ " + " ".join(safe_cmd), flush=True)
+    printable = cmd.copy()
+    key_index = printable.index("--api-key") + 1
+    printable[key_index] = "***REDACTED***"
+    print("+ " + " ".join(printable), flush=True)
 
     return subprocess.Popen(
         cmd,
@@ -265,19 +245,18 @@ def wait_for_server(api_key: str, proc: subprocess.Popen, timeout_s: int = 1200)
         now = time.time()
         if now >= next_check:
             try:
-                response = requests.get(
+                r = requests.get(
                     f"http://127.0.0.1:{PORT}/v1/models",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=4,
+                    headers={"Authorization": f"Bearer {api_key}"}, timeout=4,
                 )
-                if response.ok:
+                if r.ok:
                     print(
-                        f"\r[5/7] [{_progress_bar(100)}] 100%  API ready ✅                    "
-                        f"| {_elapsed(started)} | {gpu_memory_status()}" + " " * 10,
+                        f"\r[5/7] [{_progress_bar(100)}] 100%  API ready ✅ "
+                        f"| {_elapsed(started)} | {gpu_memory_status()}" + " " * 12,
                         flush=True,
                     )
                     return
-                last_error = f"HTTP {response.status_code}"
+                last_error = f"HTTP {r.status_code}"
             except Exception as exc:
                 last_error = str(exc)
             next_check = now + 4
@@ -285,8 +264,7 @@ def wait_for_server(api_key: str, proc: subprocess.Popen, timeout_s: int = 1200)
         print(
             f"\r[5/7] [{_progress_bar(percent)}] {percent:3d}%  {stage:<28} "
             f"| {_elapsed(started)} | {gpu_memory_status()}" + " " * 10,
-            end="",
-            flush=True,
+            end="", flush=True,
         )
         time.sleep(1)
 
@@ -311,10 +289,7 @@ def install_cloudflared() -> Path:
         raise RuntimeError(f"Unsupported CPU architecture: {arch}")
 
     dest = Path("/content/cloudflared")
-    url = (
-        "https://github.com/cloudflare/cloudflared/releases/latest/download/"
-        f"cloudflared-linux-{package_arch}"
-    )
+    url = f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{package_arch}"
     run(["curl", "-L", "--fail", "--silent", "--show-error", url, "-o", str(dest)])
     dest.chmod(0o755)
     return dest
@@ -325,12 +300,8 @@ def start_tunnel() -> tuple[subprocess.Popen, str]:
     cloudflared = install_cloudflared()
     log_path = LOG_ROOT / "cloudflared.log"
     log_handle = log_path.open("w")
-
     proc = subprocess.Popen([
-        str(cloudflared),
-        "tunnel",
-        "--url", f"http://127.0.0.1:{PORT}",
-        "--no-autoupdate",
+        str(cloudflared), "tunnel", "--url", f"http://127.0.0.1:{PORT}", "--no-autoupdate"
     ], stdout=log_handle, stderr=subprocess.STDOUT, text=True, start_new_session=True)
 
     pattern = re.compile(r"https://[-a-z0-9]+\.trycloudflare\.com")
@@ -343,7 +314,6 @@ def start_tunnel() -> tuple[subprocess.Popen, str]:
             if match:
                 return proc, match.group(0)
         time.sleep(1)
-
     raise RuntimeError(f"Could not create Cloudflare tunnel.\n{_tail(log_path, 80)}")
 
 
@@ -372,13 +342,7 @@ def main() -> None:
     print(f"Selected model: {model_id}")
     print(f"API max context: {max_model_len:,} tokens")
 
-    hf_token = get_hf_token()
-    if hf_token:
-        print("HF_TOKEN found in environment.")
-    else:
-        print("HF_TOKEN not set; Qwen is public, continuing anonymously.")
-
-    model_dir = download_model(model_id, hf_token)
+    model_dir = download_model(model_id)
     api_key = "sk-colab-" + secrets.token_urlsafe(32)
     vllm_proc = start_vllm(model_dir, api_key, max_model_len)
 
@@ -403,27 +367,20 @@ def main() -> None:
     except Exception as exc:
         test_text = f"Smoke test failed, but server/tunnel are running: {exc}"
 
-    print("\n" + "=" * 76)
+    print("\n" + "=" * 72)
     print("QWEN3.8-27B COLAB API IS READY")
-    print("=" * 76)
+    print("=" * 72)
     print(f"API_URL : {api_url}")
     print(f"API_KEY : {api_key}")
     print(f"MODEL   : {SERVED_MODEL_NAME}")
     print(f"SOURCE  : {model_id}")
     print(f"TEST    : {test_text}")
     print(f"ENV FILE: {API_ENV_FILE}")
-    print("=" * 76)
-    print("HARNESS SETTINGS")
-    print(f"Base URL : {api_url}")
-    print(f"API Key  : {api_key}")
-    print(f"Model ID : {SERVED_MODEL_NAME}")
-    print("Protocol : OpenAI-compatible / Chat Completions")
-    print("=" * 76)
-    print("\nKeep this Colab runtime running while Harness is using the model.")
+    print("=" * 72)
+    print("Keep this Colab runtime alive while Harness is using the API.")
 
-    # Keep references alive in this process. The subprocesses also run in their
-    # own sessions, so the API remains available after main() finishes.
-    _ = (vllm_proc, tunnel_proc)
+    # Keep a reference to the tunnel process in this Python process.
+    _ = tunnel_proc
 
 
 if __name__ == "__main__":
