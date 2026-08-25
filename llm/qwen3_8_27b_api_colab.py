@@ -8,9 +8,12 @@ this package from GitHub, imports it, and calls main().
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 import shutil
+import signal
+import socket
 import subprocess
 import sys
 import time
@@ -32,6 +35,8 @@ KV_CACHE_DTYPE = "fp8"
 MODEL_ROOT = Path("/content/models")
 LOG_ROOT = Path("/content/qwen_api_logs")
 API_ENV_FILE = Path("/content/qwen_api.env")
+VLLM_PID_FILE = Path("/content/qwen_vllm.pid")
+TUNNEL_PID_FILE = Path("/content/qwen_tunnel.pid")
 PORT = 8000
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -173,6 +178,96 @@ def _elapsed(started: float) -> str:
     return f"{hour}:{minute:02d}:{sec:02d}" if hour else f"{minute:02d}:{sec:02d}"
 
 
+def _port_open(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _kill_saved_process_group(pid_file: Path, label: str) -> bool:
+    if not pid_file.exists():
+        return False
+    try:
+        pid = int(pid_file.read_text().strip())
+    except Exception:
+        pid_file.unlink(missing_ok=True)
+        return False
+
+    try:
+        os.killpg(pid, signal.SIGTERM)
+        print(f"      Stopping previous {label} process group (PID {pid})...", flush=True)
+        time.sleep(2)
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        return True
+    except ProcessLookupError:
+        return False
+    finally:
+        pid_file.unlink(missing_ok=True)
+
+
+def cleanup_previous_runtime() -> None:
+    """Make reruns idempotent: one vLLM, one key, one tunnel, one port."""
+    print("\n[4/7] Cleaning previous launcher processes...", flush=True)
+
+    _kill_saved_process_group(TUNNEL_PID_FILE, "tunnel")
+    subprocess.run(
+        ["pkill", "-TERM", "-f", "nokey@localhost.run"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    _kill_saved_process_group(VLLM_PID_FILE, "vLLM")
+
+    # Backward-compatibility cleanup for servers created by older launcher
+    # versions that did not save a PID file. This is the exact condition that
+    # otherwise causes Errno 98 and then 401s against the old server/key.
+    if _port_open(PORT):
+        print(f"      Port {PORT} is occupied by an older server; releasing it...", flush=True)
+        if shutil.which("fuser"):
+            subprocess.run(
+                ["fuser", "-k", "-TERM", f"{PORT}/tcp"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.run(
+                ["pkill", "-TERM", "-f", f"vllm serve .*--port {PORT}"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+    deadline = time.time() + 20
+    while _port_open(PORT) and time.time() < deadline:
+        time.sleep(1)
+
+    if _port_open(PORT):
+        if shutil.which("fuser"):
+            subprocess.run(
+                ["fuser", "-k", "-KILL", f"{PORT}/tcp"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(2)
+
+    if _port_open(PORT):
+        raise RuntimeError(
+            f"Port {PORT} is still occupied after cleanup. Restart the Colab runtime once, then run all."
+        )
+
+    # Give CUDA worker processes from the old server a moment to release VRAM.
+    time.sleep(3)
+    print(f"      Port {PORT}: free ✅ | {gpu_memory_status()}", flush=True)
+
+
 def _infer_stage(text: str, percent: int, stage: str) -> tuple[int, str]:
     clean = ANSI_RE.sub("", text)
     lower = clean.lower()
@@ -227,13 +322,15 @@ def start_vllm(model_dir: Path, api_key: str, max_model_len: int) -> subprocess.
     printable[printable.index("--api-key") + 1] = "***REDACTED***"
     print("+ " + " ".join(printable), flush=True)
 
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         cmd,
         stdout=log_handle,
         stderr=subprocess.STDOUT,
         text=True,
         start_new_session=True,
     )
+    VLLM_PID_FILE.write_text(str(proc.pid))
+    return proc
 
 
 def wait_for_server(api_key: str, proc: subprocess.Popen, timeout_s: int = 1200) -> None:
@@ -251,6 +348,7 @@ def wait_for_server(api_key: str, proc: subprocess.Popen, timeout_s: int = 1200)
 
     while time.time() < deadline:
         if proc.poll() is not None:
+            VLLM_PID_FILE.unlink(missing_ok=True)
             print()
             raise RuntimeError(
                 f"vLLM exited early with code {proc.returncode}.\n\nLast vLLM log lines:\n{_tail(log_path)}"
@@ -300,8 +398,12 @@ def start_public_tunnel() -> tuple[subprocess.Popen, str]:
     log_path = LOG_ROOT / "localhost_run.log"
     log_handle = log_path.open("w")
 
-    # Clean up an old anonymous localhost.run tunnel from a previous rerun.
-    subprocess.run(["pkill", "-f", "nokey@localhost.run"], check=False, capture_output=True)
+    subprocess.run(
+        ["pkill", "-f", "nokey@localhost.run"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
     cmd = [
         "ssh",
@@ -323,8 +425,8 @@ def start_public_tunnel() -> tuple[subprocess.Popen, str]:
         text=True,
         start_new_session=True,
     )
+    TUNNEL_PID_FILE.write_text(str(proc.pid))
 
-    # localhost.run currently emits either *.localhost.run or *.lhr.life.
     url_pattern = re.compile(
         r"https://[a-zA-Z0-9.-]+(?:localhost\.run|lhr\.life|lhrtunnel\.link)"
     )
@@ -333,6 +435,7 @@ def start_public_tunnel() -> tuple[subprocess.Popen, str]:
 
     while time.time() < deadline:
         if proc.poll() is not None:
+            TUNNEL_PID_FILE.unlink(missing_ok=True)
             raise RuntimeError(
                 f"localhost.run tunnel exited with code {proc.returncode}.\n{_tail(log_path, 80)}"
             )
@@ -347,6 +450,7 @@ def start_public_tunnel() -> tuple[subprocess.Popen, str]:
         time.sleep(1)
 
     proc.terminate()
+    TUNNEL_PID_FILE.unlink(missing_ok=True)
     raise RuntimeError(
         "localhost.run did not provide a public HTTPS URL within 60 seconds.\n"
         + (last_text[-3000:] if last_text else "(no tunnel output)")
@@ -462,6 +566,12 @@ def main() -> None:
     print("Public tunnel: localhost.run HTTPS (no account/token)")
 
     model_dir = download_model(model_id)
+
+    # Rerunning the notebook must not leave the previous vLLM process alive.
+    # Otherwise the new process gets Errno 98, while health checks hit the old
+    # process with the newly-generated key and report misleading 401s.
+    cleanup_previous_runtime()
+
     api_key = "sk-colab-" + secrets.token_urlsafe(32)
     vllm_proc = start_vllm(model_dir, api_key, max_model_len)
     tunnel_proc: subprocess.Popen | None = None
@@ -473,9 +583,18 @@ def main() -> None:
         test_text = verify_public_api(api_url, api_key)
     except Exception:
         if tunnel_proc is not None and tunnel_proc.poll() is None:
-            tunnel_proc.terminate()
+            try:
+                os.killpg(tunnel_proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        TUNNEL_PID_FILE.unlink(missing_ok=True)
+
         if vllm_proc.poll() is None:
-            vllm_proc.terminate()
+            try:
+                os.killpg(vllm_proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        VLLM_PID_FILE.unlink(missing_ok=True)
         raise
 
     API_ENV_FILE.write_text(
