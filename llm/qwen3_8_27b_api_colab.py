@@ -8,7 +8,6 @@ this package from GitHub, imports it, and calls main().
 from __future__ import annotations
 
 import json
-import os
 import re
 import secrets
 import shutil
@@ -27,8 +26,6 @@ TRANSFORMERS_VERSION = "5.15.0"
 TORCHVISION_VERSION = "0.28.0"
 PYTORCH_CUDA_INDEX = "https://download.pytorch.org/whl/cu130"
 
-# Dedicated Colab A100: full native context. FP8 applies only to KV cache;
-# model weights remain the original BF16 checkpoint.
 GPU_MEMORY_UTILIZATION = "0.95"
 KV_CACHE_DTYPE = "fp8"
 
@@ -41,47 +38,10 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 PERCENT_RE = re.compile(r"(?:^|\s)(100|[1-9]?\d)%")
 
 
-def run(
-    cmd: list[str],
-    *,
-    check: bool = True,
-    capture: bool = False,
-    echo: bool = True,
-):
+def run(cmd: list[str], *, check: bool = True, capture: bool = False, echo: bool = True):
     if echo:
         print("+", " ".join(cmd), flush=True)
     return subprocess.run(cmd, check=check, text=True, capture_output=capture)
-
-
-def colab_secret(name: str) -> str | None:
-    """Read a secret from environment first, then Colab Secrets."""
-    value = os.environ.get(name)
-    if value and value.strip():
-        return value.strip()
-
-    try:
-        from google.colab import userdata  # type: ignore
-
-        value = userdata.get(name)
-        if value and value.strip():
-            return value.strip()
-    except Exception:
-        pass
-    return None
-
-
-def require_ngrok_token() -> str:
-    token = colab_secret("NGROK_AUTHTOKEN")
-    if token:
-        print("      NGROK_AUTHTOKEN found in Colab Secrets/environment.", flush=True)
-        return token
-
-    raise RuntimeError(
-        "NGROK_AUTHTOKEN is required for the public Harness endpoint.\n"
-        "Create a free ngrok account, copy its authtoken, then in Colab open "
-        "Secrets (key icon) -> add NGROK_AUTHTOKEN -> enable notebook access. "
-        "Re-run this cell; do not paste the token into notebook code."
-    )
 
 
 def install_dependencies() -> None:
@@ -90,7 +50,7 @@ def install_dependencies() -> None:
     print(f"      vLLM: {VLLM_VERSION}")
     print(f"      Transformers: {TRANSFORMERS_VERSION}")
     print(f"      Torchvision: {TORCHVISION_VERSION} (CUDA 13.0 wheel)")
-    print("      Tunnel: ngrok (SSE-capable)")
+    print("      Tunnel: localhost.run HTTPS (no signup/token)")
 
     run([
         sys.executable, "-m", "pip", "install", "-U",
@@ -99,19 +59,18 @@ def install_dependencies() -> None:
         "huggingface_hub[hf_xet]",
         "openai",
         "requests",
-        "pyngrok",
     ])
 
     # Colab can ship Torch ecosystem wheels built for a different CUDA version
-    # than vLLM's Torch wheel. Audio/text packages are not needed here.
+    # than vLLM's Torch wheel. Audio/text packages are unnecessary here.
     print("\n      Removing optional audio/text Torch packages that can conflict with vLLM...", flush=True)
     run([
         sys.executable, "-m", "pip", "uninstall", "-y",
         "torchaudio", "torchtext",
     ], check=False)
 
-    # vLLM's Qwen3.8 architecture inspection imports Qwen3-VL code even in
-    # language-only mode, so torchvision is required and must match Torch.
+    # Qwen3.8 model inspection imports Qwen3-VL code, so torchvision must exist
+    # and must match the Torch/CUDA build installed by vLLM.
     print("\n      Installing Torchvision matched to vLLM's CUDA 13.0 Torch...", flush=True)
     run([
         sys.executable, "-m", "pip", "install", "-U",
@@ -140,13 +99,9 @@ def install_dependencies() -> None:
 
 def gpu_info() -> tuple[str, int]:
     if shutil.which("nvidia-smi") is None:
-        raise RuntimeError(
-            "No NVIDIA GPU detected. In Colab choose Runtime > Change runtime type > GPU."
-        )
+        raise RuntimeError("No NVIDIA GPU detected. In Colab choose Runtime > Change runtime type > GPU.")
     result = run([
-        "nvidia-smi",
-        "--query-gpu=name,memory.total",
-        "--format=csv,noheader,nounits",
+        "nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"
     ], capture=True)
     first = result.stdout.strip().splitlines()[0]
     name, mem_mib = [part.strip() for part in first.rsplit(",", 1)]
@@ -160,7 +115,7 @@ def choose_model(vram_mib: int) -> tuple[str, int]:
         return FP8_MODEL, 16_384
     raise RuntimeError(
         f"Detected only {vram_mib / 1024:.1f} GiB VRAM. "
-        "Use >=40 GB for the official FP8 checkpoint or >=80 GB for BF16."
+        "Use >=40 GB for official FP8 or >=80 GB for BF16."
     )
 
 
@@ -173,7 +128,6 @@ def download_model(model_id: str) -> Path:
     if local_dir.exists():
         print(f"      Existing model directory found: {local_dir}")
         print("      Verifying/reusing cached files; only missing files will download.")
-
     snapshot_download(repo_id=model_id, local_dir=str(local_dir))
     print(f"Model ready at: {local_dir}", flush=True)
     return local_dir
@@ -182,9 +136,8 @@ def download_model(model_id: str) -> Path:
 def gpu_memory_status() -> str:
     try:
         result = subprocess.run([
-            "nvidia-smi",
-            "--query-gpu=memory.used,memory.total",
-            "--format=csv,noheader,nounits",
+            "nvidia-smi", "--query-gpu=memory.used,memory.total",
+            "--format=csv,noheader,nounits"
         ], text=True, capture_output=True, timeout=3)
         used, total = [int(x.strip()) for x in result.stdout.splitlines()[0].split(",")]
         return f"VRAM {used / 1024:.1f}/{total / 1024:.1f} GiB"
@@ -300,8 +253,7 @@ def wait_for_server(api_key: str, proc: subprocess.Popen, timeout_s: int = 1200)
         if proc.poll() is not None:
             print()
             raise RuntimeError(
-                f"vLLM exited early with code {proc.returncode}.\n\n"
-                f"Last vLLM log lines:\n{_tail(log_path)}"
+                f"vLLM exited early with code {proc.returncode}.\n\nLast vLLM log lines:\n{_tail(log_path)}"
             )
 
         new_text, offset = _read_new(log_path, offset)
@@ -313,8 +265,7 @@ def wait_for_server(api_key: str, proc: subprocess.Popen, timeout_s: int = 1200)
             try:
                 r = requests.get(
                     f"http://127.0.0.1:{PORT}/v1/models",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=4,
+                    headers={"Authorization": f"Bearer {api_key}"}, timeout=4,
                 )
                 if r.ok:
                     print(
@@ -331,8 +282,7 @@ def wait_for_server(api_key: str, proc: subprocess.Popen, timeout_s: int = 1200)
         print(
             f"\r[5/7] [{_progress_bar(percent)}] {percent:3d}%  {stage:<28} "
             f"| {_elapsed(started)} | {gpu_memory_status()}" + " " * 10,
-            end="",
-            flush=True,
+            end="", flush=True,
         )
         time.sleep(1)
 
@@ -343,54 +293,87 @@ def wait_for_server(api_key: str, proc: subprocess.Popen, timeout_s: int = 1200)
     )
 
 
-def start_ngrok_tunnel(authtoken: str):
-    """Create an HTTPS ngrok endpoint. ngrok supports SSE streaming."""
-    print("\n[6/7] Creating SSE-capable public HTTPS tunnel with ngrok...", flush=True)
-    from pyngrok import conf, ngrok
+def start_public_tunnel() -> tuple[subprocess.Popen, str]:
+    """Create a free HTTPS tunnel with localhost.run. No account/token required."""
+    print("\n[6/7] Creating zero-config public HTTPS tunnel...", flush=True)
+    LOG_ROOT.mkdir(parents=True, exist_ok=True)
+    log_path = LOG_ROOT / "localhost_run.log"
+    log_handle = log_path.open("w")
 
-    # Clean up an ngrok agent left by an earlier run in the same Colab runtime.
-    try:
-        ngrok.kill()
-    except Exception:
-        pass
+    # Clean up an old anonymous localhost.run tunnel from a previous rerun.
+    subprocess.run(["pkill", "-f", "nokey@localhost.run"], check=False, capture_output=True)
 
-    config = conf.get_default()
-    config.auth_token = authtoken
-    config.monitor_thread = False
+    cmd = [
+        "ssh",
+        "-T",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "ExitOnForwardFailure=yes",
+        "-o", "ServerAliveInterval=30",
+        "-o", "ServerAliveCountMax=3",
+        "-R", f"80:localhost:{PORT}",
+        "nokey@localhost.run",
+    ]
+    print("+ ssh -R 80:localhost:8000 nokey@localhost.run", flush=True)
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
 
-    tunnel = ngrok.connect(addr=PORT, proto="http", bind_tls=True)
-    public_base = tunnel.public_url.rstrip("/")
-    if not public_base.startswith("https://"):
-        raise RuntimeError(f"ngrok did not return an HTTPS endpoint: {public_base}")
+    # localhost.run currently emits either *.localhost.run or *.lhr.life.
+    url_pattern = re.compile(
+        r"https://[a-zA-Z0-9.-]+(?:localhost\.run|lhr\.life|lhrtunnel\.link)"
+    )
+    deadline = time.time() + 60
+    last_text = ""
 
-    print(f"      Public endpoint: {public_base}", flush=True)
-    return tunnel, public_base
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(
+                f"localhost.run tunnel exited with code {proc.returncode}.\n{_tail(log_path, 80)}"
+            )
+
+        if log_path.exists():
+            last_text = log_path.read_text(errors="ignore")
+            matches = url_pattern.findall(last_text)
+            if matches:
+                public_base = matches[-1].rstrip("/.,")
+                print(f"      Public endpoint: {public_base}", flush=True)
+                return proc, public_base
+        time.sleep(1)
+
+    proc.terminate()
+    raise RuntimeError(
+        "localhost.run did not provide a public HTTPS URL within 60 seconds.\n"
+        + (last_text[-3000:] if last_text else "(no tunnel output)")
+    )
 
 
 def verify_public_api(api_url: str, api_key: str, timeout_s: int = 90) -> str:
-    """Verify both authenticated /models and streamed chat over the public tunnel."""
+    """Verify authenticated model discovery and actual SSE streaming publicly."""
     print("\n[7/7] Verifying public API + Harness-style streaming...", flush=True)
     import requests
 
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "qwen-harness-colab/1.0",
+    }
     deadline = time.time() + timeout_s
     last_error = "not checked yet"
 
-    # First prove that the exact public URL and API key work from outside localhost.
     while time.time() < deadline:
         try:
-            response = requests.get(
-                f"{api_url}/models",
-                headers=headers,
-                timeout=15,
-            )
+            response = requests.get(f"{api_url}/models", headers=headers, timeout=15)
             if response.ok:
                 data = response.json()
                 ids = [item.get("id") for item in data.get("data", [])]
                 if SERVED_MODEL_NAME not in ids:
                     raise RuntimeError(
-                        f"Public /models responded but did not advertise {SERVED_MODEL_NAME!r}. "
-                        f"Advertised: {ids}"
+                        f"Public /models worked but did not advertise {SERVED_MODEL_NAME!r}; got {ids}"
                     )
                 print(f"      /v1/models: OK ({SERVED_MODEL_NAME})", flush=True)
                 break
@@ -403,7 +386,6 @@ def verify_public_api(api_url: str, api_key: str, timeout_s: int = 90) -> str:
             f"Public /v1/models verification failed after {timeout_s}s: {last_error}"
         )
 
-    # Then prove SSE works. This is the request shape Harness depends on.
     payload = {
         "model": SERVED_MODEL_NAME,
         "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
@@ -411,7 +393,7 @@ def verify_public_api(api_url: str, api_key: str, timeout_s: int = 90) -> str:
         "temperature": 0,
         "stream": True,
     }
-    saw_sse_event = False
+    saw_event = False
     saw_done = False
     collected: list[str] = []
 
@@ -423,16 +405,14 @@ def verify_public_api(api_url: str, api_key: str, timeout_s: int = 90) -> str:
         timeout=(15, 120),
     ) as response:
         if not response.ok:
-            body = response.text[:500]
             raise RuntimeError(
-                f"Public streamed chat failed with HTTP {response.status_code}: {body}"
+                f"Public streamed chat failed with HTTP {response.status_code}: {response.text[:500]}"
             )
 
         content_type = response.headers.get("content-type", "")
         if "text/event-stream" not in content_type.lower():
             raise RuntimeError(
-                "Public chat responded, but not as SSE. "
-                f"Content-Type was {content_type!r}."
+                f"Public chat was not SSE; Content-Type was {content_type!r}."
             )
 
         for raw_line in response.iter_lines(decode_unicode=True):
@@ -441,40 +421,35 @@ def verify_public_api(api_url: str, api_key: str, timeout_s: int = 90) -> str:
             line = raw_line.strip()
             if not line.startswith("data:"):
                 continue
-
-            saw_sse_event = True
+            saw_event = True
             data_text = line[5:].strip()
             if data_text == "[DONE]":
                 saw_done = True
                 break
-
             try:
                 event = json.loads(data_text)
             except json.JSONDecodeError:
                 continue
-
             for choice in event.get("choices", []):
                 delta = choice.get("delta") or {}
                 piece = delta.get("content")
                 if piece:
                     collected.append(piece)
 
-    if not saw_sse_event:
+    if not saw_event:
         raise RuntimeError("Public chat returned no SSE data events.")
     if not saw_done:
-        raise RuntimeError("Public chat SSE stream opened but did not complete with [DONE].")
+        raise RuntimeError("Public chat SSE stream opened but never completed with [DONE].")
 
-    text = "".join(collected).strip()
     print("      Streaming SSE: OK", flush=True)
-    return text or "stream completed"
+    return "".join(collected).strip() or "stream completed"
 
 
 def main() -> None:
     install_dependencies()
 
-    print("\n[2/7] Detecting GPU and tunnel credentials...", flush=True)
+    print("\n[2/7] Detecting GPU...", flush=True)
     gpu_name, vram_mib = gpu_info()
-    ngrok_token = require_ngrok_token()
     model_id, max_model_len = choose_model(vram_mib)
 
     print(f"GPU: {gpu_name}")
@@ -484,25 +459,21 @@ def main() -> None:
     print(f"KV cache dtype: {KV_CACHE_DTYPE}")
     print("Prefix caching: enabled")
     print(f"GPU memory target: {float(GPU_MEMORY_UTILIZATION) * 100:.0f}%")
-    print("Public tunnel: ngrok HTTPS (SSE-capable)")
+    print("Public tunnel: localhost.run HTTPS (no account/token)")
 
     model_dir = download_model(model_id)
     api_key = "sk-colab-" + secrets.token_urlsafe(32)
     vllm_proc = start_vllm(model_dir, api_key, max_model_len)
-    tunnel = None
+    tunnel_proc: subprocess.Popen | None = None
 
     try:
         wait_for_server(api_key, vllm_proc)
-        tunnel, public_base = start_ngrok_tunnel(ngrok_token)
-        api_url = public_base + "/v1"
+        tunnel_proc, public_base = start_public_tunnel()
+        api_url = public_base.rstrip("/") + "/v1"
         test_text = verify_public_api(api_url, api_key)
     except Exception:
-        try:
-            from pyngrok import ngrok
-
-            ngrok.kill()
-        except Exception:
-            pass
+        if tunnel_proc is not None and tunnel_proc.poll() is None:
+            tunnel_proc.terminate()
         if vllm_proc.poll() is None:
             vllm_proc.terminate()
         raise
@@ -525,14 +496,13 @@ def main() -> None:
     print(f"SOURCE  : {model_id}")
     print(f"CONTEXT : {max_model_len:,} tokens")
     print(f"KV CACHE: {KV_CACHE_DTYPE}")
-    print("TUNNEL  : ngrok (SSE verified)")
+    print("TUNNEL  : localhost.run (public /models + SSE verified)")
     print(f"TEST    : {test_text}")
     print(f"ENV FILE: {API_ENV_FILE}")
     print("=" * 72)
     print("Keep this Colab runtime alive while Harness is using the API.")
 
-    # Keep the tunnel object referenced for the life of this notebook process.
-    _ = tunnel
+    _ = tunnel_proc
 
 
 if __name__ == "__main__":
