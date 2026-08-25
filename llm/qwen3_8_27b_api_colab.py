@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
-"""
-Colab-first launcher for Qwen3.8-27B as an OpenAI-compatible API.
+"""Colab launcher for Qwen3.8-27B as an OpenAI-compatible API for DeepSeek Harness.
 
-What it does:
-1. Detects the Colab GPU/VRAM.
-2. Chooses the original BF16 checkpoint on ~80 GB GPUs, or official FP8 on ~40 GB GPUs.
-3. Downloads the model from Hugging Face.
-4. Generates a fresh API key for this runtime.
-5. Starts a vLLM OpenAI-compatible server with live startup progress.
-6. Creates a temporary Cloudflare tunnel so the API can be called outside Colab.
-7. Prints API_URL, API_KEY, and MODEL.
-
-The API exists only while the Colab runtime is alive.
+All real setup logic lives in this GitHub module. The Colab notebook only installs
+this package from GitHub and calls main().
 """
 
 from __future__ import annotations
@@ -28,99 +19,70 @@ from pathlib import Path
 BF16_MODEL = "Qwen/Qwen3.8-27B"
 FP8_MODEL = "Qwen/Qwen3.8-27B-FP8"
 SERVED_MODEL_NAME = "qwen3.8-27b"
-
 MODEL_ROOT = Path("/content/models")
 LOG_ROOT = Path("/content/qwen_api_logs")
 API_ENV_FILE = Path("/content/qwen_api.env")
 PORT = 8000
-
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-TQDM_PERCENT_RE = re.compile(r"(?:^|\s)(\d{1,3})%\|")
+PERCENT_RE = re.compile(r"(?:^|\s)(100|[1-9]?\d)%")
 
 
 def run(cmd: list[str], *, check: bool = True, capture: bool = False):
     print("+", " ".join(cmd), flush=True)
-    return subprocess.run(
-        cmd,
-        check=check,
-        text=True,
-        capture_output=capture,
-    )
+    return subprocess.run(cmd, check=check, text=True, capture_output=capture)
 
 
 def install_dependencies() -> None:
-    print("\n[1/7] Installing/updating runtime dependencies...", flush=True)
-    # Keep pip visible so Colab never looks frozen during large package installs.
-    run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "-U",
-            "--progress-bar",
-            "on",
-            "vllm",
-            "huggingface_hub[hf_xet]",
-            "openai",
-            "requests",
-        ]
-    )
+    print("\n[1/7] Installing Qwen3.8-compatible runtime...", flush=True)
+    print("      Qwen3.8 requires vLLM 0.27.2+ / nightly and Transformers >= 5.8.0.", flush=True)
+
+    # vLLM recommends uv for nightly wheels because pip can prefer an older stable
+    # build when stable has a numerically newer version.
+    run([sys.executable, "-m", "pip", "install", "-U", "uv"])
+
+    run([
+        "uv", "pip", "install", "--system", "-U", "vllm", "--pre",
+        "--index-url", "https://wheels.vllm.ai/nightly",
+    ])
+
+    run([
+        "uv", "pip", "install", "--system", "-U",
+        "transformers>=5.8.0",
+        "huggingface_hub[hf_xet]",
+        "openai",
+        "requests",
+    ])
+
+    version = run([
+        sys.executable, "-c",
+        "import vllm, transformers; print('vLLM:', vllm.__version__); print('Transformers:', transformers.__version__)"
+    ], capture=True)
+    print(version.stdout.strip(), flush=True)
 
 
 def gpu_info() -> tuple[str, int]:
     if shutil.which("nvidia-smi") is None:
-        raise RuntimeError(
-            "No NVIDIA GPU detected. In Colab choose Runtime > Change runtime type > GPU."
-        )
+        raise RuntimeError("No NVIDIA GPU detected. In Colab choose Runtime > Change runtime type > GPU.")
 
-    result = run(
-        [
-            "nvidia-smi",
-            "--query-gpu=name,memory.total",
-            "--format=csv,noheader,nounits",
-        ],
-        capture=True,
-    )
-    first_line = result.stdout.strip().splitlines()[0]
-    name, mem_mib = [part.strip() for part in first_line.rsplit(",", 1)]
+    result = run([
+        "nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"
+    ], capture=True)
+    first = result.stdout.strip().splitlines()[0]
+    name, mem_mib = [part.strip() for part in first.rsplit(",", 1)]
     return name, int(mem_mib)
 
 
-def gpu_memory_status() -> str:
-    """Return a compact live VRAM usage string without failing the launcher."""
-    try:
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.used,memory.total",
-                "--format=csv,noheader,nounits",
-            ],
-            check=False,
-            text=True,
-            capture_output=True,
-            timeout=3,
-        )
-        used, total = [int(x.strip()) for x in result.stdout.strip().splitlines()[0].split(",")]
-        return f"VRAM {used / 1024:.1f}/{total / 1024:.1f} GiB"
-    except Exception:
-        return "VRAM n/a"
-
-
 def choose_model(vram_mib: int) -> tuple[str, int]:
-    # Full BF16 checkpoint is ~55.6 GB, so reserve space for runtime + KV cache.
+    # BF16 weights are ~55.6 GB. On an 80 GB A100 this leaves enough room for
+    # runtime/KV cache at a practical 32K agent context.
     if vram_mib >= 70_000:
         return BF16_MODEL, 32768
-
-    # Official FP8 checkpoint is ~30.9 GB.
+    # Official FP8 checkpoint is ~31 GB.
     if vram_mib >= 38_000:
         return FP8_MODEL, 16384
-
     raise RuntimeError(
-        f"Detected only {vram_mib / 1024:.1f} GiB VRAM. "
-        "This launcher intentionally uses only Qwen's official checkpoints. "
-        "Use a >=40 GB Colab GPU for the official FP8 model, or an >=80 GB GPU "
-        "for the original BF16 model."
+        f"Detected only {vram_mib / 1024:.1f} GiB VRAM. Use >=40 GB for official FP8 "
+        "or >=80 GB for BF16."
     )
 
 
@@ -128,76 +90,49 @@ def get_hf_token() -> str | None:
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     if token:
         return token
-
     try:
         from google.colab import userdata  # type: ignore
-
         return userdata.get("HF_TOKEN")
     except Exception:
         return None
 
 
 def download_model(model_id: str, token: str | None) -> Path:
-    print(f"\n[3/7] Downloading {model_id}...", flush=True)
+    print(f"\n[3/7] Preparing {model_id}...", flush=True)
     from huggingface_hub import snapshot_download
 
     MODEL_ROOT.mkdir(parents=True, exist_ok=True)
     local_dir = MODEL_ROOT / model_id.split("/")[-1]
-    snapshot_download(
-        repo_id=model_id,
-        local_dir=str(local_dir),
-        token=token,
-    )
+    snapshot_download(repo_id=model_id, local_dir=str(local_dir), token=token)
     print(f"Model ready at: {local_dir}", flush=True)
     return local_dir
 
 
-def _read_new_log_text(log_file: Path, offset: int) -> tuple[str, int]:
-    if not log_file.exists():
-        return "", offset
+def gpu_memory_status() -> str:
     try:
-        with log_file.open("r", errors="ignore") as handle:
-            handle.seek(offset)
-            text = handle.read()
-            return text, handle.tell()
+        result = subprocess.run([
+            "nvidia-smi", "--query-gpu=memory.used,memory.total",
+            "--format=csv,noheader,nounits"
+        ], text=True, capture_output=True, timeout=3)
+        used, total = [int(x.strip()) for x in result.stdout.splitlines()[0].split(",")]
+        return f"VRAM {used / 1024:.1f}/{total / 1024:.1f} GiB"
     except Exception:
+        return "VRAM ?"
+
+
+def _tail(path: Path, lines: int = 120) -> str:
+    if not path.exists():
+        return "(log file not created)"
+    return "\n".join(path.read_text(errors="ignore").splitlines()[-lines:])
+
+
+def _read_new(path: Path, offset: int) -> tuple[str, int]:
+    if not path.exists():
         return "", offset
-
-
-def _progress_from_log(text: str, current_percent: int, current_stage: str) -> tuple[int, str]:
-    """Map vLLM log activity to an approximate startup percentage and stage."""
-    clean = ANSI_RE.sub("", text)
-    lower = clean.lower()
-    percent = current_percent
-    stage = current_stage
-
-    # When vLLM/tqdm exposes real checkpoint loading progress, use it within
-    # the model-weight portion of the startup bar (25% -> 72%).
-    tqdm_matches = TQDM_PERCENT_RE.findall(clean)
-    if tqdm_matches:
-        shard_pct = max(0, min(100, int(tqdm_matches[-1])))
-        percent = max(percent, 25 + int(shard_pct * 0.47))
-        stage = f"Loading model weights ({shard_pct}%)"
-
-    stages = [
-        (8, "Launching vLLM process", ["api server", "vllm serve"]),
-        (15, "Initializing inference engine", ["initializing a v1 llm engine", "initializing llm engine", "engine core"]),
-        (22, "Reading model configuration", ["model config", "resolved architecture", "using model"]),
-        (25, "Loading model weights", ["loading model", "loading weights", "safetensors"]),
-        (73, "Model weights loaded", ["loading weights took", "model loading took", "weights loaded"]),
-        (79, "Preparing KV cache", ["available kv cache", "gpu kv cache", "kv cache size", "kv cache memory"]),
-        (86, "Initializing attention/cache", ["cache blocks", "profiling run", "memory profiling"]),
-        (91, "Compiling CUDA graphs", ["capturing cuda graphs", "cuda graph", "torch.compile", "compilation"]),
-        (96, "Starting HTTP API server", ["application startup", "uvicorn", "route", "openai-compatible"]),
-        (99, "API server responding", ["application startup complete", "running on http", "started server process"]),
-    ]
-
-    for candidate_percent, candidate_stage, needles in stages:
-        if any(needle in lower for needle in needles) and candidate_percent >= percent:
-            percent = candidate_percent
-            stage = candidate_stage
-
-    return percent, stage
+    with path.open("r", errors="ignore") as fh:
+        fh.seek(offset)
+        text = fh.read()
+        return text, fh.tell()
 
 
 def _progress_bar(percent: int, width: int = 24) -> str:
@@ -206,87 +141,40 @@ def _progress_bar(percent: int, width: int = 24) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
-def _format_elapsed(seconds: float) -> str:
-    seconds = int(seconds)
-    minutes, seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours:
-        return f"{hours:d}:{minutes:02d}:{seconds:02d}"
-    return f"{minutes:02d}:{seconds:02d}"
+def _elapsed(started: float) -> str:
+    sec = int(time.time() - started)
+    minute, sec = divmod(sec, 60)
+    hour, minute = divmod(minute, 60)
+    return f"{hour}:{minute:02d}:{sec:02d}" if hour else f"{minute:02d}:{sec:02d}"
 
 
-def _print_startup_progress(percent: int, stage: str, started_at: float) -> None:
-    line = (
-        f"\r[5/7] [{_progress_bar(percent)}] {percent:3d}%  "
-        f"{stage:<32} | {_format_elapsed(time.time() - started_at)} | {gpu_memory_status()}"
-    )
-    # Padding clears remnants from a longer previous status line.
-    print(line + " " * 12, end="", flush=True)
+def _infer_stage(text: str, percent: int, stage: str) -> tuple[int, str]:
+    clean = ANSI_RE.sub("", text)
+    lower = clean.lower()
 
+    # Real tqdm percentages, when present, are mapped into the weight-loading span.
+    matches = PERCENT_RE.findall(clean)
+    if matches and any(k in lower for k in ("weight", "checkpoint", "safetensor", "loading")):
+        real = int(matches[-1])
+        percent = max(percent, 22 + int(real * 0.50))
+        stage = f"Loading model weights ({real}%)"
 
-def _vllm_log_tail(lines: int = 100) -> str:
-    log_file = LOG_ROOT / "vllm.log"
-    if not log_file.exists():
-        return "(vLLM log file was not created)"
-    return "\n".join(log_file.read_text(errors="ignore").splitlines()[-lines:])
-
-
-def wait_for_server(
-    api_key: str,
-    proc: subprocess.Popen,
-    timeout_s: int = 1200,
-) -> None:
-    print("\n[5/7] Loading Qwen and waiting for the API...", flush=True)
-    print("      Live startup progress below (percentage is stage-based unless vLLM reports weight-loading %).")
-    import requests
-
-    started_at = time.time()
-    deadline = started_at + timeout_s
-    headers = {"Authorization": f"Bearer {api_key}"}
-    log_file = LOG_ROOT / "vllm.log"
-    log_offset = 0
-    last_error = None
-    percent = 3
-    stage = "Starting process"
-    next_http_check = 0.0
-
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            print()  # finish the in-place progress line
-            raise RuntimeError(
-                f"vLLM exited early with code {proc.returncode}.\n\n"
-                f"Last vLLM log lines:\n{_vllm_log_tail()}"
-            )
-
-        new_text, log_offset = _read_new_log_text(log_file, log_offset)
-        if new_text:
-            percent, stage = _progress_from_log(new_text, percent, stage)
-
-        now = time.time()
-        if now >= next_http_check:
-            try:
-                response = requests.get(
-                    f"http://127.0.0.1:{PORT}/v1/models",
-                    headers=headers,
-                    timeout=3,
-                )
-                if response.ok:
-                    _print_startup_progress(100, "API ready ✅", started_at)
-                    print("\n      vLLM is ready.", flush=True)
-                    return
-                last_error = f"HTTP {response.status_code}: {response.text[:200]}"
-            except Exception as exc:
-                last_error = str(exc)
-            next_http_check = now + 3
-
-        _print_startup_progress(percent, stage, started_at)
-        time.sleep(1)
-
-    print()
-    raise RuntimeError(
-        f"vLLM did not become ready within {timeout_s}s. Last error: {last_error}\n\n"
-        f"Last vLLM log lines:\n{_vllm_log_tail()}"
-    )
+    stages = [
+        (8, "Starting vLLM", ("api server", "vllm serve")),
+        (15, "Reading model config", ("model config", "architecture", "qwen3_5")),
+        (22, "Creating inference engine", ("engine core", "llm engine", "initializing")),
+        (28, "Loading model weights", ("loading model", "loading weights", "safetensors")),
+        (74, "Model weights loaded", ("loading weights took", "model loading took", "weights loaded")),
+        (80, "Allocating KV cache", ("kv cache", "available kv")),
+        (87, "Profiling GPU memory", ("memory profiling", "profile run")),
+        (92, "Compiling/warming kernels", ("torch.compile", "compilation", "cuda graph", "warmup")),
+        (97, "Starting HTTP server", ("uvicorn", "application startup")),
+        (99, "HTTP server started", ("application startup complete", "running on http", "started server process")),
+    ]
+    for candidate, label, needles in stages:
+        if candidate >= percent and any(n in lower for n in needles):
+            percent, stage = candidate, label
+    return percent, stage
 
 
 def start_vllm(model_dir: Path, api_key: str, max_model_len: int) -> subprocess.Popen:
@@ -296,38 +184,83 @@ def start_vllm(model_dir: Path, api_key: str, max_model_len: int) -> subprocess.
     log_handle = log_path.open("w")
 
     cmd = [
-        "vllm",
-        "serve",
-        str(model_dir),
-        "--served-model-name",
-        SERVED_MODEL_NAME,
-        "--host",
-        "0.0.0.0",
-        "--port",
-        str(PORT),
-        "--api-key",
-        api_key,
-        "--gpu-memory-utilization",
-        "0.92",
-        "--max-model-len",
-        str(max_model_len),
+        "vllm", "serve", str(model_dir),
+        "--served-model-name", SERVED_MODEL_NAME,
+        "--host", "0.0.0.0",
+        "--port", str(PORT),
+        "--api-key", api_key,
+        "--gpu-memory-utilization", "0.92",
+        "--max-model-len", str(max_model_len),
+        # Harness depends heavily on reliable function/tool calls.
+        "--enable-auto-tool-choice",
+        "--tool-call-parser", "qwen3_coder",
+        "--reasoning-parser", "qwen3",
+        # We are using this endpoint as a coding/agent LLM, not as a vision server.
+        # Skipping the vision side reduces startup work and VRAM usage.
+        "--language-model-only",
     ]
-
-    # Do not print the generated API key as part of the command line.
-    safe_cmd = cmd.copy()
-    key_index = safe_cmd.index("--api-key") + 1
-    safe_cmd[key_index] = "<generated-key>"
-    print("+", " ".join(safe_cmd), flush=True)
-    print(f"  vLLM detailed log: {log_path}", flush=True)
-
-    proc = subprocess.Popen(
-        cmd,
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        start_new_session=True,
+    print("+ " + " ".join(cmd[:-2]) + " --language-model-only", flush=True)
+    return subprocess.Popen(
+        cmd, stdout=log_handle, stderr=subprocess.STDOUT, text=True, start_new_session=True
     )
-    return proc
+
+
+def wait_for_server(api_key: str, proc: subprocess.Popen, timeout_s: int = 1200) -> None:
+    print("\n[5/7] Loading Qwen and waiting for the API...", flush=True)
+    print("      This line updates from the actual vLLM log; early crashes are reported immediately.", flush=True)
+    import requests
+
+    started = time.time()
+    deadline = started + timeout_s
+    log_path = LOG_ROOT / "vllm.log"
+    offset = 0
+    percent, stage = 3, "Process launched"
+    last_error = "not checked yet"
+    next_check = 0.0
+
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            print()
+            raise RuntimeError(
+                f"vLLM exited early with code {proc.returncode}.\n\n"
+                f"Last vLLM log lines:\n{_tail(log_path)}"
+            )
+
+        new_text, offset = _read_new(log_path, offset)
+        if new_text:
+            percent, stage = _infer_stage(new_text, percent, stage)
+
+        now = time.time()
+        if now >= next_check:
+            try:
+                r = requests.get(
+                    f"http://127.0.0.1:{PORT}/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"}, timeout=4,
+                )
+                if r.ok:
+                    print(
+                        f"\r[5/7] [{_progress_bar(100)}] 100%  API ready ✅                    "
+                        f"| {_elapsed(started)} | {gpu_memory_status()}" + " " * 10,
+                        flush=True,
+                    )
+                    return
+                last_error = f"HTTP {r.status_code}"
+            except Exception as exc:
+                last_error = str(exc)
+            next_check = now + 4
+
+        print(
+            f"\r[5/7] [{_progress_bar(percent)}] {percent:3d}%  {stage:<28} "
+            f"| {_elapsed(started)} | {gpu_memory_status()}" + " " * 10,
+            end="", flush=True,
+        )
+        time.sleep(1)
+
+    print()
+    raise RuntimeError(
+        f"vLLM did not become ready within {timeout_s}s. Last API error: {last_error}\n\n"
+        f"Last vLLM log lines:\n{_tail(log_path)}"
+    )
 
 
 def install_cloudflared() -> Path:
@@ -341,13 +274,10 @@ def install_cloudflared() -> Path:
     elif arch in {"aarch64", "arm64"}:
         package_arch = "arm64"
     else:
-        raise RuntimeError(f"Unsupported CPU architecture for cloudflared: {arch}")
+        raise RuntimeError(f"Unsupported CPU architecture: {arch}")
 
     dest = Path("/content/cloudflared")
-    url = (
-        "https://github.com/cloudflare/cloudflared/releases/latest/download/"
-        f"cloudflared-linux-{package_arch}"
-    )
+    url = f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{package_arch}"
     run(["curl", "-L", "--fail", "--silent", "--show-error", url, "-o", str(dest)])
     dest.chmod(0o755)
     return dest
@@ -358,54 +288,30 @@ def start_tunnel() -> tuple[subprocess.Popen, str]:
     cloudflared = install_cloudflared()
     log_path = LOG_ROOT / "cloudflared.log"
     log_handle = log_path.open("w")
-
-    proc = subprocess.Popen(
-        [
-            str(cloudflared),
-            "tunnel",
-            "--url",
-            f"http://127.0.0.1:{PORT}",
-            "--no-autoupdate",
-        ],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        start_new_session=True,
-    )
+    proc = subprocess.Popen([
+        str(cloudflared), "tunnel", "--url", f"http://127.0.0.1:{PORT}", "--no-autoupdate"
+    ], stdout=log_handle, stderr=subprocess.STDOUT, text=True, start_new_session=True)
 
     pattern = re.compile(r"https://[-a-z0-9]+\.trycloudflare\.com")
     deadline = time.time() + 90
-
     while time.time() < deadline:
         if proc.poll() is not None:
             break
         if log_path.exists():
-            text = log_path.read_text(errors="ignore")
-            match = pattern.search(text)
+            match = pattern.search(log_path.read_text(errors="ignore"))
             if match:
-                print("      Tunnel ready ✅", flush=True)
                 return proc, match.group(0)
         time.sleep(1)
-
-    tail = ""
-    if log_path.exists():
-        tail = "\n".join(log_path.read_text(errors="ignore").splitlines()[-80:])
-    raise RuntimeError(f"Could not create Cloudflare tunnel.\n{tail}")
+    raise RuntimeError(f"Could not create Cloudflare tunnel.\n{_tail(log_path, 80)}")
 
 
 def smoke_test(api_url: str, api_key: str) -> str:
     print("\n[7/7] Sending a test request...", flush=True)
     from openai import OpenAI
-
     client = OpenAI(base_url=api_url, api_key=api_key)
     response = client.chat.completions.create(
         model=SERVED_MODEL_NAME,
-        messages=[
-            {
-                "role": "user",
-                "content": "Reply with exactly: Qwen API is online",
-            }
-        ],
+        messages=[{"role": "user", "content": "Reply with exactly: Qwen API is online"}],
         max_tokens=32,
         temperature=0,
     )
@@ -418,19 +324,18 @@ def main() -> None:
     print("\n[2/7] Detecting GPU...", flush=True)
     gpu_name, vram_mib = gpu_info()
     model_id, max_model_len = choose_model(vram_mib)
-    print(f"GPU: {gpu_name}", flush=True)
-    print(f"VRAM: {vram_mib / 1024:.1f} GiB", flush=True)
-    print(f"Selected model: {model_id}", flush=True)
-    print(f"API max context: {max_model_len:,} tokens", flush=True)
+    print(f"GPU: {gpu_name}")
+    print(f"VRAM: {vram_mib / 1024:.1f} GiB")
+    print(f"Selected model: {model_id}")
+    print(f"API max context: {max_model_len:,} tokens")
 
     hf_token = get_hf_token()
     if hf_token:
-        print("HF_TOKEN found (Colab secret/environment).", flush=True)
+        print("HF_TOKEN found in Colab secrets/environment.")
     else:
-        print("HF_TOKEN not found; Qwen model is public, continuing anonymously.", flush=True)
+        print("HF_TOKEN not found; Qwen is public, continuing anonymously.")
 
     model_dir = download_model(model_id, hf_token)
-
     api_key = "sk-colab-" + secrets.token_urlsafe(32)
     vllm_proc = start_vllm(model_dir, api_key, max_model_len)
 
@@ -443,7 +348,6 @@ def main() -> None:
         raise
 
     api_url = public_base.rstrip("/") + "/v1"
-
     API_ENV_FILE.write_text(
         f"QWEN_API_URL={api_url}\n"
         f"QWEN_API_KEY={api_key}\n"
@@ -456,22 +360,17 @@ def main() -> None:
     except Exception as exc:
         test_text = f"Smoke test failed, but server/tunnel are running: {exc}"
 
-    print("\n" + "=" * 72)
-    print("QWEN3.8-27B COLAB API IS READY")
-    print("=" * 72)
+    print("\n" + "=" * 74)
+    print("QWEN3.8-27B COLAB API IS READY FOR HARNESS")
+    print("=" * 74)
     print(f"API_URL : {api_url}")
     print(f"API_KEY : {api_key}")
     print(f"MODEL   : {SERVED_MODEL_NAME}")
     print(f"SOURCE  : {model_id}")
     print(f"TEST    : {test_text}")
-    print(f"ENV FILE: {API_ENV_FILE}")
-    print("=" * 72)
-    print(
-        "\nKeep this Colab runtime running. The URL and API key stop working "
-        "when the runtime ends. Do NOT commit the generated key to GitHub."
-    )
+    print("=" * 74)
+    print("Keep this Colab runtime alive. Restarting it changes the URL and API key.")
 
-    # Keep references alive in this process until it exits.
     _ = tunnel_proc
 
 
