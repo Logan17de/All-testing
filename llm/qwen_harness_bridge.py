@@ -4,6 +4,13 @@
 Run on the Windows machine that runs Harness. Harness talks only to 127.0.0.1;
 this process exchanges jobs with the Colab worker through Growing-Trader
 Supabase over ordinary outbound HTTPS.
+
+Important: this bridge intentionally does NOT validate the Authorization header.
+It binds only to 127.0.0.1, so it is reachable only from the same Windows PC.
+DeepSeek Harness currently resolves custom-provider credentials differently for
+model discovery vs real chat requests; ignoring local bearer auth avoids that
+Harness-side mismatch while keeping the actual Supabase relay protected by its
+own dedicated QWEN_RELAY_SECRET.
 """
 
 from __future__ import annotations
@@ -20,11 +27,10 @@ from qwen_supabase_relay import CONTEXT_WINDOW, MODEL_ID, RelayError, RelayStore
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("QWEN_BRIDGE_PORT", "8787"))
-LOCAL_API_KEY = os.environ.get("QWEN_BRIDGE_API_KEY", "local-qwen")
 POLL_SECONDS = float(os.environ.get("QWEN_RELAY_POLL_SECONDS", "0.18"))
 JOB_TIMEOUT_SECONDS = int(os.environ.get("QWEN_RELAY_JOB_TIMEOUT", "3600"))
 
-app = FastAPI(title="Qwen Harness Supabase Bridge", version="1.0")
+app = FastAPI(title="Qwen Harness Supabase Bridge", version="1.1")
 _store: RelayStore | None = None
 
 
@@ -34,14 +40,6 @@ def store() -> RelayStore:
         _store = RelayStore.from_env()
         _store.preflight()
     return _store
-
-
-def _check_local_auth(request: Request) -> None:
-    if not LOCAL_API_KEY:
-        return
-    supplied = request.headers.get("authorization", "")
-    if supplied != f"Bearer {LOCAL_API_KEY}":
-        raise HTTPException(status_code=401, detail="Invalid local bridge API key")
 
 
 def _worker_or_503() -> dict[str, Any]:
@@ -65,12 +63,13 @@ def health() -> dict[str, Any]:
         "bridge": f"http://{HOST}:{PORT}",
         "relay_id": store().config.relay_id,
         "worker": worker,
+        "local_auth": "disabled-loopback-only",
     }
 
 
 @app.get("/v1/models")
 def models(request: Request) -> dict[str, Any]:
-    _check_local_auth(request)
+    # Authorization is intentionally ignored. The server is loopback-only.
     worker = _worker_or_503()
     return {
         "object": "list",
@@ -193,7 +192,7 @@ def _wait_nonstream(job: dict[str, Any]) -> JSONResponse:
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
-    _check_local_auth(request)
+    # Authorization is intentionally ignored. The server is loopback-only.
     _worker_or_503()
 
     try:
@@ -204,7 +203,6 @@ async def chat_completions(request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Request body must be a JSON object")
 
-    # Preserve Harness tool/reasoning/sampling fields; only normalize model ID.
     payload["model"] = MODEL_ID
     wants_stream = bool(payload.get("stream", False))
 
@@ -249,12 +247,13 @@ def main() -> None:
 
     print("\nQwen Harness local bridge")
     print(f"  Base URL : http://{HOST}:{PORT}/v1")
-    print(f"  API key  : {LOCAL_API_KEY or '(disabled)'}")
+    print("  Local auth: DISABLED (127.0.0.1 only)")
     print(f"  Model    : {MODEL_ID}")
     print(f"  Context  : {CONTEXT_WINDOW:,}")
     print(f"  Relay ID : {relay.config.relay_id}")
     print(f"  Colab    : {'ONLINE ✅' if worker else 'not online yet'}")
-    print("\nKeep this terminal open while using Harness.\n")
+    print("\nIn Harness you may keep any non-empty API key, e.g. local-qwen.")
+    print("Keep this terminal open while using Harness.\n")
     uvicorn.run(app, host=HOST, port=PORT, log_level="info")
 
 
