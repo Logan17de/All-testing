@@ -19,11 +19,18 @@ from pathlib import Path
 BF16_MODEL = "Qwen/Qwen3.8-27B"
 FP8_MODEL = "Qwen/Qwen3.8-27B-FP8"
 SERVED_MODEL_NAME = "qwen3.8-27b"
+NATIVE_CONTEXT = 262_144
 
 VLLM_VERSION = "0.27.1"
 TRANSFORMERS_VERSION = "5.15.0"
 TORCHVISION_VERSION = "0.28.0"
 PYTORCH_CUDA_INDEX = "https://download.pytorch.org/whl/cu130"
+
+# Dedicated Colab A100: use the full native context and let vLLM reserve most
+# of the GPU for weights + cache. FP8 here applies ONLY to the KV cache; the
+# Qwen checkpoint remains the original BF16 model on an 80 GB GPU.
+GPU_MEMORY_UTILIZATION = "0.95"
+KV_CACHE_DTYPE = "fp8"
 
 MODEL_ROOT = Path("/content/models")
 LOG_ROOT = Path("/content/qwen_api_logs")
@@ -77,9 +84,8 @@ def install_dependencies() -> None:
         "--index-url", PYTORCH_CUDA_INDEX,
     ])
 
-    # Verify the exact stack and the exact Qwen model module before launching
-    # the expensive server process. If this fails, the useful error appears in
-    # Step 1 instead of after waiting at Step 5.
+    # Verify the exact stack and exact Qwen model module before launching the
+    # expensive server process. Fail here rather than after model startup.
     print("\n      Verifying Torch / Torchvision / vLLM / Qwen3.8 runtime...", flush=True)
     verify = run([
         sys.executable, "-c",
@@ -110,10 +116,16 @@ def gpu_info() -> tuple[str, int]:
 
 
 def choose_model(vram_mib: int) -> tuple[str, int]:
+    # A100 80 GB: original BF16 weights + FP8 KV cache, full 262,144-token
+    # native Qwen3.8 context. No YaRN or RoPE modification is needed.
     if vram_mib >= 70_000:
-        return BF16_MODEL, 32768
+        return BF16_MODEL, NATIVE_CONTEXT
+
+    # Keep the 40 GB fallback conservative. The user's 80 GB A100 path above
+    # is the full-context target; smaller GPUs should prioritize reliability.
     if vram_mib >= 38_000:
-        return FP8_MODEL, 16384
+        return FP8_MODEL, 16_384
+
     raise RuntimeError(
         f"Detected only {vram_mib / 1024:.1f} GiB VRAM. "
         "Use >=40 GB for the official FP8 checkpoint or >=80 GB for BF16."
@@ -214,8 +226,14 @@ def start_vllm(model_dir: Path, api_key: str, max_model_len: int) -> subprocess.
         "--host", "0.0.0.0",
         "--port", str(PORT),
         "--api-key", api_key,
-        "--gpu-memory-utilization", "0.92",
+        "--gpu-memory-utilization", GPU_MEMORY_UTILIZATION,
         "--max-model-len", str(max_model_len),
+        # Official vLLM Qwen3.8 long-context recipe uses FP8 KV cache. This
+        # halves KV storage relative to BF16 while leaving model weights BF16.
+        "--kv-cache-dtype", KV_CACHE_DTYPE,
+        # Harness repeatedly sends a mostly-identical conversation prefix.
+        # Make automatic prefix-cache reuse explicit.
+        "--enable-prefix-caching",
         "--enable-auto-tool-choice",
         "--tool-call-parser", "qwen3_coder",
         "--reasoning-parser", "qwen3",
@@ -360,6 +378,9 @@ def main() -> None:
     print(f"VRAM: {vram_mib / 1024:.1f} GiB")
     print(f"Selected model: {model_id}")
     print(f"API max context: {max_model_len:,} tokens")
+    print(f"KV cache dtype: {KV_CACHE_DTYPE}")
+    print(f"Prefix caching: enabled")
+    print(f"GPU memory target: {float(GPU_MEMORY_UTILIZATION) * 100:.0f}%")
 
     model_dir = download_model(model_id)
     api_key = "sk-colab-" + secrets.token_urlsafe(32)
@@ -379,6 +400,8 @@ def main() -> None:
         f"QWEN_API_KEY={api_key}\n"
         f"QWEN_MODEL={SERVED_MODEL_NAME}\n"
         f"QWEN_SOURCE_MODEL={model_id}\n"
+        f"QWEN_CONTEXT_WINDOW={max_model_len}\n"
+        f"QWEN_KV_CACHE_DTYPE={KV_CACHE_DTYPE}\n"
     )
 
     try:
@@ -393,6 +416,8 @@ def main() -> None:
     print(f"API_KEY : {api_key}")
     print(f"MODEL   : {SERVED_MODEL_NAME}")
     print(f"SOURCE  : {model_id}")
+    print(f"CONTEXT : {max_model_len:,} tokens")
+    print(f"KV CACHE: {KV_CACHE_DTYPE}")
     print(f"TEST    : {test_text}")
     print(f"ENV FILE: {API_ENV_FILE}")
     print("=" * 72)
