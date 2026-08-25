@@ -22,6 +22,8 @@ SERVED_MODEL_NAME = "qwen3.8-27b"
 
 VLLM_VERSION = "0.27.1"
 TRANSFORMERS_VERSION = "5.15.0"
+TORCHVISION_VERSION = "0.28.0"
+PYTORCH_CUDA_INDEX = "https://download.pytorch.org/whl/cu130"
 
 MODEL_ROOT = Path("/content/models")
 LOG_ROOT = Path("/content/qwen_api_logs")
@@ -43,6 +45,7 @@ def install_dependencies() -> None:
     print(f"      Python: {sys.version.split()[0]}")
     print(f"      vLLM: {VLLM_VERSION}")
     print(f"      Transformers: {TRANSFORMERS_VERSION}")
+    print(f"      Torchvision: {TORCHVISION_VERSION} (CUDA 13.0 wheel)")
 
     run([
         sys.executable, "-m", "pip", "install", "-U",
@@ -53,27 +56,43 @@ def install_dependencies() -> None:
         "requests",
     ])
 
-    # Colab can ship torchaudio/torchvision wheels compiled for a different CUDA
-    # version than the PyTorch wheel installed by vLLM. Transformers imports these
-    # optional packages during startup, which can crash vLLM before model loading.
-    # This Harness endpoint is text-only, so remove the optional multimedia wheels.
-    print("\n      Removing optional Colab multimedia packages that can conflict with vLLM...", flush=True)
+    # Colab may ship optional Torch ecosystem packages compiled for a CUDA
+    # version that differs from the Torch wheel pulled in by vLLM. Torchaudio
+    # previously caused a CUDA 12.8 vs 13.0 crash. It is not needed for this
+    # text-only Harness endpoint, so remove it. Torchtext is also unnecessary.
+    print("\n      Removing optional audio/text Torch packages that can conflict with vLLM...", flush=True)
     run([
         sys.executable, "-m", "pip", "uninstall", "-y",
-        "torchaudio", "torchvision", "torchtext",
+        "torchaudio", "torchtext",
     ], check=False)
 
-    # Verify the exact failure point before we spend time starting the server.
-    print("\n      Verifying vLLM / Torch runtime...", flush=True)
+    # Qwen3.8 is implemented through vLLM's qwen3_5 module, which imports
+    # qwen3_vl during architecture inspection even when --language-model-only
+    # is used. That import requires torchvision. Install the wheel matching
+    # Torch 2.13.0+cu130 without allowing pip to replace Torch itself.
+    print("\n      Installing Torchvision matched to vLLM's CUDA 13.0 Torch...", flush=True)
+    run([
+        sys.executable, "-m", "pip", "install", "-U", "--force-reinstall", "--no-deps",
+        f"torchvision=={TORCHVISION_VERSION}",
+        "--index-url", PYTORCH_CUDA_INDEX,
+    ])
+
+    # Verify the exact stack and the exact Qwen model module before launching
+    # the expensive server process. If this fails, the useful error appears in
+    # Step 1 instead of after waiting at Step 5.
+    print("\n      Verifying Torch / Torchvision / vLLM / Qwen3.8 runtime...", flush=True)
     verify = run([
         sys.executable, "-c",
         (
-            "import torch, transformers, vllm; "
+            "import torch, torchvision, transformers, vllm; "
             "print('Torch:', torch.__version__); "
             "print('Torch CUDA:', torch.version.cuda); "
+            "print('Torchvision:', torchvision.__version__); "
             "print('Transformers:', transformers.__version__); "
             "print('vLLM:', vllm.__version__); "
-            "print('CUDA available:', torch.cuda.is_available())"
+            "print('CUDA available:', torch.cuda.is_available()); "
+            "import vllm.model_executor.models.qwen3_5; "
+            "print('Qwen3.8 vLLM module: OK')"
         ),
     ], capture=True)
     print(verify.stdout.strip(), flush=True)
