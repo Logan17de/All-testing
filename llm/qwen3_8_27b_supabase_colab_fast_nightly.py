@@ -329,6 +329,7 @@ def _consume_stream(api_key: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 _original_benchmark = fast.benchmark_running_server
+_original_runtime_summary = fast._runtime_summary_from_log
 
 
 def benchmark_running_server(label: str = "manual") -> dict[str, Any] | None:
@@ -338,17 +339,22 @@ def benchmark_running_server(label: str = "manual") -> dict[str, Any] | None:
     acceptance = result.get("mtp_draft_acceptance_rate")
     mean_len = result.get("mtp_mean_acceptance_length")
     if acceptance is not None:
-        print(
-            f"      MTP acceptance: {float(acceptance) * 100.0:.1f}% | "
-            f"mean accepted length: {float(mean_len):.2f}" if mean_len is not None
-            else f"      MTP acceptance: {float(acceptance) * 100.0:.1f}%",
-            flush=True,
-        )
+        if mean_len is not None:
+            print(
+                f"      MTP acceptance: {float(acceptance) * 100.0:.1f}% | "
+                f"mean acceptance length: {float(mean_len):.2f}",
+                flush=True,
+            )
+        else:
+            print(
+                f"      MTP acceptance: {float(acceptance) * 100.0:.1f}%",
+                flush=True,
+            )
     return result
 
 
 def _runtime_summary_from_log() -> None:
-    fast._runtime_summary_from_log()
+    _original_runtime_summary()
     print(f"      vLLM runtime       : {base.VLLM_VERSION} (nightly, MTP-compatible)")
     print(f"      FP8 linear backend : {LINEAR_BACKEND} (A100 W8A16)")
     print(f"      spec metrics       : {PER_REQUEST_SPEC_METRICS}")
