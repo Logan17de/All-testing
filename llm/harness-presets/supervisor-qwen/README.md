@@ -38,7 +38,9 @@ This preset makes the parent model the evaluator. It delegates one bounded codin
 
 ## Level 2 progress reporting
 
-`qwen_builder` runs as a **continuable background subagent** and receives Harness's native child-scoped `report` tool. Reports use `reportDelivery: next-step`, so meaningful milestones are delivered to the supervisor while Qwen continues working.
+`qwen_builder` runs as a **continuable background subagent** and receives Harness's native child-scoped `report` tool from the standard base bundle. The base bundle's report delivery defaults to `next-step`, so meaningful milestones are delivered to the supervisor while Qwen continues working.
+
+Do **not** add another `@deepseek-ai/dsh-tool-subagent-report` row to this preset. Harness already loads that contribution globally; registering it twice makes a continuable child fail with a duplicate `tool:report` prompt-section error.
 
 The worker is instructed to report only useful transitions, for example:
 
