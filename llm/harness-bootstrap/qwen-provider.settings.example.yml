@@ -1,0 +1,21 @@
+# DeepSeek Harness custom Qwen provider example.
+# Copy/merge this into $DSH_HOME/settings.yaml only if configuring manually.
+# Never commit a real API key. Store it through Harness or expose the referenced
+# environment variable only on the machine that runs Harness.
+
+llm-pi-ai:
+  providers:
+    qwen:
+      displayName: Qwen
+      apiKeyEnv: QWEN_API_KEY
+      api: openai-completions
+      baseURL: <QWEN_OPENAI_COMPATIBLE_BASE_URL>
+      models:
+        - id: qwen3.8-27b
+          name: Qwen
+          contextWindow: 262144
+          maxTokens: 32768
+          reasoningEfforts:
+            low: low
+            medium: medium
+            xhigh: xhigh
