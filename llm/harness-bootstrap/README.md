@@ -11,6 +11,7 @@ This folder reproduces the working Harness setup on a fresh Windows machine with
 - `qwen-power` preset
 - `supervisor-qwen` preset
 - optional custom OpenAI-compatible Qwen provider
+- stable local Qwen worker affinity
 - workaround for the duplicate `@deepseek-ai/dsh-tools` Web-profile bug that causes:
 
 ```text
@@ -19,6 +20,39 @@ Cannot read properties of undefined (reading 'prepare')
 ```
 
 The bootstrap does **not** store the Qwen API key in a Windows environment variable and does not commit it anywhere. The user enters the key directly in **Harness -> Settings -> Models -> Qwen**. Harness stores the secret in its own local credential store.
+
+## Qwen worker affinity
+
+Each Harness installation gets one random local affinity ID. The installer stores it under the local Harness home and adds it to the Qwen provider as:
+
+```yaml
+headers:
+  X-Qwen-Affinity: <LOCAL_RANDOM_AFFINITY_ID>
+```
+
+The public gateway hashes this value before sending it to the relay. The raw affinity value is not stored in Supabase.
+
+Routing behavior:
+
+```text
+Harness installation
+        ↓
+X-Qwen-Affinity
+        ↓
+Gateway hashes it
+        ↓
+Affinity map
+        ↓
+Colab worker A
+```
+
+As long as worker A remains online, inference-ready, and heartbeating, later requests from that Harness installation remain on worker A. This preserves vLLM prefix-cache locality instead of bouncing the same client between Colabs.
+
+If worker A disappears or stops heartbeating, the next queued request may be claimed by another healthy worker and the affinity is automatically rebound to that worker. A newly started Colab does **not** steal an existing healthy affinity.
+
+Older Harness installs that do not yet send `X-Qwen-Affinity` still get a compatibility fallback based on an opaque hash of the API credential. Rerunning/updating the bootstrap is recommended so separate machines receive separate affinity IDs.
+
+The generated affinity ID is machine-local configuration. Never copy its concrete value into public documentation, screenshots, issues, or repository files.
 
 ## Prerequisite
 
@@ -150,6 +184,7 @@ The generated provider uses:
 Provider ID     qwen
 Protocol        openai-completions
 API key         entered directly in Harness Models UI
+Affinity        stable random ID generated locally
 Model           qwen3.8-27b
 Context         262144
 Max output      32768
@@ -161,7 +196,7 @@ A privacy-safe manual template is available in:
 qwen-provider.settings.example.yml
 ```
 
-If `$DSH_HOME/settings.yaml` already contains an `llm-pi-ai:` section, the installer intentionally does **not** attempt a risky YAML merge. Instead it writes a local snippet under `$DSH_HOME` and tells the operator to merge/add the provider safely. The API key should still be entered through **Settings -> Models**.
+If `$DSH_HOME/settings.yaml` already contains an `llm-pi-ai:` section, the installer intentionally does **not** attempt a risky YAML merge. Instead it writes a local snippet under `$DSH_HOME` containing the generated affinity header and tells the operator to merge/add the provider safely. The API key should still be entered through **Settings -> Models**.
 
 ## If `run_code` / tools break after a plugin update
 
@@ -199,6 +234,6 @@ Repository documentation and scripts must use generic placeholders for machine/u
 - private keys or credentials
 - personal email addresses
 - private server/IP details
-- machine-specific identifiers
+- machine-specific identifiers, including concrete affinity IDs
 
-Use terms such as `<USER_HOME>`, `<PROJECT_PATH>`, `<API_KEY>`, `<SERVER_IP>`, and example domains where concrete values are unnecessary.
+Use terms such as `<USER_HOME>`, `<PROJECT_PATH>`, `<API_KEY>`, `<SERVER_IP>`, `<LOCAL_RANDOM_AFFINITY_ID>`, and example domains where concrete values are unnecessary.
