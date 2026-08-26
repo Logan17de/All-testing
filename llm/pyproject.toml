@@ -22,6 +22,7 @@ qwen-relay-test-worker = "qwen_supabase_test_worker:main"
 py-modules = [
   "qwen3_8_27b_api_colab",
   "qwen3_8_27b_supabase_colab",
+  "qwen3_8_27b_supabase_colab_fast",
   "qwen_supabase_relay",
   "qwen_supabase_test_worker",
   "qwen_harness_bridge",
