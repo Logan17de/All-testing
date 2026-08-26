@@ -2,7 +2,7 @@
 """No-GPU test worker for the Qwen Harness relay.
 
 This validates only the transport path:
-Harness -> Windows bridge -> Growing-Trader Supabase -> this Colab worker -> back.
+Harness -> public/bridge API -> Growing-Trader Supabase -> this Colab worker -> back.
 It never imports vLLM, Torch, CUDA, Hugging Face, or a model. Every request
 returns the assistant text `succeed` using OpenAI-compatible response shapes.
 """
@@ -15,7 +15,12 @@ import time
 import uuid
 from typing import Any
 
-from qwen_supabase_relay import CONTEXT_WINDOW, MODEL_ID, RelayStore
+from qwen_supabase_relay import (
+    CONTEXT_WINDOW,
+    MODEL_ID,
+    RelayStore,
+    request_oracle_wake_if_needed,
+)
 
 QUEUE_POLL_SECONDS = 0.35
 HEARTBEAT_SECONDS = 5.0
@@ -39,14 +44,18 @@ def load_relay_env() -> None:
     print("[TEST 1/3] Checking Growing-Trader relay secret...", flush=True)
     secret = colab_secret("QWEN_RELAY_SECRET")
     relay_id = colab_secret("QWEN_RELAY_ID") or "qwen3-8-27b"
+    wake_token = colab_secret("ORACLE_WAKE_GITHUB_TOKEN")
     if not secret:
         raise RuntimeError(
             "QWEN_RELAY_SECRET is missing. Add it in Colab Secrets, enable Notebook access, then rerun."
         )
     os.environ["QWEN_RELAY_SECRET"] = secret
     os.environ["QWEN_RELAY_ID"] = relay_id
+    if wake_token:
+        os.environ["ORACLE_WAKE_GITHUB_TOKEN"] = wake_token
     print(f"         Relay ID: {relay_id}")
     print("         Secret: found ✅")
+    print(f"         Oracle auto-wake: {'enabled ✅' if wake_token else 'not configured'}")
 
 
 def _stream_events() -> list[str]:
@@ -175,6 +184,11 @@ def main() -> None:
     store = RelayStore.from_env()
     store.preflight()
     print("           Relay RPC/auth: OK ✅")
+
+    # Wake Oracle if it is currently powered off. The test worker's heartbeat
+    # then keeps the shared VM alive through the same lifecycle policy as Qwen.
+    request_oracle_wake_if_needed(wait_seconds=0)
+
     print("           GPU required: NO ✅")
     print("           vLLM/model required: NO ✅")
     TestWorker(store).run_forever()
