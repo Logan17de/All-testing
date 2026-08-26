@@ -1,13 +1,19 @@
 # DeepSeek Harness custom Qwen provider example.
 # Copy/merge this into $DSH_HOME/settings.yaml only if configuring manually.
-# Never commit a real API key. Store it through Harness or expose the referenced
-# environment variable only on the machine that runs Harness.
+# Never commit a real API key.
+#
+# Intentionally omit apiKeyEnv here. Start Harness, open Settings -> Models,
+# edit the qwen provider, paste the API key, and Apply. Harness will store the
+# secret in its local credential store and may then add a credential reference
+# such as QWEN_API_KEY to settings. That reference is safe; the secret is not.
+#
+# Do not launch Harness with QWEN_API_KEY already set in the OS environment if
+# you want the API-key field in the Models UI to remain editable.
 
 llm-pi-ai:
   providers:
     qwen:
       displayName: Qwen
-      apiKeyEnv: QWEN_API_KEY
       api: openai-completions
       baseURL: <QWEN_OPENAI_COMPATIBLE_BASE_URL>
       models:
