@@ -18,7 +18,7 @@ Interrupted: interrupted
 Cannot read properties of undefined (reading 'prepare')
 ```
 
-The Qwen API key is requested interactively and stored only in the local Windows user environment as `QWEN_API_KEY`. It is never written to this repository.
+The bootstrap does **not** store the Qwen API key in a Windows environment variable and does not commit it anywhere. The user enters the key directly in **Harness -> Settings -> Models -> Qwen**. Harness stores the secret in its own local credential store.
 
 ## Prerequisite
 
@@ -32,23 +32,19 @@ Open a new PowerShell window after Node.js is installed.
 
 ## Fast install - no Git clone required
 
-Download the bootstrap to a temporary local file and run it:
-
 ```powershell
 $installer = "$env:TEMP\Install-Harness-Windows.ps1"
 Invoke-WebRequest "https://raw.githubusercontent.com/Logan17de/All-testing/main/llm/harness-bootstrap/Install-Harness-Windows.ps1" -OutFile $installer
 PowerShell -ExecutionPolicy Bypass -File $installer
 ```
 
-The installer asks for the Qwen OpenAI-compatible base URL and API key. Leave the base URL blank if Qwen should not be configured on this machine.
+The installer asks only for the Qwen OpenAI-compatible base URL. Leave it blank if Qwen should not be configured on this machine.
 
 To supply the non-secret base URL as an argument:
 
 ```powershell
 PowerShell -ExecutionPolicy Bypass -File $installer -QwenBaseUrl "https://gateway.example/v1"
 ```
-
-Never place the real API key in the command line, repository, screenshots, or shell history. The script prompts for it with hidden input.
 
 ## Install from a cloned repository
 
@@ -66,7 +62,52 @@ Start Harness:
 dsh web
 ```
 
-For Codex OAuth, keep Harness running and open:
+### Enter the Qwen API key inside Harness
+
+Open:
+
+```text
+Settings -> Models -> Qwen -> Edit
+```
+
+Paste the Qwen API key into the **API key** field and click **Apply**.
+
+Harness stores the secret in its local credential store. The settings document may subsequently contain a credential reference such as:
+
+```text
+QWEN_API_KEY
+```
+
+That reference is not the secret itself.
+
+### Important: avoid launch-environment locking
+
+If `QWEN_API_KEY` is already set as an operating-system environment variable when Harness starts, the Models UI treats that credential as launch-provided and displays:
+
+```text
+Provided by the launch environment (read-only)
+```
+
+If direct editing in Harness is desired, do **not** launch Harness with that environment variable set.
+
+For a machine that used an older version of this bootstrap, close Harness and remove the old user-level variable:
+
+```powershell
+[Environment]::SetEnvironmentVariable("QWEN_API_KEY", $null, "User")
+Remove-Item Env:QWEN_API_KEY -ErrorAction SilentlyContinue
+```
+
+Then start a fresh Harness process:
+
+```powershell
+dsh web
+```
+
+The Qwen API-key field should now be writable. Enter the key in the Models UI and Apply.
+
+## Codex OAuth
+
+Keep Harness running and open:
 
 ```text
 http://127.0.0.1:1456/start
@@ -74,7 +115,9 @@ http://127.0.0.1:1456/start
 
 Complete the OAuth flow. OAuth tokens remain in the local Harness home and must never be committed.
 
-Create a **new conversation** and verify the local tool runtime:
+## Verify the tool runtime
+
+Create a **new conversation** and run:
 
 ```text
 Use run_code only to execute console.log("hello"). Do not call any tools.
@@ -90,7 +133,7 @@ Then test a normal file search/edit workflow.
 
 ## Presets installed
 
-The bootstrap copies these into the local Harness preset directory:
+The bootstrap copies:
 
 ```text
 qwen-power
@@ -106,7 +149,7 @@ The generated provider uses:
 ```text
 Provider ID     qwen
 Protocol        openai-completions
-Credential ref  QWEN_API_KEY
+API key         entered directly in Harness Models UI
 Model           qwen3.8-27b
 Context         262144
 Max output      32768
@@ -118,7 +161,7 @@ A privacy-safe manual template is available in:
 qwen-provider.settings.example.yml
 ```
 
-If `$DSH_HOME/settings.yaml` already contains an `llm-pi-ai:` section, the installer intentionally does **not** attempt a risky YAML merge. Instead it writes a local snippet under `$DSH_HOME` and tells the operator to merge it through **Settings -> Models** or manually.
+If `$DSH_HOME/settings.yaml` already contains an `llm-pi-ai:` section, the installer intentionally does **not** attempt a risky YAML merge. Instead it writes a local snippet under `$DSH_HOME` and tells the operator to merge/add the provider safely. The API key should still be entered through **Settings -> Models**.
 
 ## If `run_code` / tools break after a plugin update
 
@@ -130,7 +173,7 @@ From a cloned repository run:
 PowerShell -ExecutionPolicy Bypass -File .\llm\harness-bootstrap\Repair-DshTools-Windows.ps1
 ```
 
-Or simply rerun the main installer. It reapplies the workaround after installing the Codex plugin.
+Or rerun the main installer. It reapplies the workaround after installing the Codex plugin.
 
 The repair does not delete the duplicate package. It renames it to a timestamped `.disabled-*` backup and forces the Web profile to use the host Harness tool runtime.
 
