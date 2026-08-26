@@ -19,16 +19,6 @@ function Require-Command([string]$Name, [string]$InstallHint) {
     }
 }
 
-function ConvertFrom-SecureStringPlain([Security.SecureString]$Secure) {
-    $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
-    try {
-        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
-    }
-    finally {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
-    }
-}
-
 function Disable-ProfileLocalDshTools([string]$DshHome) {
     $profileTools = Join-Path $DshHome "profiles\web\node_modules\@deepseek-ai\dsh-tools"
     if (-not (Test-Path -LiteralPath $profileTools)) {
@@ -75,16 +65,6 @@ function Configure-Qwen([string]$DshHome, [string]$BaseUrl) {
 
     $BaseUrl = $BaseUrl.Trim().TrimEnd('/')
 
-    $secureKey = Read-Host "Qwen API key (stored only in this Windows user's environment; input is hidden)" -AsSecureString
-    $plainKey = ConvertFrom-SecureStringPlain $secureKey
-    if ([string]::IsNullOrWhiteSpace($plainKey)) {
-        throw "Qwen API key was empty. Re-run the installer or configure the key later in Harness."
-    }
-
-    [Environment]::SetEnvironmentVariable("QWEN_API_KEY", $plainKey, "User")
-    $env:QWEN_API_KEY = $plainKey
-    $plainKey = $null
-
     $settings = Join-Path $DshHome "settings.yaml"
     $snippetPath = Join-Path $DshHome "qwen-provider.settings-snippet.yml"
     $safeUrl = $BaseUrl.Replace("'", "''")
@@ -93,7 +73,6 @@ llm-pi-ai:
   providers:
     qwen:
       displayName: Qwen
-      apiKeyEnv: QWEN_API_KEY
       api: openai-completions
       baseURL: '$safeUrl'
       models:
@@ -111,15 +90,16 @@ llm-pi-ai:
 
     if (-not (Test-Path -LiteralPath $settings)) {
         [IO.File]::WriteAllText($settings, $snippet + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-        Write-Host "Configured Qwen provider in settings.yaml." -ForegroundColor Green
+        Write-Host "Configured Qwen provider without an API key. Enter the key later in Harness Settings -> Models." -ForegroundColor Green
         return
     }
 
     $existing = [IO.File]::ReadAllText($settings)
     if ($existing -match '(?m)^llm-pi-ai\s*:') {
         Write-Host "settings.yaml already contains llm-pi-ai; automatic merge was skipped to avoid overwriting existing providers." -ForegroundColor Yellow
-        Write-Host "Merge this generated snippet through Harness Settings -> Models or manually:" -ForegroundColor Yellow
+        Write-Host "Use this generated snippet to add/update the provider safely:" -ForegroundColor Yellow
         Write-Host "  $snippetPath"
+        Write-Host "Then enter the API key in Harness Settings -> Models." -ForegroundColor Yellow
         return
     }
 
@@ -129,7 +109,7 @@ llm-pi-ai:
     }
     $prefix = if ($existing.Length -gt 0 -and -not $existing.EndsWith("`n")) { "`r`n" } else { "" }
     [IO.File]::AppendAllText($settings, $prefix + $snippet + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-    Write-Host "Added Qwen provider to settings.yaml." -ForegroundColor Green
+    Write-Host "Added Qwen provider without an API key." -ForegroundColor Green
 }
 
 if ($env:OS -ne "Windows_NT") {
@@ -195,10 +175,14 @@ Write-Host "Harness installation is ready." -ForegroundColor Green
 Write-Host ""
 Write-Host "Next:" -ForegroundColor Cyan
 Write-Host "  1. Run: dsh web"
-if (-not $SkipCodexOAuth) {
-    Write-Host "  2. While Harness is running, open http://127.0.0.1:1456/start and complete Codex OAuth."
+if (-not $SkipQwen) {
+    Write-Host "  2. Open Settings -> Models -> Qwen -> Edit, paste the Qwen API key, and Apply."
 }
-Write-Host '  3. Start a NEW conversation and test: Use run_code only to execute console.log("hello").'
-Write-Host "  4. If tools ever regress after a plugin update, re-run Repair-DshTools-Windows.ps1 from this repository."
+if (-not $SkipCodexOAuth) {
+    Write-Host "  3. While Harness is running, open http://127.0.0.1:1456/start and complete Codex OAuth."
+}
+Write-Host '  4. Start a NEW conversation and test: Use run_code only to execute console.log("hello").'
+Write-Host "  5. If tools ever regress after a plugin update, re-run Repair-DshTools-Windows.ps1 from this repository."
 Write-Host ""
+Write-Host "Important: do not launch Harness with QWEN_API_KEY set in the Windows environment if you want the Models UI key field to remain editable." -ForegroundColor Yellow
 Write-Host "No API keys, OAuth tokens, usernames, machine paths, IP addresses, or other private identifiers are stored in this repository." -ForegroundColor DarkGray
