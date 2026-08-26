@@ -369,12 +369,18 @@ class QwenRelayWorker:
         self.context_window = context_window
         self.worker_id = worker_id or f"colab-{uuid.uuid4().hex[:10]}"
         self.last_heartbeat = 0.0
+        # Keep heartbeat traffic independent from job/chunk RPC traffic so a
+        # long vLLM prefill or streaming upload cannot make a healthy worker
+        # look offline to the router.
+        self.heartbeat_store = type(store)(store.config)
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
 
     def heartbeat(self, status: str = "online", detail: str | None = None) -> None:
         now = time.time()
         if status == "online" and now - self.last_heartbeat < HEARTBEAT_SECONDS:
             return
-        self.store.upsert_worker(
+        self.heartbeat_store.upsert_worker(
             self.worker_id,
             status,
             model=SERVED_MODEL_NAME,
@@ -382,6 +388,13 @@ class QwenRelayWorker:
             detail=detail,
         )
         self.last_heartbeat = now
+
+    def _heartbeat_loop(self) -> None:
+        while not self._heartbeat_stop.wait(HEARTBEAT_SECONDS):
+            try:
+                self.heartbeat("online", f"{gpu_memory_status()} | active")
+            except Exception as exc:
+                print(f"\n      Worker heartbeat warning: {exc}", flush=True)
 
     def _flush_lines(self, job_id: str, seq: int, lines: list[str]) -> int:
         if not lines:
@@ -460,6 +473,13 @@ class QwenRelayWorker:
     def run_forever(self) -> None:
         print("\n[6/7] Registering Colab worker through outbound Supabase HTTPS...", flush=True)
         self.heartbeat("online", f"{gpu_memory_status()} | waiting for Harness")
+        self._heartbeat_stop.clear()
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            name="qwen-worker-heartbeat",
+            daemon=True,
+        )
+        self._heartbeat_thread.start()
         print(f"      Worker ID: {self.worker_id}")
         print(f"      Relay ID : {self.store.config.relay_id}")
         print("      Public Colab ports/tunnels: NONE ✅")
@@ -482,6 +502,9 @@ class QwenRelayWorker:
         except KeyboardInterrupt:
             print("\nWorker stopped by user.")
         finally:
+            self._heartbeat_stop.set()
+            if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+                self._heartbeat_thread.join(timeout=2)
             try:
                 self.heartbeat("offline", "worker stopped")
             except Exception:
