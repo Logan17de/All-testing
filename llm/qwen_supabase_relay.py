@@ -2,12 +2,15 @@
 """Shared outbound-only Supabase relay primitives for Colab and Harness.
 
 Security model:
-- Uses Growing-Trader's public Supabase URL + publishable key.
-- All relay tables remain protected by RLS with no direct anon policies.
+- Uses the public Supabase URL + publishable key.
+- Relay tables remain protected by RLS with no direct anon policies.
 - Every operation goes through SECURITY DEFINER RPCs gated by QWEN_RELAY_SECRET.
 - No service-role key is stored on Colab or Windows.
-- No Supabase Storage is required; large Harness requests are gzip+base64 encoded
-  into the isolated qwen_relay_jobs table and removed after completion.
+- Large requests are gzip+base64 encoded into the isolated relay jobs table.
+
+The RPC wrapper retries short-lived transport failures and recreates the
+Supabase client before retrying. This prevents a single "Server disconnected"
+error from killing an otherwise healthy inference job.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ import base64
 import gzip
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -33,6 +37,28 @@ DEFAULT_ORACLE_GATEWAY_HEALTH_URL = "https://api.zetbros.com/health"
 DEFAULT_ORACLE_WAKE_REPO = "Logan17de/Growing-Trader"
 DEFAULT_ORACLE_WAKE_WORKFLOW = "oracle-wake.yml"
 DEFAULT_ORACLE_WAKE_REF = "main"
+
+RPC_MAX_ATTEMPTS = max(1, int(os.environ.get("QWEN_RELAY_RPC_ATTEMPTS", "4")))
+RPC_BACKOFF_SECONDS = max(0.05, float(os.environ.get("QWEN_RELAY_RPC_BACKOFF_SECONDS", "0.25")))
+
+_TRANSIENT_MARKERS = (
+    "server disconnected",
+    "remoteprotocolerror",
+    "readerror",
+    "connecterror",
+    "connection reset",
+    "connection aborted",
+    "connection refused",
+    "temporarily unavailable",
+    "timed out",
+    "timeout",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "http 502",
+    "http 503",
+    "http 504",
+)
 
 
 class RelayError(RuntimeError):
@@ -61,13 +87,13 @@ def _decode_payload(encoded: str) -> dict[str, Any]:
     return value
 
 
-def oracle_gateway_online(timeout_seconds: float = 4.0) -> bool:
-    """Return True when the public Oracle gateway is reachable.
+def _transient_error(exc: Exception) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(marker in text for marker in _TRANSIENT_MARKERS)
 
-    /health intentionally does not require the public model API key. A 200 here
-    proves that the VM, Nginx/TLS, and gateway service are up; the Colab worker
-    may still be loading and can report worker_online=false.
-    """
+
+def oracle_gateway_online(timeout_seconds: float = 4.0) -> bool:
+    """Return True when the public Oracle gateway is reachable."""
     health_url = (
         os.environ.get("ORACLE_GATEWAY_HEALTH_URL")
         or DEFAULT_ORACLE_GATEWAY_HEALTH_URL
@@ -87,17 +113,7 @@ def oracle_gateway_online(timeout_seconds: float = 4.0) -> bool:
 
 
 def request_oracle_wake_if_needed(*, wait_seconds: int = 0) -> bool:
-    """Wake the shared Oracle VM through a narrowly-scoped GitHub workflow.
-
-    Colab cannot contact a powered-off VM, so wake-up is dispatched through the
-    Growing-Trader GitHub Actions workflow that already owns the OCI credentials.
-    Colab only needs ORACLE_WAKE_GITHUB_TOKEN, ideally a fine-grained token with
-    Actions read/write access to Logan17de/Growing-Trader and nothing else.
-
-    Returns True when the gateway was already online or becomes reachable within
-    wait_seconds. A successful dispatch with wait_seconds=0 also returns True.
-    Missing wake credentials are non-fatal so model startup can still proceed.
-    """
+    """Wake the shared Oracle VM through a narrowly-scoped GitHub workflow."""
     if oracle_gateway_online():
         print("      Oracle gateway: already online ✅", flush=True)
         return True
@@ -198,10 +214,34 @@ class RelayStore:
     """RPC-only wrapper around the isolated Qwen relay schema."""
 
     def __init__(self, config: RelayConfig):
+        self.config = config
+        self._client_lock = threading.Lock()
+        self.sb = self._new_client()
+
+    def _new_client(self):
         from supabase import create_client
 
-        self.config = config
-        self.sb = create_client(config.url, config.publishable_key)
+        return create_client(self.config.url, self.config.publishable_key)
+
+    def _reset_client(self) -> None:
+        with self._client_lock:
+            self.sb = self._new_client()
+
+    def _rpc(self, name: str, params: dict[str, Any], *, attempts: int | None = None):
+        max_attempts = max(1, attempts or RPC_MAX_ATTEMPTS)
+        last_error: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                return self.sb.rpc(name, params).execute()
+            except Exception as exc:
+                last_error = exc
+                if attempt + 1 >= max_attempts or not _transient_error(exc):
+                    raise
+                self._reset_client()
+                delay = min(RPC_BACKOFF_SECONDS * (2**attempt), 2.0)
+                time.sleep(delay)
+        assert last_error is not None
+        raise last_error
 
     @classmethod
     def from_env(cls) -> "RelayStore":
@@ -215,7 +255,7 @@ class RelayStore:
 
     def preflight(self) -> None:
         try:
-            result = self.sb.rpc("qwen_relay_preflight", self._auth()).execute()
+            result = self._rpc("qwen_relay_preflight", self._auth())
             if _result_data(result) is not True:
                 raise RelayError(f"Unexpected relay preflight response: {_result_data(result)!r}")
         except Exception as exc:
@@ -224,28 +264,43 @@ class RelayStore:
                 f"Original error: {exc}"
             ) from exc
 
-    def create_job(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def create_job(self, payload: dict[str, Any], affinity_key: str | None = None) -> dict[str, Any]:
         job_id = str(uuid.uuid4())
-        params: dict[str, Any] = {
-            **self._auth(),
-            "p_job_id": job_id,
-            "p_request_payload": _encode_payload(payload),
-        }
         try:
-            result = self.sb.rpc("qwen_relay_create_job", params).execute()
+            if affinity_key:
+                result = self._rpc(
+                    "qwen_relay_create_affinity_job",
+                    {
+                        **self._auth(),
+                        "p_job_id": job_id,
+                        "p_request_payload": _encode_payload(payload),
+                        "p_affinity_key": affinity_key,
+                    },
+                )
+                rpc_name = "qwen_relay_create_affinity_job"
+            else:
+                result = self._rpc(
+                    "qwen_relay_create_job",
+                    {
+                        **self._auth(),
+                        "p_job_id": job_id,
+                        "p_request_payload": _encode_payload(payload),
+                    },
+                )
+                rpc_name = "qwen_relay_create_job"
             rows = _result_data(result) or []
             if not rows:
-                raise RelayError("qwen_relay_create_job returned no row")
+                raise RelayError(f"{rpc_name} returned no row")
             return rows[0]
         except Exception as exc:
             raise RelayError(f"Failed to enqueue Qwen job: {exc}") from exc
 
     def claim_job(self, worker_id: str) -> dict[str, Any] | None:
         try:
-            result = self.sb.rpc(
+            result = self._rpc(
                 "qwen_relay_claim_job",
                 {**self._auth(), "p_worker_id": worker_id},
-            ).execute()
+            )
             rows = _result_data(result) or []
             return rows[0] if rows else None
         except Exception as exc:
@@ -258,15 +313,15 @@ class RelayStore:
         return _decode_payload(encoded)
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
-        result = self.sb.rpc(
+        result = self._rpc(
             "qwen_relay_get_job",
             {**self._auth(), "p_job_id": job_id},
-        ).execute()
+        )
         rows = _result_data(result) or []
         return rows[0] if rows else None
 
     def set_job_status(self, job_id: str, status: str, error: str | None = None) -> None:
-        self.sb.rpc(
+        self._rpc(
             "qwen_relay_set_job_status",
             {
                 **self._auth(),
@@ -274,14 +329,14 @@ class RelayStore:
                 "p_status": status,
                 "p_error": error[:8000] if error else None,
             },
-        ).execute()
+        )
 
     def cancel_job(self, job_id: str) -> None:
         try:
-            self.sb.rpc(
+            self._rpc(
                 "qwen_relay_cancel_job",
                 {**self._auth(), "p_job_id": job_id},
-            ).execute()
+            )
         except Exception:
             pass
 
@@ -290,7 +345,7 @@ class RelayStore:
         return bool(job and job.get("status") == "cancelled")
 
     def append_chunk(self, job_id: str, seq: int, payload: dict[str, Any]) -> None:
-        self.sb.rpc(
+        self._rpc(
             "qwen_relay_append_chunk",
             {
                 **self._auth(),
@@ -298,10 +353,10 @@ class RelayStore:
                 "p_seq": seq,
                 "p_payload": payload,
             },
-        ).execute()
+        )
 
     def fetch_chunks(self, job_id: str, after_seq: int, limit: int = 100) -> list[dict[str, Any]]:
-        result = self.sb.rpc(
+        result = self._rpc(
             "qwen_relay_fetch_chunks",
             {
                 **self._auth(),
@@ -309,7 +364,7 @@ class RelayStore:
                 "p_after_seq": after_seq,
                 "p_limit": limit,
             },
-        ).execute()
+        )
         return list(_result_data(result) or [])
 
     def upsert_worker(
@@ -321,7 +376,7 @@ class RelayStore:
         context_window: int = CONTEXT_WINDOW,
         detail: str | None = None,
     ) -> None:
-        self.sb.rpc(
+        self._rpc(
             "qwen_relay_upsert_worker",
             {
                 **self._auth(),
@@ -331,26 +386,26 @@ class RelayStore:
                 "p_context_window": context_window,
                 "p_detail": detail,
             },
-        ).execute()
+        )
 
     def get_live_worker(self, max_age_seconds: int = 30) -> dict[str, Any] | None:
-        result = self.sb.rpc(
+        result = self._rpc(
             "qwen_relay_get_live_worker",
             {
                 **self._auth(),
                 "p_max_age_seconds": max_age_seconds,
             },
-        ).execute()
+        )
         rows = _result_data(result) or []
         return rows[0] if rows else None
 
     def cleanup_job(self, job_id: str, request_path: str | None = None) -> None:
-        del request_path  # Backward-compatible argument; Storage is no longer used.
+        del request_path
         try:
-            self.sb.rpc(
+            self._rpc(
                 "qwen_relay_cleanup_job",
                 {**self._auth(), "p_job_id": job_id},
-            ).execute()
+            )
         except Exception:
             pass
 
