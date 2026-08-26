@@ -45,8 +45,8 @@ SERVER_STATE_FILE = Path("/content/qwen_server_state.json")
 VLLM_PID_FILE = Path("/content/qwen_vllm.pid")
 PORT = 8000
 
-BATCH_LINES = 8
-BATCH_MAX_SECONDS = 0.20
+BATCH_LINES = 16
+BATCH_MAX_SECONDS = 0.75
 HEARTBEAT_SECONDS = 5.0
 STARTUP_HEARTBEAT_SECONDS = 10.0
 QUEUE_POLL_SECONDS = 0.50
@@ -435,7 +435,10 @@ class QwenRelayWorker:
                     now = time.time()
                     if lines and (len(lines) >= BATCH_LINES or now - last_flush >= BATCH_MAX_SECONDS):
                         seq = self._flush_lines(job_id, seq, lines)
-                        last_flush = now
+                        # Reset after the blocking Supabase upload completes.
+                        # Using the pre-upload timestamp caused every buffered token
+                        # to immediately trigger another one-line RPC.
+                        last_flush = time.time()
 
                     if now >= cancel_check_at:
                         if self.store.job_cancelled(job_id):
