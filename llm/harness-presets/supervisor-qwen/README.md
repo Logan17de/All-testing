@@ -10,15 +10,17 @@ User
 Supervisor model selected in Harness
   ↓ inspect / decide next step
 qwen_builder
-  ↓ edit repository / test / report
+  ↓ continuable background worker
+  ├─ milestone reports while working
+  └─ edit repository / test / final report
 Supervisor
-  ↓ independently inspect files/diff/tests
+  ↓ after child settlement: independently inspect files/diff/tests
 accept OR delegate correction
   ↓
 repeat until verified complete
 ```
 
-The supervisor can be any model configured in Harness. To approximate the intended "OpenAI guides Qwen" setup, select an OpenAI API model as the session model. The worker remains fixed to:
+The supervisor can be any model configured in Harness. To approximate the intended "OpenAI guides Qwen" setup, select an OpenAI/Codex model as the session model. The worker remains fixed to:
 
 ```text
 provider: qwen
@@ -32,21 +34,45 @@ The ChatGPT web conversation itself is not directly embedded into Harness; the a
 
 Harness's Ralph workflow repeatedly launches fresh workers, but completion is still a worker self-declaration and the built-in Ralph flow has no independent evaluator deciding whether the objective is actually complete.
 
-This preset makes the parent model the evaluator. It delegates one bounded coding task, receives the worker result, then independently inspects the actual workspace and verification evidence before deciding whether to continue.
+This preset makes the parent model the evaluator. It delegates one bounded coding task, receives selected progress reports and the eventual child settlement, then independently inspects the actual workspace and verification evidence before deciding whether to continue.
+
+## Level 2 progress reporting
+
+`qwen_builder` runs as a **continuable background subagent** and receives Harness's native child-scoped `report` tool. Reports use `reportDelivery: next-step`, so meaningful milestones are delivered to the supervisor while Qwen continues working.
+
+The worker is instructed to report only useful transitions, for example:
+
+```text
+Inspection complete — relevant playback code identified.
+Root cause found — pause state still advances the wall-clock-derived time.
+Implementation started — rewriting the playback clock state.
+Verification started — running targeted playback tests.
+Verification passed — targeted tests are green.
+```
+
+It should **not** report every file read, grep, shell command, or trivial edit, and it should never expose private chain-of-thought. The goal is visible activity without turning the supervisor transcript into a tool log.
+
+The runtime also sends the supervisor a settlement/completion notice when the child finishes. The supervisor is explicitly instructed **not to inspect or verify a workspace that the child may still be modifying** merely because a progress report arrived; verification begins after settlement.
 
 ## Worker lifecycle
 
-`qwen_builder` uses the in-process `spawn` subagent provider with `enableRunInBackground: false`.
+`qwen_builder` uses the in-process `spawn` subagent provider with:
 
-Each invocation is a fresh Qwen child. It does not inherit the supervisor conversation, so the supervisor must send a standalone prompt. The child is created from the same parent workspace/cwd, so repository files carry durable state between rounds.
+```text
+enableRunInBackground: true
+backgroundMode: continuable
+```
 
-Fresh workers are intentional:
+A `qwen_builder` call therefore returns a durable child id immediately and runs Qwen independently. Each new `qwen_builder` invocation creates a separate child conversation, so the next bounded correction or implementation step starts with focused conversational context while sharing the same repository workspace.
 
-- no long Qwen conversation accumulating across the whole project;
+This keeps the useful properties of fresh implementation rounds:
+
+- no single Qwen conversation accumulating across the entire project;
 - each implementation step gets a focused context;
-- corrections start from the real modified workspace rather than old conversational assumptions;
+- corrections start from the real modified workspace rather than stale conversational assumptions;
 - the expensive strategic context stays with the supervisor;
-- the supervisor can shrink a task after a token-limit failure.
+- the supervisor can shrink a task after a token-limit failure;
+- meaningful worker progress remains visible while the child is active.
 
 ## Install
 
@@ -62,13 +88,11 @@ This copies the preset to:
 %USERPROFILE%\.dsh\.agent-presets\supervisor-qwen\agent.cordis.yml
 ```
 
-If `DSH_HOME` is set, the installer uses:
-
-```text
-%DSH_HOME%\.agent-presets\supervisor-qwen\agent.cordis.yml
-```
+If `DSH_HOME` is set, the installer uses that Harness home instead.
 
 Restart the Harness host after installation and select `supervisor-qwen` as the session mode.
+
+If `supervisor-qwen` was already installed before Level 2 reporting was added, rerun the installer and restart Harness so the local preset is replaced with the latest version.
 
 ## Model requirements
 
@@ -79,7 +103,7 @@ provider: qwen
 model: qwen3.8-27b
 ```
 
-The preset assumes the Qwen API endpoint is available whenever implementation is delegated. With the planned public API gateway this can eventually be `https://api.zetbros.com/v1`; the preset itself does not care whether Qwen is reached through localhost or a remote OpenAI-compatible URL.
+The preset itself does not depend on whether Qwen is reached through a local or remote OpenAI-compatible endpoint.
 
 ## Recommended use
 
@@ -90,19 +114,19 @@ Example flow:
 ```text
 Supervisor: inspect current auth implementation
 Supervisor → qwen_builder: implement refresh-token storage + tests
-Qwen: edits files, runs tests, reports
+Qwen report: inspection complete; implementation starting
+Qwen report: implementation complete; running tests
+Qwen report: tests passed; final result follows
+Runtime: child settled
 Supervisor: inspect diff and test output
 Supervisor → qwen_builder: fix missing invalidation path
-Qwen: edits, tests, reports
-Supervisor: rerun targeted tests + inspect edge case
-Supervisor → qwen_builder: add regression test
-Qwen: edits, tests, reports
+...
 Supervisor: final verification
 Supervisor: report completion to user
 ```
 
 ## Safety / correctness policy
 
-The supervisor is explicitly instructed not to trust the worker's completion claim by itself. It should inspect repository state and verification evidence before ending the loop.
+The supervisor is explicitly instructed not to trust worker reports or completion claims by themselves. It should inspect repository state and verification evidence after the child settles before ending the loop.
 
 The Qwen child is capped at delegation depth 1 so it cannot recursively fan out additional subagents. This keeps responsibility clear: supervisor decides, Qwen builds.
