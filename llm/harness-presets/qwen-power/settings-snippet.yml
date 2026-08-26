@@ -1,0 +1,23 @@
+# Merge these values into your DeepSeek Harness settings.
+# Keep the API key managed by the Harness Models UI; Harness may add apiKeyEnv automatically.
+
+agent-default-model:
+  provider: qwen
+  model: qwen3.8-27b
+  reasoningEffort: medium
+
+llm-pi-ai:
+  providers:
+    qwen:
+      displayName: Qwen
+      api: openai-completions
+      baseURL: http://127.0.0.1:8787/v1
+      models:
+        - id: qwen3.8-27b
+          name: Qwen
+          contextWindow: 262144
+          maxTokens: 32768
+          reasoningEfforts:
+            low: low
+            medium: medium
+            xhigh: xhigh
