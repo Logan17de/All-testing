@@ -1,0 +1,52 @@
+name: Patch Qwen relay streaming speed
+
+on:
+  push:
+    paths:
+      - ".github/workflows/patch-qwen-relay-speed.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch relay batching
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('llm/qwen3_8_27b_supabase_colab.py')
+          text = path.read_text(encoding='utf-8')
+
+          old_constants = 'BATCH_LINES = 8\nBATCH_MAX_SECONDS = 0.20'
+          new_constants = 'BATCH_LINES = 16\nBATCH_MAX_SECONDS = 0.75'
+          if text.count(old_constants) != 1:
+              raise SystemExit('Expected batching constants were not found exactly once')
+          text = text.replace(old_constants, new_constants, 1)
+
+          old_timer = '                        seq = self._flush_lines(job_id, seq, lines)\n                        last_flush = now'
+          new_timer = '                        seq = self._flush_lines(job_id, seq, lines)\n                        # Reset after the blocking Supabase upload completes.\n                        # Using the pre-upload timestamp caused every buffered token\n                        # to immediately trigger another one-line RPC.\n                        last_flush = time.time()'
+          if text.count(old_timer) != 1:
+              raise SystemExit('Expected flush timer block was not found exactly once')
+          text = text.replace(old_timer, new_timer, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet -- llm/qwen3_8_27b_supabase_colab.py; then
+            echo "No patch required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add llm/qwen3_8_27b_supabase_colab.py
+          git commit -m "Fix Qwen relay stream batching"
+          git push
