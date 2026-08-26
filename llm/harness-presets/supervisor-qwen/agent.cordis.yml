@@ -118,8 +118,9 @@
 #
 # Continuable background child: the tool returns a durable child id immediately.
 # The worker reports selected milestones to the supervisor while it works, and the
-# runtime sends a settlement notice when the child finishes. A new qwen_builder
-# call starts a separate child for the next bounded implementation step.
+# runtime sends a settlement notice when the child finishes. Harness's base bundle
+# already provides the child-scoped native `report` tool for continuable subagents,
+# so this preset must not register a second report plugin.
 
 - id: qwen-builder
   name: '@deepseek-ai/dsh-tool-subagent'
@@ -154,13 +155,6 @@
       Use reasoning for implementation decisions, not for reproducing entire source files. Once the action is clear, write/edit the files. Run the most relevant available tests, type checks, linters, builds, or targeted commands before reporting completion.
 
       Before finishing, call `report` once with a concise final implementation result: files changed, behavior implemented, verification actually run and its result, and any blocker or uncertainty. Never claim a test passed unless you ran it or inspected authoritative output.
-
-# Install the child-scoped native `report` tool only for continuable subagents.
-# `next-step` wakes/updates the supervisor when a milestone arrives.
-- id: qwen-progress-report
-  name: '@deepseek-ai/dsh-tool-subagent-report'
-  config:
-    reportDelivery: next-step
 
 # ── remaining supervisor-facing tools ───────────────────────────────────────
 
