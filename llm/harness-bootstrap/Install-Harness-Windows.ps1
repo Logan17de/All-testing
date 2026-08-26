@@ -198,7 +198,7 @@ Write-Host "  1. Run: dsh web"
 if (-not $SkipCodexOAuth) {
     Write-Host "  2. While Harness is running, open http://127.0.0.1:1456/start and complete Codex OAuth."
 }
-Write-Host "  3. Start a NEW conversation and test: Use run_code only to execute console.log(\"hello\")."
+Write-Host '  3. Start a NEW conversation and test: Use run_code only to execute console.log("hello").'
 Write-Host "  4. If tools ever regress after a plugin update, re-run Repair-DshTools-Windows.ps1 from this repository."
 Write-Host ""
 Write-Host "No API keys, OAuth tokens, usernames, machine paths, IP addresses, or other private identifiers are stored in this repository." -ForegroundColor DarkGray
