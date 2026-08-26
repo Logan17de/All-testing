@@ -1,0 +1,126 @@
+name: Patch Qwen worker heartbeat
+
+on:
+  push:
+    paths:
+      - ".github/workflows/patch-qwen-worker-heartbeat.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch dedicated worker heartbeat
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('llm/qwen3_8_27b_supabase_colab.py')
+          text = path.read_text(encoding='utf-8')
+
+          old_init = '''        self.worker_id = worker_id or f"colab-{uuid.uuid4().hex[:10]}"
+        self.last_heartbeat = 0.0
+'''
+          new_init = '''        self.worker_id = worker_id or f"colab-{uuid.uuid4().hex[:10]}"
+        self.last_heartbeat = 0.0
+        # Keep heartbeat traffic independent from job/chunk RPC traffic so a
+        # long vLLM prefill or streaming upload cannot make a healthy worker
+        # look offline to the router.
+        self.heartbeat_store = type(store)(store.config)
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
+'''
+          if text.count(old_init) != 1:
+              raise SystemExit('Expected QwenRelayWorker init block not found exactly once')
+          text = text.replace(old_init, new_init, 1)
+
+          old_store = '''        self.store.upsert_worker(
+            self.worker_id,
+            status,
+            model=SERVED_MODEL_NAME,
+            context_window=self.context_window,
+            detail=detail,
+        )
+        self.last_heartbeat = now
+
+    def _flush_lines'''
+          new_store = '''        self.heartbeat_store.upsert_worker(
+            self.worker_id,
+            status,
+            model=SERVED_MODEL_NAME,
+            context_window=self.context_window,
+            detail=detail,
+        )
+        self.last_heartbeat = now
+
+    def _heartbeat_loop(self) -> None:
+        while not self._heartbeat_stop.wait(HEARTBEAT_SECONDS):
+            try:
+                self.heartbeat("online", f"{gpu_memory_status()} | active")
+            except Exception as exc:
+                print(f"\\n      Worker heartbeat warning: {exc}", flush=True)
+
+    def _flush_lines'''
+          if text.count(old_store) != 1:
+              raise SystemExit('Expected heartbeat store block not found exactly once')
+          text = text.replace(old_store, new_store, 1)
+
+          old_start = '''        self.heartbeat("online", f"{gpu_memory_status()} | waiting for Harness")
+        print(f"      Worker ID: {self.worker_id}")
+'''
+          new_start = '''        self.heartbeat("online", f"{gpu_memory_status()} | waiting for Harness")
+        self._heartbeat_stop.clear()
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            name="qwen-worker-heartbeat",
+            daemon=True,
+        )
+        self._heartbeat_thread.start()
+        print(f"      Worker ID: {self.worker_id}")
+'''
+          if text.count(old_start) != 1:
+              raise SystemExit('Expected run_forever startup block not found exactly once')
+          text = text.replace(old_start, new_start, 1)
+
+          old_finally = '''        finally:
+            try:
+                self.heartbeat("offline", "worker stopped")
+            except Exception:
+                pass
+'''
+          new_finally = '''        finally:
+            self._heartbeat_stop.set()
+            if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+                self._heartbeat_thread.join(timeout=2)
+            try:
+                self.heartbeat("offline", "worker stopped")
+            except Exception:
+                pass
+'''
+          if text.count(old_finally) != 1:
+              raise SystemExit('Expected run_forever finally block not found exactly once')
+          text = text.replace(old_finally, new_finally, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Compile worker
+        run: python -m py_compile llm/qwen3_8_27b_supabase_colab.py
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet -- llm/qwen3_8_27b_supabase_colab.py; then
+            echo "No patch required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add llm/qwen3_8_27b_supabase_colab.py
+          git commit -m "Keep Qwen worker heartbeat alive during inference"
+          git push
