@@ -17,6 +17,8 @@ import gzip
 import json
 import os
 import time
+import urllib.error
+import urllib.request
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -26,6 +28,11 @@ DEFAULT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_dBUDUTTSQvFMhqgP7FQBOQ_5ZMjLh
 DEFAULT_RELAY_ID = "qwen3-8-27b"
 MODEL_ID = "qwen3.8-27b"
 CONTEXT_WINDOW = 262_144
+
+DEFAULT_ORACLE_GATEWAY_HEALTH_URL = "https://api.zetbros.com/health"
+DEFAULT_ORACLE_WAKE_REPO = "Logan17de/Growing-Trader"
+DEFAULT_ORACLE_WAKE_WORKFLOW = "oracle-wake.yml"
+DEFAULT_ORACLE_WAKE_REF = "main"
 
 
 class RelayError(RuntimeError):
@@ -52,6 +59,110 @@ def _decode_payload(encoded: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise RelayError("Decoded relay request payload is not a JSON object")
     return value
+
+
+def oracle_gateway_online(timeout_seconds: float = 4.0) -> bool:
+    """Return True when the public Oracle gateway is reachable.
+
+    /health intentionally does not require the public model API key. A 200 here
+    proves that the VM, Nginx/TLS, and gateway service are up; the Colab worker
+    may still be loading and can report worker_online=false.
+    """
+    health_url = (
+        os.environ.get("ORACLE_GATEWAY_HEALTH_URL")
+        or DEFAULT_ORACLE_GATEWAY_HEALTH_URL
+    ).strip()
+    if not health_url:
+        return False
+    request = urllib.request.Request(
+        health_url,
+        headers={"User-Agent": "zetbros-colab-qwen/1.0"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            return 200 <= int(response.status) < 300
+    except Exception:
+        return False
+
+
+def request_oracle_wake_if_needed(*, wait_seconds: int = 0) -> bool:
+    """Wake the shared Oracle VM through a narrowly-scoped GitHub workflow.
+
+    Colab cannot contact a powered-off VM, so wake-up is dispatched through the
+    Growing-Trader GitHub Actions workflow that already owns the OCI credentials.
+    Colab only needs ORACLE_WAKE_GITHUB_TOKEN, ideally a fine-grained token with
+    Actions read/write access to Logan17de/Growing-Trader and nothing else.
+
+    Returns True when the gateway was already online or becomes reachable within
+    wait_seconds. A successful dispatch with wait_seconds=0 also returns True.
+    Missing wake credentials are non-fatal so model startup can still proceed.
+    """
+    if oracle_gateway_online():
+        print("      Oracle gateway: already online ✅", flush=True)
+        return True
+
+    token = (os.environ.get("ORACLE_WAKE_GITHUB_TOKEN") or "").strip()
+    if not token:
+        print(
+            "      Oracle gateway is offline and ORACLE_WAKE_GITHUB_TOKEN is not configured; "
+            "automatic VM wake skipped.",
+            flush=True,
+        )
+        return False
+
+    repo = (os.environ.get("ORACLE_WAKE_REPO") or DEFAULT_ORACLE_WAKE_REPO).strip()
+    workflow = (
+        os.environ.get("ORACLE_WAKE_WORKFLOW") or DEFAULT_ORACLE_WAKE_WORKFLOW
+    ).strip()
+    ref = (os.environ.get("ORACLE_WAKE_REF") or DEFAULT_ORACLE_WAKE_REF).strip()
+    url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/dispatches"
+    body = json.dumps({"ref": ref}).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "zetbros-colab-qwen/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            status = int(response.status)
+        if status != 204:
+            print(f"      Oracle wake dispatch returned HTTP {status}; continuing Colab startup.", flush=True)
+            return False
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")[:500]
+        print(
+            f"      Oracle wake dispatch failed: GitHub HTTP {exc.code} {detail}; "
+            "continuing Colab startup.",
+            flush=True,
+        )
+        return False
+    except Exception as exc:
+        print(f"      Oracle wake dispatch failed: {exc}; continuing Colab startup.", flush=True)
+        return False
+
+    print("      Oracle VM wake requested through GitHub Actions ✅", flush=True)
+    if wait_seconds <= 0:
+        return True
+
+    deadline = time.time() + wait_seconds
+    while time.time() < deadline:
+        if oracle_gateway_online(timeout_seconds=5.0):
+            print("      Oracle gateway: online ✅", flush=True)
+            return True
+        remaining = max(0, int(deadline - time.time()))
+        print(f"\r      Waiting for Oracle gateway... {remaining:3d}s remaining", end="", flush=True)
+        time.sleep(10)
+    print("\n      Oracle wake was dispatched, but the gateway is not reachable yet.", flush=True)
+    return False
 
 
 @dataclass
