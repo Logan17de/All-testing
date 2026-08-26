@@ -54,6 +54,24 @@ function Install-Preset([string]$Name, [string]$DshHome) {
     Write-Host "Installed preset: $Name" -ForegroundColor Green
 }
 
+function Get-QwenAffinityId([string]$DshHome) {
+    $affinityPath = Join-Path $DshHome "qwen-affinity.id"
+    if (Test-Path -LiteralPath $affinityPath) {
+        $existing = ([IO.File]::ReadAllText($affinityPath)).Trim()
+        if ($existing -match '^[A-Za-z0-9_-]{16,128}$') {
+            return $existing
+        }
+    }
+
+    $value = [Guid]::NewGuid().ToString("N")
+    [IO.File]::WriteAllText(
+        $affinityPath,
+        $value + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false)
+    )
+    return $value
+}
+
 function Configure-Qwen([string]$DshHome, [string]$BaseUrl) {
     if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
         $BaseUrl = Read-Host "Qwen OpenAI-compatible base URL (blank = skip Qwen setup)"
@@ -64,6 +82,7 @@ function Configure-Qwen([string]$DshHome, [string]$BaseUrl) {
     }
 
     $BaseUrl = $BaseUrl.Trim().TrimEnd('/')
+    $affinityId = Get-QwenAffinityId -DshHome $DshHome
 
     $settings = Join-Path $DshHome "settings.yaml"
     $snippetPath = Join-Path $DshHome "qwen-provider.settings-snippet.yml"
@@ -75,6 +94,8 @@ llm-pi-ai:
       displayName: Qwen
       api: openai-completions
       baseURL: '$safeUrl'
+      headers:
+        X-Qwen-Affinity: '$affinityId'
       models:
         - id: qwen3.8-27b
           name: Qwen
@@ -90,7 +111,8 @@ llm-pi-ai:
 
     if (-not (Test-Path -LiteralPath $settings)) {
         [IO.File]::WriteAllText($settings, $snippet + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-        Write-Host "Configured Qwen provider without an API key. Enter the key later in Harness Settings -> Models." -ForegroundColor Green
+        Write-Host "Configured Qwen provider with worker affinity and without an API key." -ForegroundColor Green
+        Write-Host "Enter the API key later in Harness Settings -> Models." -ForegroundColor Green
         return
     }
 
@@ -99,6 +121,7 @@ llm-pi-ai:
         Write-Host "settings.yaml already contains llm-pi-ai; automatic merge was skipped to avoid overwriting existing providers." -ForegroundColor Yellow
         Write-Host "Use this generated snippet to add/update the provider safely:" -ForegroundColor Yellow
         Write-Host "  $snippetPath"
+        Write-Host "The snippet includes this machine's stable X-Qwen-Affinity header." -ForegroundColor Yellow
         Write-Host "Then enter the API key in Harness Settings -> Models." -ForegroundColor Yellow
         return
     }
@@ -109,7 +132,7 @@ llm-pi-ai:
     }
     $prefix = if ($existing.Length -gt 0 -and -not $existing.EndsWith("`n")) { "`r`n" } else { "" }
     [IO.File]::AppendAllText($settings, $prefix + $snippet + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-    Write-Host "Added Qwen provider without an API key." -ForegroundColor Green
+    Write-Host "Added Qwen provider with worker affinity and without an API key." -ForegroundColor Green
 }
 
 if ($env:OS -ne "Windows_NT") {
@@ -177,6 +200,7 @@ Write-Host "Next:" -ForegroundColor Cyan
 Write-Host "  1. Run: dsh web"
 if (-not $SkipQwen) {
     Write-Host "  2. Open Settings -> Models -> Qwen -> Edit, paste the Qwen API key, and Apply."
+    Write-Host "     Worker affinity is already configured locally; the API key remains editable in Harness."
 }
 if (-not $SkipCodexOAuth) {
     Write-Host "  3. While Harness is running, open http://127.0.0.1:1456/start and complete Codex OAuth."
@@ -185,4 +209,5 @@ Write-Host '  4. Start a NEW conversation and test: Use run_code only to execute
 Write-Host "  5. If tools ever regress after a plugin update, re-run Repair-DshTools-Windows.ps1 from this repository."
 Write-Host ""
 Write-Host "Important: do not launch Harness with QWEN_API_KEY set in the Windows environment if you want the Models UI key field to remain editable." -ForegroundColor Yellow
+Write-Host "The generated Qwen affinity ID stays only under the local Harness home; it is never committed to this repository." -ForegroundColor DarkGray
 Write-Host "No API keys, OAuth tokens, usernames, machine paths, IP addresses, or other private identifiers are stored in this repository." -ForegroundColor DarkGray
