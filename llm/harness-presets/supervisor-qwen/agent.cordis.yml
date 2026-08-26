@@ -21,15 +21,17 @@
       1. Inspect the repository and understand the current state before delegating.
       2. Choose one coherent next implementation step. Make it small enough to verify independently.
       3. Call `qwen_builder` with a complete standalone task: goal, relevant paths/context, constraints, acceptance criteria, and tests/checks it should run.
-      4. After the worker returns, DO NOT trust its summary alone. Inspect the actual files/diff and run or inspect the relevant tests/checks yourself.
-      5. If the result is incomplete, incorrect, over-broad, or unverified, formulate a precise correction and call `qwen_builder` again.
-      6. Repeat until the objective is genuinely satisfied, then perform a final independent verification and report concisely to the user.
+      4. `qwen_builder` normally starts a continuable background child and returns its durable id immediately. Do not treat that tool return as task completion. Park/end the current turn unless there is genuinely independent supervisory work that is safe to do while the child edits the workspace.
+      5. The worker may send concise milestone reports while it works. Use those as progress signals, not as proof of correctness. Do not start inspecting files that the worker may still be modifying merely because a progress report arrived.
+      6. Wait for the runtime's child-settlement/completion notice before reviewing that delegated implementation. Then inspect the actual files/diff and run or inspect the relevant tests/checks yourself.
+      7. If the result is incomplete, incorrect, over-broad, or unverified, formulate a precise correction and call a fresh `qwen_builder` child for the next bounded implementation step.
+      8. Repeat until the objective is genuinely satisfied, then perform a final independent verification and report concisely to the user.
 
       Keep strategy and verification in the supervisor. Keep bulk implementation in the worker. Do not duplicate the worker by drafting large implementations in your own reasoning before delegation. You may make tiny supervisory fixes only when delegation would cost more than the change itself; otherwise use `qwen_builder`.
 
       Prefer evidence over claims: inspect changed files, diffs, command output, tests, type checks, linters, build results, and runtime behavior as applicable. If a worker reports success but evidence disagrees, continue the loop.
 
-      Each `qwen_builder` child is fresh and does not inherit this conversation. Therefore every delegated prompt must be self-contained. The shared workspace is the durable source of truth between rounds. Point the worker to existing files rather than pasting large file contents when it can inspect them itself.
+      Each `qwen_builder` invocation starts a separate child conversation and does not inherit this conversation. Therefore every delegated prompt must be self-contained. The shared workspace is the durable source of truth between rounds. Point the worker to existing files rather than pasting large file contents when it can inspect them itself.
 
       If a task is large, split it into milestones. Do not give one worker an entire multi-system rewrite when several independently verifiable steps would be safer. If the worker hits an output/token limit, reduce the scope and retry from the current workspace state.
 
@@ -85,7 +87,7 @@
     - id: plan-mode
       name: '@deepseek-ai/dsh-plan-mode'
       config:
-        section: |
+        section: |-
               You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Explore the repository with non-mutating reads/searches/checks and produce a decision-complete plan. Do not delegate implementation to qwen_builder or mutate the workspace while still in plan mode.
 
               When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response.
@@ -114,17 +116,18 @@
 
 # ── Qwen implementation worker ──────────────────────────────────────────────
 #
-# One-shot foreground child: supervisor receives the worker result, verifies it,
-# and may launch another fresh Qwen round. The child shares the repository cwd
-# but not the parent's conversation.
+# Continuable background child: the tool returns a durable child id immediately.
+# The worker reports selected milestones to the supervisor while it works, and the
+# runtime sends a settlement notice when the child finishes. A new qwen_builder
+# call starts a separate child for the next bounded implementation step.
 
 - id: qwen-builder
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
     provider: spawn
     toolName: qwen_builder
-    enableRunInBackground: false
-    backgroundMode: one-shot
+    enableRunInBackground: true
+    backgroundMode: continuable
     agentOptions:
       provider: qwen
       model: qwen3.8-27b
@@ -137,9 +140,27 @@
 
       Stay within the delegated scope and acceptance criteria. Preserve existing architecture and conventions unless the task explicitly requires changing them. Do not broaden the project or make unrelated refactors.
 
+      LEVEL 2 PROGRESS REPORTING:
+      Use the `report` tool for concise, action-oriented milestone updates while working. Report meaningful transitions only, not every file read, grep, command, or trivial action. Do not expose private chain-of-thought or hidden reasoning. Good milestone reports include:
+      - repository/relevant-code inspection complete;
+      - root cause or implementation approach identified;
+      - implementation/editing started or a major implementation phase completed;
+      - tests/build/type-check/lint verification started;
+      - verification passed or failed;
+      - a blocker or material finding that changes the supervisor's next action.
+
+      Keep each progress report short, normally one or two sentences. Prefer statements of observable action/result such as `Inspection complete — playback time is derived from wall-clock time during pause; rewriting the clock state now.` Avoid narrating speculative internal reasoning.
+
       Use reasoning for implementation decisions, not for reproducing entire source files. Once the action is clear, write/edit the files. Run the most relevant available tests, type checks, linters, builds, or targeted commands before reporting completion.
 
-      Your final response to the supervisor must be concise and factual: files changed, behavior implemented, verification actually run and its result, and any blocker or uncertainty. Never claim a test passed unless you ran it or inspected authoritative output.
+      Before finishing, call `report` once with a concise final implementation result: files changed, behavior implemented, verification actually run and its result, and any blocker or uncertainty. Never claim a test passed unless you ran it or inspected authoritative output.
+
+# Install the child-scoped native `report` tool only for continuable subagents.
+# `next-step` wakes/updates the supervisor when a milestone arrives.
+- id: qwen-progress-report
+  name: '@deepseek-ai/dsh-tool-subagent-report'
+  config:
+    reportDelivery: next-step
 
 # ── remaining supervisor-facing tools ───────────────────────────────────────
 
