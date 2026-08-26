@@ -1,11 +1,16 @@
 # DeepSeek Harness custom Qwen provider example.
 # Copy/merge this into $DSH_HOME/settings.yaml only if configuring manually.
-# Never commit a real API key.
+# Never commit a real API key or a real machine-local affinity identifier.
 #
 # Intentionally omit apiKeyEnv here. Start Harness, open Settings -> Models,
-# edit the qwen provider, paste the API key, and Apply. Harness will store the
+# edit the qwen provider, paste the API key, and Apply. Harness stores the
 # secret in its local credential store and may then add a credential reference
 # such as QWEN_API_KEY to settings. That reference is safe; the secret is not.
+#
+# X-Qwen-Affinity should be a stable random value generated once per Harness
+# installation. The bootstrap generates and stores one locally automatically.
+# It keeps this Harness installation on the same healthy Colab worker. If that
+# worker disappears, the relay fails over and rebinds the affinity automatically.
 #
 # Do not launch Harness with QWEN_API_KEY already set in the OS environment if
 # you want the API-key field in the Models UI to remain editable.
@@ -16,6 +21,8 @@ llm-pi-ai:
       displayName: Qwen
       api: openai-completions
       baseURL: <QWEN_OPENAI_COMPATIBLE_BASE_URL>
+      headers:
+        X-Qwen-Affinity: <LOCAL_RANDOM_AFFINITY_ID>
       models:
         - id: qwen3.8-27b
           name: Qwen
