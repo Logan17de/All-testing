@@ -3,6 +3,11 @@
 
 vLLM stays private on 127.0.0.1:8000. Colab only makes ordinary outbound HTTPS
 calls to Supabase. No reverse tunnel or public Colab port is used.
+
+The Colab runtime also holds a lightweight Supabase VM lease from the beginning
+of startup. This lets the shared Oracle VM remain online while Qwen is still
+installing/downloading/loading, without making the public gateway report the
+model as ready before vLLM is actually usable.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -23,6 +29,7 @@ from typing import Any
 BF16_MODEL = "Qwen/Qwen3.8-27B"
 FP8_MODEL = "Qwen/Qwen3.8-27B-FP8"
 SERVED_MODEL_NAME = "qwen3.8-27b"
+STARTUP_MODEL_NAME = "__qwen-starting__"
 NATIVE_CONTEXT = 262_144
 
 VLLM_VERSION = "0.27.1"
@@ -41,6 +48,7 @@ PORT = 8000
 BATCH_LINES = 8
 BATCH_MAX_SECONDS = 0.20
 HEARTBEAT_SECONDS = 5.0
+STARTUP_HEARTBEAT_SECONDS = 10.0
 QUEUE_POLL_SECONDS = 0.50
 
 
@@ -65,7 +73,7 @@ def colab_secret(name: str) -> str | None:
 
 
 def load_relay_env() -> None:
-    """Load only the dedicated relay secret; URL/publishable key are safe defaults."""
+    """Load relay auth and optional narrowly-scoped Oracle wake credentials."""
     print("[0/7] Checking Growing-Trader Qwen relay...", flush=True)
     secret = colab_secret("QWEN_RELAY_SECRET")
     relay_id = colab_secret("QWEN_RELAY_ID") or "qwen3-8-27b"
@@ -81,12 +89,63 @@ def load_relay_env() -> None:
     # publishable key are intentionally embedded as non-secret defaults.
     optional_url = colab_secret("SUPABASE_URL")
     optional_key = colab_secret("SUPABASE_PUBLISHABLE_KEY")
+    wake_token = colab_secret("ORACLE_WAKE_GITHUB_TOKEN")
     if optional_url:
         os.environ["SUPABASE_URL"] = optional_url
     if optional_key:
         os.environ["SUPABASE_PUBLISHABLE_KEY"] = optional_key
+    if wake_token:
+        os.environ["ORACLE_WAKE_GITHUB_TOKEN"] = wake_token
+
     print(f"      Relay ID: {relay_id}")
     print("      QWEN_RELAY_SECRET: found ✅")
+    print(f"      Oracle auto-wake: {'enabled ✅' if wake_token else 'not configured'}")
+
+
+class StartupLease:
+    """Keep Oracle alive while Colab is active but Qwen is not ready yet."""
+
+    def __init__(self, store, worker_id: str):
+        self.store = store
+        self.worker_id = worker_id
+        self.stop_event = threading.Event()
+        self.thread: threading.Thread | None = None
+
+    def _heartbeat(self, status: str = "online", detail: str = "Colab active | Qwen starting") -> None:
+        self.store.upsert_worker(
+            self.worker_id,
+            status,
+            model=STARTUP_MODEL_NAME,
+            context_window=NATIVE_CONTEXT,
+            detail=detail,
+        )
+
+    def _loop(self) -> None:
+        while not self.stop_event.wait(STARTUP_HEARTBEAT_SECONDS):
+            try:
+                self._heartbeat()
+            except Exception as exc:
+                print(f"\n      Startup lease heartbeat warning: {exc}", flush=True)
+
+    def start(self) -> None:
+        self._heartbeat()
+        self.thread = threading.Thread(
+            target=self._loop,
+            name="qwen-startup-lease",
+            daemon=True,
+        )
+        self.thread.start()
+        print("      Colab VM lease: active ✅", flush=True)
+
+    def stop(self, *, mark_offline: bool = False) -> None:
+        self.stop_event.set()
+        if self.thread is not None and self.thread.is_alive():
+            self.thread.join(timeout=2)
+        if mark_offline:
+            try:
+                self._heartbeat("offline", "Colab startup stopped before Qwen became ready")
+            except Exception:
+                pass
 
 
 def install_dependencies() -> None:
@@ -304,11 +363,11 @@ def wait_for_server(api_key: str, proc: subprocess.Popen, timeout_s: int = 1200)
 
 
 class QwenRelayWorker:
-    def __init__(self, store, api_key: str, context_window: int):
+    def __init__(self, store, api_key: str, context_window: int, *, worker_id: str | None = None):
         self.store = store
         self.api_key = api_key
         self.context_window = context_window
-        self.worker_id = f"colab-{uuid.uuid4().hex[:10]}"
+        self.worker_id = worker_id or f"colab-{uuid.uuid4().hex[:10]}"
         self.last_heartbeat = 0.0
 
     def heartbeat(self, status: str = "online", detail: str | None = None) -> None:
@@ -430,35 +489,64 @@ def main() -> None:
     # Cell 1 installs the small relay dependency set. Validate credentials and
     # Growing-Trader RPCs before installing vLLM or touching the A100.
     load_relay_env()
-    from qwen_supabase_relay import RelayStore
+    from qwen_supabase_relay import RelayStore, request_oracle_wake_if_needed
 
     relay = RelayStore.from_env()
     relay.preflight()
     print("      Growing-Trader relay RPC/auth: OK ✅")
 
-    install_dependencies()
+    # Hold the shared VM lease immediately. The lease uses a special startup
+    # model marker that the public gateway ignores for readiness, while the VM
+    # shutdown workflows still treat it as proof that Colab is active.
+    worker_id = f"colab-{uuid.uuid4().hex[:10]}"
+    startup_lease = StartupLease(relay, worker_id)
+    handoff_to_worker = False
+    startup_lease.start()
 
-    print("\n[2/7] Verifying GPU...", flush=True)
-    gpu_name, vram_mib = gpu_info()
-    model_id, max_model_len = choose_model(vram_mib)
-    print(f"      GPU: {gpu_name} ({vram_mib / 1024:.1f} GiB)")
-    print(f"      Model: {model_id}")
-    print(f"      Context: {max_model_len:,}")
-    print(f"      KV cache: {KV_CACHE_DTYPE}")
+    # If the Oracle VM is currently off, dispatch the existing OCI credentials
+    # through a narrowly-scoped GitHub Actions wake workflow. Boot happens in
+    # parallel with the expensive model/runtime preparation below.
+    request_oracle_wake_if_needed(wait_seconds=0)
 
-    model_dir = download_model(model_id)
+    try:
+        install_dependencies()
 
-    reused = try_reuse_server(model_id, max_model_len)
-    if reused:
-        _, api_key = reused
-    else:
-        cleanup_old_server()
-        api_key = "sk-colab-" + secrets.token_urlsafe(32)
-        proc = start_vllm(model_dir, api_key, max_model_len, model_id)
-        wait_for_server(api_key, proc)
+        print("\n[2/7] Verifying GPU...", flush=True)
+        gpu_name, vram_mib = gpu_info()
+        model_id, max_model_len = choose_model(vram_mib)
+        print(f"      GPU: {gpu_name} ({vram_mib / 1024:.1f} GiB)")
+        print(f"      Model: {model_id}")
+        print(f"      Context: {max_model_len:,}")
+        print(f"      KV cache: {KV_CACHE_DTYPE}")
 
-    worker = QwenRelayWorker(relay, api_key, max_model_len)
-    worker.run_forever()
+        model_dir = download_model(model_id)
+
+        reused = try_reuse_server(model_id, max_model_len)
+        if reused:
+            _, api_key = reused
+        else:
+            cleanup_old_server()
+            api_key = "sk-colab-" + secrets.token_urlsafe(32)
+            proc = start_vllm(model_dir, api_key, max_model_len, model_id)
+            wait_for_server(api_key, proc)
+
+        worker = QwenRelayWorker(
+            relay,
+            api_key,
+            max_model_len,
+            worker_id=worker_id,
+        )
+
+        # Stop the startup heartbeat first, then atomically reuse the same row
+        # as the real ready worker. The public gateway will only see the row
+        # after its model field becomes qwen3.8-27b.
+        startup_lease.stop(mark_offline=False)
+        worker.heartbeat("online", f"{gpu_memory_status()} | ready")
+        handoff_to_worker = True
+        worker.run_forever()
+    finally:
+        if not handoff_to_worker:
+            startup_lease.stop(mark_offline=True)
 
 
 if __name__ == "__main__":
