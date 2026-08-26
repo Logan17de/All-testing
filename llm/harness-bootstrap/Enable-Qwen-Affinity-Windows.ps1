@@ -38,17 +38,17 @@ $body = $match.Groups['body'].Value
 
 if ($body -match '(?m)^\s{6}headers:\s*$') {
     if ($body -match '(?m)^\s{8}X-Qwen-Affinity:\s*.*$') {
-        $body = [regex]::Replace(
+        $affinityLine = [regex]::new('(?m)^\s{8}X-Qwen-Affinity:\s*.*$')
+        $body = $affinityLine.Replace(
             $body,
-            '(?m)^\s{8}X-Qwen-Affinity:\s*.*$',
             "        X-Qwen-Affinity: '$affinity'",
             1
         )
     }
     else {
-        $body = [regex]::Replace(
+        $headersLine = [regex]::new('(?m)^(\s{6}headers:\s*\r?\n)')
+        $body = $headersLine.Replace(
             $body,
-            '(?m)^(\s{6}headers:\s*\r?\n)',
             "`$1        X-Qwen-Affinity: '$affinity'`r`n",
             1
         )
