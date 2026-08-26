@@ -1,7 +1,7 @@
 param(
     [string]$QwenBaseUrl = "",
     [switch]$SkipQwen,
-    [switch]$SkipCodexOAuth,
+    [switch]$SkipSubscriptions,
     [switch]$SkipPresets
 )
 
@@ -36,6 +36,24 @@ function Disable-ProfileLocalDshTools([string]$DshHome) {
     $backupLeaf = "dsh-tools.disabled-$stamp"
     Rename-Item -LiteralPath $profileTools -NewName $backupLeaf
     Write-Host "Disabled duplicate profile-local dsh-tools (backup kept as $backupLeaf)." -ForegroundColor Green
+}
+
+function Remove-LegacySubscriptionPlugins {
+    $pluginList = (& dsh plugin --profile web list 2>&1 | Out-String)
+    $legacyPackages = @(
+        "dsh-codex-oauth",
+        "@wnjxyk/dsh-codex-oauth"
+    )
+
+    foreach ($package in $legacyPackages) {
+        if ($pluginList -match [regex]::Escape($package)) {
+            Write-Host "Removing legacy single-provider plugin: $package" -ForegroundColor Yellow
+            & dsh plugin --profile web remove -w $package
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to remove legacy plugin: $package"
+            }
+        }
+    }
 }
 
 function Install-Preset([string]$Name, [string]$DshHome) {
@@ -167,16 +185,12 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to initialize the web profile." }
 
 $dshHome = if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $HOME ".dsh" }
 
-if (-not $SkipCodexOAuth) {
-    Write-Step "Installing Codex OAuth integration"
-    $pluginList = (& dsh plugin --profile web list 2>&1 | Out-String)
-    if ($pluginList -match '(?m)(^|\s)dsh-codex-oauth@') {
-        Write-Host "Removing older incompatible dsh-codex-oauth package..." -ForegroundColor Yellow
-        & dsh plugin --profile web remove -w dsh-codex-oauth
-    }
+if (-not $SkipSubscriptions) {
+    Write-Step "Installing subscription providers"
+    Remove-LegacySubscriptionPlugins
 
-    & dsh plugin --profile web add -w @wnjxyk/dsh-codex-oauth@latest
-    if ($LASTEXITCODE -ne 0) { throw "Codex OAuth plugin installation failed." }
+    & dsh plugin --profile web add dsh-plugin-subscriptions
+    if ($LASTEXITCODE -ne 0) { throw "Subscription plugin installation failed." }
 
     Write-Step "Applying duplicate dsh-tools workaround"
     Disable-ProfileLocalDshTools -DshHome $dshHome
@@ -198,16 +212,20 @@ Write-Host "Harness installation is ready." -ForegroundColor Green
 Write-Host ""
 Write-Host "Next:" -ForegroundColor Cyan
 Write-Host "  1. Run: dsh web"
-if (-not $SkipQwen) {
-    Write-Host "  2. Open Settings -> Models -> Qwen -> Edit, paste the Qwen API key, and Apply."
-    Write-Host "     Worker affinity is already configured locally; the API key remains editable in Harness."
+if (-not $SkipSubscriptions) {
+    Write-Host "  2. Open Settings -> Subscriptions."
+    Write-Host "     Connect ChatGPT (Codex) to use ChatGPT subscription quota."
+    Write-Host "     Connect Claude to use Claude Pro/Max subscription quota."
+    Write-Host "     Claude can import an existing Claude Code login or use browser authorization."
 }
-if (-not $SkipCodexOAuth) {
-    Write-Host "  3. While Harness is running, open http://127.0.0.1:1456/start and complete Codex OAuth."
+if (-not $SkipQwen) {
+    Write-Host "  3. Open Settings -> Models -> Qwen -> Edit, paste the Qwen API key, and Apply."
+    Write-Host "     Worker affinity is already configured locally; the API key remains editable in Harness."
 }
 Write-Host '  4. Start a NEW conversation and test: Use run_code only to execute console.log("hello").'
 Write-Host "  5. If tools ever regress after a plugin update, re-run Repair-DshTools-Windows.ps1 from this repository."
 Write-Host ""
 Write-Host "Important: do not launch Harness with QWEN_API_KEY set in the Windows environment if you want the Models UI key field to remain editable." -ForegroundColor Yellow
+Write-Host "Subscription credentials stay in the local Harness profile and must never be committed." -ForegroundColor DarkGray
 Write-Host "The generated Qwen affinity ID stays only under the local Harness home; it is never committed to this repository." -ForegroundColor DarkGray
 Write-Host "No API keys, OAuth tokens, usernames, machine paths, IP addresses, or other private identifiers are stored in this repository." -ForegroundColor DarkGray
