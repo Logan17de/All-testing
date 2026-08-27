@@ -103,8 +103,8 @@ def prepare_runtime() -> None:
         sys.executable,
         "-c",
         (
-            "import torch, torchvision, transformers, vllm, flashinfer; "
-            "from PIL import Image, ImageText; "
+            "import PIL, torch, torchvision, transformers, vllm, flashinfer; "
+            "from PIL import Image, ImageFont; "
             "import vllm.model_executor.models.qwen3_5; "
             "import vllm.model_executor.models.qwen3_5_mtp; "
             "print('Torch:', torch.__version__, 'CUDA:', torch.version.cuda); "
@@ -112,7 +112,7 @@ def prepare_runtime() -> None:
             "print('Transformers:', transformers.__version__); "
             "print('vLLM nightly:', vllm.__version__); "
             "print('FlashInfer:', getattr(flashinfer, '__version__', 'installed')); "
-            "print('Pillow import: OK'); "
+            "print('Pillow:', PIL.__version__, 'OK'); "
             "print('CUDA available:', torch.cuda.is_available()); "
             "print('Qwen3.8 + native MTP modules: OK'); "
             "print('__QWEN_VLLM_VERSION__=' + str(vllm.__version__))"
