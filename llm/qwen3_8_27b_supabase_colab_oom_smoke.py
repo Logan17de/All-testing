@@ -11,10 +11,12 @@ PASS because it proves the code path got as far as real model initialization.
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import qwen3_8_27b_supabase_colab_fast as fast
-import qwen3_8_27b_supabase_colab_fast_nightly as nightly
+import qwen3_8_27b_colab_runtime as runtime
 
 base = fast.base
 
@@ -34,11 +36,30 @@ EXPECTED_MEMORY_MARKERS = (
 
 
 def _gpu_compute_capability() -> tuple[int, int]:
-    import torch
-
-    if not torch.cuda.is_available():
-        raise RuntimeError("Expected-OOM smoke test requires an NVIDIA GPU runtime")
-    return tuple(int(x) for x in torch.cuda.get_device_capability())  # type: ignore[return-value]
+    # Check Torch in a fresh interpreter.  The Colab kernel itself may contain
+    # old preloaded package objects after the runtime stack was upgraded.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import torch; "
+                "assert torch.cuda.is_available(), 'CUDA unavailable'; "
+                "m, n = torch.cuda.get_device_capability(); "
+                "print(f'{m},{n}')"
+            ),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    try:
+        major, minor = result.stdout.strip().split(",", 1)
+        return int(major), int(minor)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not determine GPU compute capability: {result.stdout.strip()}"
+        ) from exc
 
 
 def choose_model(vram_mib: int) -> tuple[str, int]:
@@ -83,9 +104,10 @@ def _is_expected_memory_failure(text: str) -> bool:
 
 
 def main() -> None:
-    # Install the exact production-nightly overrides first, then relax only the
-    # A100-size gate. Everything else remains identical to the real worker.
-    nightly._install_overrides()
+    # Build/repair the runtime before the relay imports Supabase/requests, then
+    # apply the exact production-nightly settings and relax only the A100 gate.
+    runtime.prepare_runtime()
+    runtime.apply_overrides()
     fast.choose_model = choose_model
 
     try:
