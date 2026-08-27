@@ -1,0 +1,20 @@
+# Mount the adapter, NOT upstream's own entry.
+#
+# Upstream `dsh-barricade` must stay installed (this package imports its
+# analyzer, policy and rules) but must NOT be listed in dsh.profile.bundles:
+# its own plugin entry reads ctx.approval without declaring it and hard-fails
+# the whole plugin tree at boot.
+#
+# toolNames must list ONLY tools that carry a shell command string. The guard
+# fails closed when a listed tool has no readable command, so listing a tool
+# that has no `command` argument refuses every one of its calls.
+#
+# `run_code` in particular must NOT be listed: its arguments are `{code, ...}`,
+# never `{command}`. Guarding it would refuse all of Code Mode. It also does not
+# need guarding — Code Mode dispatches real tools underneath (tool/code-dispatch),
+# so a shell command run from `run_code` still arrives here as `pwsh`/`bash`.
+- insert:
+    - id: barricade-guard
+      name: dsh-barricade-guard
+      config:
+        toolNames: [pwsh, bash]

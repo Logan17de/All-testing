@@ -1,0 +1,17 @@
+{
+  "name": "dsh-barricade-guard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 0.1.1-rc.2 adapter mounting dsh-barricade's rule engine through ctx.tools.guard().",
+  "main": "plugin.js",
+  "license": "MIT",
+  "peerDependencies": {
+    "dsh-barricade": "*"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

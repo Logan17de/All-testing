@@ -263,6 +263,29 @@ supervisor-qwen
 
 This means the parent can be a subscription-backed Codex or Claude model while Qwen remains the delegated builder.
 
+## Agent Team workflow (optional)
+
+`agent-team/` adds the same supervisor/worker idea as a real team instead of a
+single session: an **Engineering Leader** and a **Qwen Coder** that are
+independent root sessions sharing one Workspace, each with its own model,
+context and permissions. The Leader delegates, then inspects the Workspace and
+verifies before accepting.
+
+```powershell
+cd agent-team
+.\Install-AgentTeam-Windows.ps1 -Workspace "<PROJECT_PATH>"
+```
+
+It also installs the plugin market, a file explorer with source control, and
+session deletion (DSH ships `archiveSession` but no delete).
+
+`supervisor-qwen` is **not** replaced. It remains the only one of the two that
+works without Agent Team installed, so it stays as the fallback. See
+[agent-team/README.md](agent-team/README.md).
+
+> The installer runs `Repair-DshTools-Windows.ps1` **after** installing plugins,
+> because plugin installs are what reintroduce the duplicate `dsh-tools` copy.
+
 ## Qwen configuration
 
 The generated provider uses:

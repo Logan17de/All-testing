@@ -1,0 +1,48 @@
+{
+  "comment": [
+    "Declarative Agent Team provisioning spec.",
+    "Applied idempotently through the plugin's public /agent-team/api contract.",
+    "",
+    "The Engineering Leader deliberately declares no provider/model: the Leader",
+    "must not be hardcoded to one vendor. Supply it at provision time, e.g.",
+    "  --set engineering-leader.provider=codex --set engineering-leader.model=gpt-5.6-sol",
+    "Any model configured in Harness Settings -> Models is valid.",
+    "",
+    "No credentials appear here. Providers and their keys stay in Harness."
+  ],
+  "assistants": [
+    {
+      "key": "engineering-leader",
+      "name": "Engineering Leader",
+      "description": "Supervising architect: plans, decomposes, delegates implementation, and independently verifies before accepting.",
+      "icon": "compass",
+      "instructionsFile": "instructions/engineering-leader.md",
+      "agentPresetId": "standard",
+      "permissionPresetId": "workspace-write",
+      "skillAllowlist": [],
+      "mcpServers": []
+    },
+    {
+      "key": "qwen-coder",
+      "name": "Qwen Coder",
+      "description": "Primary implementation worker: edits the shared Workspace and runs verification.",
+      "icon": "code",
+      "provider": "qwen",
+      "model": "qwen3.8-27b",
+      "instructionsFile": "instructions/qwen-coder.md",
+      "agentPresetId": "standard",
+      "permissionPresetId": "workspace-write",
+      "skillAllowlist": [],
+      "mcpServers": []
+    }
+  ],
+  "teams": [
+    {
+      "key": "ai-coding-team",
+      "name": "AI Coding Team",
+      "leader": "engineering-leader",
+      "members": ["engineering-leader", "qwen-coder"],
+      "directMemberChat": true
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "dsh-agent-team-provision",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Declarative provisioner for Agent Team assistants and teams, driven through the plugin's public /agent-team/api contract.",
+  "bin": { "dsh-team-provision": "./src/provision.js" },
+  "scripts": {
+    "provision": "node src/provision.js",
+    "smoke": "node src/smoke.js",
+    "test": "node --test test/"
+  },
+  "engines": { "node": ">=22.19.0" }
+}
