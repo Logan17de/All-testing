@@ -41,6 +41,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import qwen3_8_27b_supabase_colab_fast as fast
@@ -48,13 +50,14 @@ import qwen3_8_27b_supabase_colab_fast_nightly as nightly
 
 base = fast.base
 
-PROFILE_ID = "a100-fp8-mtp3-vlm-single-user-nightly-colab-v4"
+PROFILE_ID = "a100-fp8-mtp3-vlm-single-user-nightly-colab-v5"
 MM_LIMITS = {"image": 2, "video": 0}
 KV_CACHE_MEMORY_BYTES = os.environ.get("QWEN_KV_CACHE_MEMORY_BYTES", "12G")
 MULTIMODAL_MAX_BATCHED_TOKENS = int(
     os.environ.get("QWEN_MAX_NUM_BATCHED_TOKENS", "8192")
 )
 MULTIMODAL_COMPILATION_CONFIG = {"cudagraph_mode": "FULL_DECODE_ONLY"}
+JOB_TIMER_INTERVAL_SECONDS = max(1.0, float(os.environ.get("QWEN_JOB_TIMER_INTERVAL", "5")))
 
 
 def _installed_version(distribution: str) -> str | None:
@@ -332,6 +335,56 @@ def _verify_multimodal_server(api_key: str) -> None:
     print(f"      Image input smoke test: OK ✅ | {preview}", flush=True)
 
 
+def _format_elapsed(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _install_job_timing() -> None:
+    """Add live elapsed-time visibility around each relay job without changing I/O."""
+    worker_cls = base.QwenRelayWorker
+    if getattr(worker_cls, "_qwen_live_job_timing", False):
+        return
+
+    original_process = worker_cls.process
+
+    def timed_process(self, job):
+        job_id = str(job.get("id", "unknown"))
+        started = time.monotonic()
+        stop = threading.Event()
+
+        print(f"      [00:00] Job {job_id} | processing started", flush=True)
+
+        def report() -> None:
+            while not stop.wait(JOB_TIMER_INTERVAL_SECONDS):
+                elapsed = _format_elapsed(time.monotonic() - started)
+                print(
+                    f"      [{elapsed}] Job {job_id} | {base.gpu_memory_status()} | working...",
+                    flush=True,
+                )
+
+        reporter = threading.Thread(
+            target=report,
+            name=f"qwen-job-timer-{job_id[:8]}",
+            daemon=True,
+        )
+        reporter.start()
+        try:
+            return original_process(self, job)
+        finally:
+            stop.set()
+            reporter.join(timeout=1.0)
+            elapsed = _format_elapsed(time.monotonic() - started)
+            print(f"      [{elapsed}] Job {job_id} | processing returned ✅", flush=True)
+
+    worker_cls.process = timed_process
+    worker_cls._qwen_live_job_timing = True
+
+
 def apply_overrides() -> None:
     """Apply nightly VLM settings plus the bounded single-user memory profile."""
     nightly._install_overrides()
@@ -343,6 +396,7 @@ def apply_overrides() -> None:
     # Keep summary/benchmark metadata aligned with the actual launch profile.
     fast.MAX_NUM_BATCHED_TOKENS = MULTIMODAL_MAX_BATCHED_TOKENS
     fast.COMPILATION_CONFIG = MULTIMODAL_COMPILATION_CONFIG
+    _install_job_timing()
 
     # fast.main() calls this after the local server is ready but BEFORE creating
     # the relay worker. Making the image smoke test part of this hook means a
@@ -360,6 +414,7 @@ def apply_overrides() -> None:
         print(f"      CUDA graph mode    : {MULTIMODAL_COMPILATION_CONFIG['cudagraph_mode']}")
         print(f"      multimodal input   : images enabled (up to {MM_LIMITS['image']} per request) ✅")
         print("      video input        : disabled")
+        print(f"      live job timer     : every {JOB_TIMER_INTERVAL_SECONDS:g}s ✅")
 
     fast._runtime_summary_from_log = _summary_and_vision_check
 
