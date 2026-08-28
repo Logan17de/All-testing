@@ -10,7 +10,8 @@ Security model:
 
 The RPC wrapper retries short-lived transport failures and recreates the
 Supabase client before retrying. This prevents a single "Server disconnected"
-error from killing an otherwise healthy inference job.
+or transient Cloudflare/Supabase gateway error from killing an otherwise
+healthy inference job.
 """
 
 from __future__ import annotations
@@ -38,8 +39,8 @@ DEFAULT_ORACLE_WAKE_REPO = "Logan17de/Growing-Trader"
 DEFAULT_ORACLE_WAKE_WORKFLOW = "oracle-wake.yml"
 DEFAULT_ORACLE_WAKE_REF = "main"
 
-RPC_MAX_ATTEMPTS = max(1, int(os.environ.get("QWEN_RELAY_RPC_ATTEMPTS", "4")))
-RPC_BACKOFF_SECONDS = max(0.05, float(os.environ.get("QWEN_RELAY_RPC_BACKOFF_SECONDS", "0.25")))
+RPC_MAX_ATTEMPTS = max(1, int(os.environ.get("QWEN_RELAY_RPC_ATTEMPTS", "6")))
+RPC_BACKOFF_SECONDS = max(0.05, float(os.environ.get("QWEN_RELAY_RPC_BACKOFF_SECONDS", "0.35")))
 
 _TRANSIENT_MARKERS = (
     "server disconnected",
@@ -58,6 +59,12 @@ _TRANSIENT_MARKERS = (
     "http 502",
     "http 503",
     "http 504",
+    "http 520",
+    "error code 520",
+    "'code': 520",
+    '"code": 520',
+    "gateway.supabase.co",
+    "web server is returning an unknown error",
 )
 
 
@@ -90,6 +97,13 @@ def _decode_payload(encoded: str) -> dict[str, Any]:
 def _transient_error(exc: Exception) -> bool:
     text = f"{type(exc).__name__}: {exc}".lower()
     return any(marker in text for marker in _TRANSIENT_MARKERS)
+
+
+def _compact_error(exc: Exception, limit: int = 320) -> str:
+    text = " ".join(f"{type(exc).__name__}: {exc}".split())
+    if "error code 520" in text.lower() or "gateway.supabase.co" in text.lower():
+        return "Supabase/Cloudflare gateway HTTP 520 (temporary upstream error)"
+    return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
 def oracle_gateway_online(timeout_seconds: float = 4.0) -> bool:
@@ -235,13 +249,19 @@ class RelayStore:
                 return self.sb.rpc(name, params).execute()
             except Exception as exc:
                 last_error = exc
-                if attempt + 1 >= max_attempts or not _transient_error(exc):
+                transient = _transient_error(exc)
+                if attempt + 1 >= max_attempts or not transient:
+                    if transient:
+                        raise RelayError(
+                            f"Transient Supabase RPC failure after {max_attempts} attempts: "
+                            f"{_compact_error(exc)}"
+                        ) from exc
                     raise
                 self._reset_client()
-                delay = min(RPC_BACKOFF_SECONDS * (2**attempt), 2.0)
+                delay = min(RPC_BACKOFF_SECONDS * (2**attempt), 4.0)
                 time.sleep(delay)
         assert last_error is not None
-        raise last_error
+        raise RelayError(_compact_error(last_error)) from last_error
 
     @classmethod
     def from_env(cls) -> "RelayStore":
@@ -261,7 +281,7 @@ class RelayStore:
         except Exception as exc:
             raise RelayError(
                 "Growing-Trader Qwen relay preflight failed. Check QWEN_RELAY_SECRET. "
-                f"Original error: {exc}"
+                f"Original error: {_compact_error(exc)}"
             ) from exc
 
     def create_job(self, payload: dict[str, Any], affinity_key: str | None = None) -> dict[str, Any]:
@@ -293,7 +313,7 @@ class RelayStore:
                 raise RelayError(f"{rpc_name} returned no row")
             return rows[0]
         except Exception as exc:
-            raise RelayError(f"Failed to enqueue Qwen job: {exc}") from exc
+            raise RelayError(f"Failed to enqueue Qwen job: {_compact_error(exc)}") from exc
 
     def claim_job(self, worker_id: str) -> dict[str, Any] | None:
         try:
@@ -304,7 +324,7 @@ class RelayStore:
             rows = _result_data(result) or []
             return rows[0] if rows else None
         except Exception as exc:
-            raise RelayError(f"Failed to claim Qwen relay job: {exc}") from exc
+            raise RelayError(f"Failed to claim Qwen relay job: {_compact_error(exc)}") from exc
 
     def decode_job_payload(self, job: dict[str, Any]) -> dict[str, Any]:
         encoded = job.get("request_payload")
