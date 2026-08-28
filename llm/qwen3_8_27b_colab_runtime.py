@@ -14,6 +14,14 @@ This runtime deliberately uses the full Qwen3.8 VLM instead of vLLM's
 travel unchanged through Harness -> Supabase -> Colab -> vLLM. A real in-memory
 PNG request is executed before the worker is exposed as ready.
 
+The worker is single-user and advertises a 262,144-token context. vLLM's default
+``gpu_memory_utilization`` policy would otherwise consume nearly all remaining
+VRAM for KV blocks (the previous text-only profile exposed ~1.17M tokens of KV
+capacity / 4.45x 262K concurrency). This profile instead gives FP8 KV an explicit
+12 GiB budget, keeps only decode CUDA graphs, and uses an 8K chunked-prefill cap.
+That preserves one full 262K context with substantial KV slack while reserving
+VRAM for the vision encoder and image activations.
+
 vLLM nightly wheels do not always use a monotonically increasing public release
 number. A dev wheel can contain the required Qwen3.5/Qwen3.8 VLM + MTP
 implementation while still reporting a base version below a later stable
@@ -28,6 +36,7 @@ import base64
 import importlib.metadata as metadata
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -39,8 +48,13 @@ import qwen3_8_27b_supabase_colab_fast_nightly as nightly
 
 base = fast.base
 
-PROFILE_ID = "a100-fp8-mtp3-vlm-single-user-nightly-colab-v3"
-MM_LIMITS = {"image": 8, "video": 0}
+PROFILE_ID = "a100-fp8-mtp3-vlm-single-user-nightly-colab-v4"
+MM_LIMITS = {"image": 2, "video": 0}
+KV_CACHE_MEMORY_BYTES = os.environ.get("QWEN_KV_CACHE_MEMORY_BYTES", "12G")
+MULTIMODAL_MAX_BATCHED_TOKENS = int(
+    os.environ.get("QWEN_MAX_NUM_BATCHED_TOKENS", "8192")
+)
+MULTIMODAL_COMPILATION_CONFIG = {"cudagraph_mode": "FULL_DECODE_ONLY"}
 
 
 def _installed_version(distribution: str) -> str | None:
@@ -175,8 +189,8 @@ def _start_multimodal_vllm(
     max_model_len: int,
     model_id: str,
 ) -> subprocess.Popen:
-    """Start Qwen3.8-27B as a full VLM while retaining the optimized text path."""
-    print("\n[4/7] Starting multimodal MTP-compatible private vLLM API...", flush=True)
+    """Start the full VLM with a bounded single-user 262K memory profile."""
+    print("\n[4/7] Starting memory-bounded multimodal private vLLM API...", flush=True)
     base.LOG_ROOT.mkdir(parents=True, exist_ok=True)
     log_handle = (base.LOG_ROOT / "vllm.log").open("w")
 
@@ -196,14 +210,17 @@ def _start_multimodal_vllm(
         str(base.PORT),
         "--api-key",
         api_key,
-        "--gpu-memory-utilization",
-        fast.GPU_MEMORY_UTILIZATION,
+        # Explicit KV budget is intentional. When present vLLM ignores
+        # gpu_memory_utilization for KV sizing, preventing the old 4.45x-context
+        # over-allocation from consuming VRAM needed by the vision encoder.
+        "--kv-cache-memory-bytes",
+        KV_CACHE_MEMORY_BYTES,
         "--max-model-len",
         str(max_model_len),
         "--max-num-seqs",
         str(fast.MAX_NUM_SEQS),
         "--max-num-batched-tokens",
-        str(fast.MAX_NUM_BATCHED_TOKENS),
+        str(MULTIMODAL_MAX_BATCHED_TOKENS),
         "--kv-cache-dtype",
         fast.KV_CACHE_DTYPE,
         "--enable-chunked-prefill",
@@ -217,14 +234,14 @@ def _start_multimodal_vllm(
         "--linear-backend",
         nightly.LINEAR_BACKEND,
         "--compilation-config",
-        json.dumps(fast.COMPILATION_CONFIG, separators=(",", ":")),
+        json.dumps(MULTIMODAL_COMPILATION_CONFIG, separators=(",", ":")),
         "--enable-auto-tool-choice",
         "--tool-call-parser",
         "qwen3_coder",
         "--reasoning-parser",
         "qwen3",
-        # IMPORTANT: do not pass --language-model-only. vLLM documents that
-        # flag as disabling every multimodal input. Keep the vision tower loaded.
+        # IMPORTANT: do not pass --language-model-only. That flag disables
+        # every multimodal input. Keep the vision tower loaded.
         "--limit-mm-per-prompt",
         json.dumps(MM_LIMITS, separators=(",", ":")),
     ]
@@ -246,15 +263,15 @@ def _start_multimodal_vllm(
         "model_id": model_id,
         "max_model_len": max_model_len,
         "kv_cache_dtype": fast.KV_CACHE_DTYPE,
+        "kv_cache_memory_bytes": KV_CACHE_MEMORY_BYTES,
         "optimization_profile": PROFILE_ID,
         "mtp_tokens": fast.MTP_TOKENS,
         "attention_backend": fast.ATTENTION_BACKEND,
         "linear_backend": nightly.LINEAR_BACKEND,
         "vllm_version": base.VLLM_VERSION,
         "max_num_seqs": fast.MAX_NUM_SEQS,
-        "max_num_batched_tokens": fast.MAX_NUM_BATCHED_TOKENS,
-        "gpu_memory_utilization": fast.GPU_MEMORY_UTILIZATION,
-        "compilation_config": fast.COMPILATION_CONFIG,
+        "max_num_batched_tokens": MULTIMODAL_MAX_BATCHED_TOKENS,
+        "compilation_config": MULTIMODAL_COMPILATION_CONFIG,
         "multimodal_enabled": True,
         "mm_limits": MM_LIMITS,
     }))
@@ -316,12 +333,16 @@ def _verify_multimodal_server(api_key: str) -> None:
 
 
 def apply_overrides() -> None:
-    """Apply nightly inference settings and replace text-only serve with full VLM serve."""
+    """Apply nightly VLM settings plus the bounded single-user memory profile."""
     nightly._install_overrides()
     nightly.PROFILE_ID = PROFILE_ID
     fast.PROFILE_ID = PROFILE_ID
     fast.install_dependencies = _runtime_already_prepared
     fast.start_vllm = _start_multimodal_vllm
+
+    # Keep summary/benchmark metadata aligned with the actual launch profile.
+    fast.MAX_NUM_BATCHED_TOKENS = MULTIMODAL_MAX_BATCHED_TOKENS
+    fast.COMPILATION_CONFIG = MULTIMODAL_COMPILATION_CONFIG
 
     # fast.main() calls this after the local server is ready but BEFORE creating
     # the relay worker. Making the image smoke test part of this hook means a
@@ -334,6 +355,9 @@ def apply_overrides() -> None:
         if state is None or not state.get("multimodal_enabled"):
             raise RuntimeError("Multimodal vLLM server state is missing")
         _verify_multimodal_server(str(state["api_key"]))
+        print(f"      explicit FP8 KV    : {KV_CACHE_MEMORY_BYTES} (single 262K target)")
+        print(f"      prefill token cap  : {MULTIMODAL_MAX_BATCHED_TOKENS:,}")
+        print(f"      CUDA graph mode    : {MULTIMODAL_COMPILATION_CONFIG['cudagraph_mode']}")
         print(f"      multimodal input   : images enabled (up to {MM_LIMITS['image']} per request) ✅")
         print("      video input        : disabled")
 
