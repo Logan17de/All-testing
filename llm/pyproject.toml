@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "all-testing-llm"
-version = "0.4.0"
+version = "0.4.1"
 description = "Colab-first LLM workers, local Harness bridges, and heterogeneous MoE experiments"
 requires-python = ">=3.10"
 dependencies = [
@@ -28,6 +28,7 @@ test = ["pytest>=8.0"]
 qwen-harness-bridge = "qwen_harness_bridge:main"
 qwen-relay-test-worker = "qwen_supabase_test_worker:main"
 qwen38-flash-ft = "qwen38_flash_freetoken.cli:main"
+qwen38-flash-harness = "qwen3_8_flash_colab_runtime:main"
 
 [tool.setuptools]
 py-modules = [
@@ -37,6 +38,7 @@ py-modules = [
   "qwen3_8_27b_supabase_colab_fast_nightly",
   "qwen3_8_27b_colab_runtime",
   "qwen3_8_27b_supabase_colab_oom_smoke",
+  "qwen3_8_flash_colab_runtime",
   "qwen_supabase_relay",
   "qwen_supabase_test_worker",
   "qwen_harness_bridge",
