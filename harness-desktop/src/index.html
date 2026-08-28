@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Harness Desktop</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">H</div>
+        <div><strong>Harness</strong><span>Desktop</span></div>
+      </div>
+      <nav>
+        <button class="nav active" data-page="dashboard">Overview</button>
+        <button class="nav" data-page="harness">Harness</button>
+        <button class="nav" data-page="plugins">Plugins</button>
+        <button class="nav" data-page="api">API Check</button>
+        <button class="nav" data-page="settings">Settings</button>
+        <button class="nav" data-page="logs">Logs</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText">Checking…</span>
+      </div>
+    </aside>
+
+    <main class="content">
+      <section id="dashboard" class="page active">
+        <div class="page-title"><div><h1>Overview</h1><p>Desktop Harness runtime and recovery controls.</p></div></div>
+        <div id="safeModeBanner" class="banner warning hidden"><strong>Safe Mode</strong><span>Harness was not auto-started. Fix or rollback plugins, then start it manually.</span></div>
+        <div class="cards">
+          <article class="card"><span class="eyebrow">Harness</span><strong id="healthCard">Checking…</strong><small id="runtimeUrl">127.0.0.1:3080</small></article>
+          <article class="card"><span class="eyebrow">DSH</span><strong id="dshVersion">—</strong><small>Bundled with the desktop app</small></article>
+          <article class="card"><span class="eyebrow">Workspace</span><strong id="workspaceCard">—</strong><small>Current project root</small></article>
+        </div>
+        <div class="panel actions-panel">
+          <h2>Runtime controls</h2>
+          <div class="row">
+            <button id="startHarness" class="primary">Start Harness</button>
+            <button id="restartHarness">Restart Harness</button>
+            <button id="openHarness" data-page-target="harness">Open Harness</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Plugin safety loop</h2>
+          <div class="flow"><span>Receive</span><b>→</b><span>Validate</span><b>→</b><span>Build</span><b>→</b><span>Snapshot</span><b>→</b><span>Activate</span><b>→</b><span>Health check</span><b>→</b><span>Restart</span></div>
+        </div>
+      </section>
+
+      <section id="harness" class="page harness-page">
+        <div class="page-title compact"><div><h1>Harness</h1><p>The local Harness UI is embedded here.</p></div><button id="refreshHarness">Refresh</button></div>
+        <div id="webviewFallback" class="center-state">Waiting for Harness…</div>
+        <webview id="harnessView" src="http://127.0.0.1:3080" partition="persist:harness" webpreferences="contextIsolation=yes,nodeIntegration=no"></webview>
+      </section>
+
+      <section id="plugins" class="page">
+        <div class="page-title"><div><h1>Plugins</h1><p>Stage, verify, activate, disable, or roll back without touching a known-good profile first.</p></div><button id="receivePlugin" class="primary">Receive plugin .zip</button></div>
+        <div id="pluginCandidate" class="panel hidden"></div>
+        <div class="split">
+          <div class="panel"><div class="panel-heading"><h2>Installed</h2><button id="refreshPlugins" class="quiet">Refresh</button></div><div id="installedPlugins" class="list empty">No tracked plugins yet.</div></div>
+          <div class="panel"><div class="panel-heading"><h2>Rollback</h2><button id="rollbackPlugin" class="danger">Rollback previous change</button></div><div id="pluginHistory" class="list empty">No restore points yet.</div></div>
+        </div>
+      </section>
+
+      <section id="api" class="page">
+        <div class="page-title"><div><h1>API Check</h1><p>Test an OpenAI-compatible model endpoint before using it in Harness.</p></div></div>
+        <div class="panel form-panel">
+          <label>API base URL<input id="apiBaseUrl" value="https://api.deepseek.com" placeholder="https://provider.example/v1" /></label>
+          <label>API key<input id="apiKey" type="password" placeholder="Used only for this check" /></label>
+          <div class="row"><button id="testApi" class="primary">Test connection</button><span id="apiResult" class="muted"></span></div>
+        </div>
+      </section>
+
+      <section id="settings" class="page">
+        <div class="page-title"><div><h1>Settings</h1><p>Keep v1 intentionally small: workspace and runtime information only.</p></div></div>
+        <div class="panel form-panel">
+          <label>Workspace<div class="input-row"><input id="workspaceInput" readonly /><button id="chooseWorkspace">Choose folder</button></div></label>
+          <label>Harness data root<input id="dshHomeInput" readonly /></label>
+          <label>Language<input value="English" readonly /></label>
+        </div>
+      </section>
+
+      <section id="logs" class="page">
+        <div class="page-title"><div><h1>Logs</h1><p>App, plugin build, and Harness startup output.</p></div><button id="clearLogView">Clear view</button></div>
+        <pre id="logOutput" class="log-output"></pre>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="renderer.js"></script>
+</body>
+</html>
