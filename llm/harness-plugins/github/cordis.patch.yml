@@ -1,0 +1,3 @@
+- insert:
+    - id: llm-harness-github
+      name: '@logan17de/dsh-plugin-github'

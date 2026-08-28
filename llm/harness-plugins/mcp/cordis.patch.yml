@@ -1,0 +1,22 @@
+- insert:
+    - id: llm-harness-mcp-stdio
+      name: '@deepseek-ai/dsh-mcp-client'
+      disabled: !!js (process.env.DSH_MCP_TRANSPORT ?? 'stdio') !== 'stdio'
+      config:
+        serverName: !!js process.env.DSH_MCP_SERVER_NAME ?? 'memory'
+        transport: stdio
+        command: !!js process.env.DSH_MCP_COMMAND ?? 'npx'
+        args: !!js JSON.parse(process.env.DSH_MCP_ARGS_JSON ?? '["-y","@modelcontextprotocol/server-memory@2026.7.4"]')
+        env: !!js JSON.parse(process.env.DSH_MCP_ENV_JSON ?? '{}')
+        cwd: !!js process.env.DSH_MCP_CWD || process.cwd()
+        failOnStartupError: !!js process.env.DSH_MCP_FAIL_ON_STARTUP === '1'
+
+    - id: llm-harness-mcp-http
+      name: '@deepseek-ai/dsh-mcp-client'
+      disabled: !!js process.env.DSH_MCP_TRANSPORT !== 'streamable-http'
+      config:
+        serverName: !!js process.env.DSH_MCP_SERVER_NAME ?? 'remote'
+        transport: streamable-http
+        url: !!js process.env.DSH_MCP_URL ?? 'http://localhost:3000/mcp'
+        headers: !!js process.env.DSH_MCP_TOKEN ? ({ Authorization: `Bearer ${process.env.DSH_MCP_TOKEN}` }) : {}
+        failOnStartupError: !!js process.env.DSH_MCP_FAIL_ON_STARTUP === '1'

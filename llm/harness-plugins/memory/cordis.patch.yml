@@ -1,0 +1,3 @@
+- insert:
+    - id: llm-harness-memory
+      name: '@logan17de/dsh-plugin-memory'

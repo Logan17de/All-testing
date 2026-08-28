@@ -1,0 +1,12 @@
+{
+  "name": "@logan17de/dsh-plugin-google-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "files": ["index.js", "cordis.patch.yml", "README.md"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "*"
+  }
+}

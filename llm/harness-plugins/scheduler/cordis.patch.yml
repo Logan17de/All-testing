@@ -1,0 +1,3 @@
+- insert:
+    - id: llm-harness-scheduler
+      name: '@deepseek-ai/dsh-schedule'

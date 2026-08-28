@@ -1,0 +1,3 @@
+- insert:
+    - id: llm-harness-deep-search
+      name: '@logan17de/dsh-plugin-deep-search'

@@ -1,0 +1,3 @@
+- insert:
+    - id: llm-harness-google-workspace
+      name: '@logan17de/dsh-plugin-google-workspace'
