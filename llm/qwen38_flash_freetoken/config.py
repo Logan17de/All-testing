@@ -25,7 +25,10 @@ class RuntimeConfig:
 
     min_gpu_gib: float = 75.0
     min_host_gib: float = 128.0
-    min_disk_free_gib: float = 190.0
+    # Official FP8 repo is ~185.5 GB (~173 GiB). 185 GiB free leaves ~12 GiB
+    # above checkpoint payload for HF/Xet metadata/cache overhead without rejecting
+    # the current Colab G4 disk (~188 GiB free after the runtime install).
+    min_disk_free_gib: float = 185.0
     gpu_memory_ratio: float = 0.92
     expert_cache_gib: float = 42.0
     cache_format: str = "bf16"
