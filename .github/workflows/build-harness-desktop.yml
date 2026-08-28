@@ -16,6 +16,8 @@ jobs:
   windows-x64:
     runs-on: windows-latest
     timeout-minutes: 35
+    env:
+      PNPM_CONFIG_AUTO_INSTALL_PEERS: 'true'
     defaults:
       run:
         working-directory: harness-desktop
@@ -29,14 +31,17 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Set up pnpm
+        run: npm install --global pnpm@11.24.0 --no-audit --no-fund
+
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: pnpm install --no-frozen-lockfile
 
       - name: Test plugin validator
-        run: npm test
+        run: pnpm test
 
       - name: Build Windows installer
-        run: npm run dist
+        run: pnpm run dist
 
       - name: Create SHA256
         shell: pwsh
