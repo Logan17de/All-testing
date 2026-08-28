@@ -4,12 +4,19 @@ const path = require('node:path');
 const AdmZip = require('adm-zip');
 const { validatePluginDirectory } = require('./plugin-validator');
 
+const MAX_ARCHIVE_ENTRIES = 5000;
+const MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
+
 function readJson(file, fallback) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
     return fallback;
   }
+}
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 function copyTree(source, destination, filter = () => true) {
@@ -65,10 +72,18 @@ class PluginManager {
     fs.mkdirSync(extractDir, { recursive: true });
 
     const zip = new AdmZip(zipPath);
-    for (const entry of zip.getEntries()) {
+    const entries = zip.getEntries();
+    if (entries.length > MAX_ARCHIVE_ENTRIES) throw new Error('Plugin archive contains too many files.');
+
+    let uncompressedBytes = 0;
+    for (const entry of entries) {
       const normalized = entry.entryName.replace(/\\/g, '/');
       if (normalized.startsWith('/') || normalized.split('/').includes('..')) {
         throw new Error(`Unsafe archive path: ${entry.entryName}`);
+      }
+      uncompressedBytes += Number(entry.header?.size || 0);
+      if (uncompressedBytes > MAX_UNCOMPRESSED_BYTES) {
+        throw new Error('Plugin archive expands beyond the 512 MiB safety limit.');
       }
     }
     zip.extractAllTo(extractDir, true);
@@ -164,6 +179,12 @@ class PluginManager {
     if (!started.ok) throw new Error('Harness did not become healthy after rollback.');
   }
 
+  async rollbackFailedChange(snapshotPath) {
+    await this.restoreSnapshot(snapshotPath);
+    this.state.history.pop();
+    this.save();
+  }
+
   async activate(candidateId) {
     const candidate = this.state.candidates[candidateId];
     if (!candidate || candidate.status !== 'ready') throw new Error('Plugin candidate is not ready.');
@@ -175,6 +196,7 @@ class PluginManager {
       version: candidate.version,
       snapshotPath: snapshot.snapshotPath,
       createdAt: snapshot.createdAt,
+      installedBefore: clone(this.state.installed),
     });
     this.save();
 
@@ -184,19 +206,19 @@ class PluginManager {
       { cwd: this.getWorkspace() },
     );
     if (add.code !== 0) {
-      await this.restoreSnapshot(snapshot.snapshotPath);
+      await this.rollbackFailedChange(snapshot.snapshotPath);
       throw new Error(`Plugin activation failed and was rolled back.\n${add.stderr || add.stdout}`);
     }
 
     const dump = await this.runtime.runDsh(['--profile', 'web', '--dump-config'], { cwd: this.getWorkspace() });
     if (dump.code !== 0 || !dump.stdout.includes(candidate.name)) {
-      await this.restoreSnapshot(snapshot.snapshotPath);
+      await this.rollbackFailedChange(snapshot.snapshotPath);
       throw new Error('Plugin did not appear in the composed Harness config. Previous profile was restored.');
     }
 
     const started = await this.runtime.start(this.getWorkspace());
     if (!started.ok) {
-      await this.restoreSnapshot(snapshot.snapshotPath);
+      await this.rollbackFailedChange(snapshot.snapshotPath);
       throw new Error('Harness failed its post-install health check. Previous profile was restored.');
     }
 
@@ -214,19 +236,25 @@ class PluginManager {
   async disable(name) {
     if (!this.state.installed[name]) throw new Error('Plugin is not tracked as installed.');
     const snapshot = this.snapshotProfile(`Before disabling ${name}`);
-    this.state.history.push({ type: 'disable', plugin: name, snapshotPath: snapshot.snapshotPath, createdAt: snapshot.createdAt });
+    this.state.history.push({
+      type: 'disable',
+      plugin: name,
+      snapshotPath: snapshot.snapshotPath,
+      createdAt: snapshot.createdAt,
+      installedBefore: clone(this.state.installed),
+    });
     this.save();
 
     await this.runtime.stop();
     const remove = await this.runtime.runDsh(['plugin', '--profile', 'web', 'remove', name], { cwd: this.getWorkspace() });
     if (remove.code !== 0) {
-      await this.restoreSnapshot(snapshot.snapshotPath);
+      await this.rollbackFailedChange(snapshot.snapshotPath);
       throw new Error(`Plugin disable failed and was rolled back.\n${remove.stderr || remove.stdout}`);
     }
 
     const started = await this.runtime.start(this.getWorkspace());
     if (!started.ok) {
-      await this.restoreSnapshot(snapshot.snapshotPath);
+      await this.rollbackFailedChange(snapshot.snapshotPath);
       throw new Error('Harness failed after disabling plugin. Previous profile was restored.');
     }
     delete this.state.installed[name];
@@ -239,7 +267,7 @@ class PluginManager {
     if (!previous) throw new Error('No rollback point is available yet.');
     await this.restoreSnapshot(previous.snapshotPath);
     this.state.history.pop();
-    this.state.installed = {};
+    this.state.installed = clone(previous.installedBefore || {});
     this.save();
     return { ok: true, restored: previous };
   }
