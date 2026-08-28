@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "all-testing-llm"
-version = "0.3.3"
-description = "Colab-first LLM workers and local Harness bridges"
+version = "0.4.0"
+description = "Colab-first LLM workers, local Harness bridges, and heterogeneous MoE experiments"
 requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.115",
@@ -14,9 +14,20 @@ dependencies = [
   "supabase>=2.15",
 ]
 
+[project.optional-dependencies]
+qwen38-flash-freetoken = [
+  "accelerate>=1.10",
+  "huggingface_hub[hf_xet]>=0.34",
+  "safetensors>=0.5",
+  "psutil>=5.9",
+  "requests>=2.32",
+]
+test = ["pytest>=8.0"]
+
 [project.scripts]
 qwen-harness-bridge = "qwen_harness_bridge:main"
 qwen-relay-test-worker = "qwen_supabase_test_worker:main"
+qwen38-flash-ft = "qwen38_flash_freetoken.cli:main"
 
 [tool.setuptools]
 py-modules = [
@@ -30,3 +41,7 @@ py-modules = [
   "qwen_supabase_test_worker",
   "qwen_harness_bridge",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["qwen38_flash_freetoken*"]
