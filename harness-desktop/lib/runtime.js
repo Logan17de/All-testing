@@ -22,14 +22,31 @@ class HarnessRuntime {
     const pnpmManifest = JSON.parse(fs.readFileSync(path.join(this.pnpmPackageRoot, 'package.json'), 'utf8'));
     const pnpmBin = typeof pnpmManifest.bin === 'string' ? pnpmManifest.bin : pnpmManifest.bin?.pnpm;
     this.pnpmCli = path.join(this.pnpmPackageRoot, pnpmBin);
+    this.shimDir = path.join(os.tmpdir(), 'harness-desktop-runtime-bin');
+    this.ensureRuntimeShims();
+  }
+
+  ensureRuntimeShims() {
+    fs.mkdirSync(this.shimDir, { recursive: true });
+    if (process.platform === 'win32') {
+      fs.writeFileSync(
+        path.join(this.shimDir, 'pnpm.cmd'),
+        '@echo off\r\n"%HARNESS_DESKTOP_NODE%" "%HARNESS_DESKTOP_PNPM%" %*\r\n',
+      );
+    } else {
+      const shim = path.join(this.shimDir, 'pnpm');
+      fs.writeFileSync(shim, '#!/bin/sh\nexec "$HARNESS_DESKTOP_NODE" "$HARNESS_DESKTOP_PNPM" "$@"\n');
+      fs.chmodSync(shim, 0o755);
+    }
   }
 
   nodeEnv() {
-    const appBin = path.join(this.appRoot, 'node_modules', '.bin');
     return {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
-      PATH: `${appBin}${path.delimiter}${process.env.PATH || ''}`,
+      HARNESS_DESKTOP_NODE: process.execPath,
+      HARNESS_DESKTOP_PNPM: this.pnpmCli,
+      PATH: `${this.shimDir}${path.delimiter}${process.env.PATH || ''}`,
     };
   }
 
