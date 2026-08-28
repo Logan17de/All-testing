@@ -29,7 +29,6 @@ qwen-harness-bridge = "qwen_harness_bridge:main"
 qwen-relay-test-worker = "qwen_supabase_test_worker:main"
 qwen38-flash-ft = "qwen38_flash_freetoken.cli:main"
 qwen38-flash-harness = "qwen3_8_flash_colab_runtime:main"
-qwen38-flash-oom-smoke = "qwen3_8_flash_supabase_colab_oom_smoke:main"
 
 [tool.setuptools]
 py-modules = [

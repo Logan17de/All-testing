@@ -88,12 +88,21 @@ def validate_colab_target(cfg: RuntimeConfig, strict: bool = True) -> list[str]:
     if r.gpu_vram_gib is not None and r.gpu_vram_gib < cfg.min_gpu_gib:
         problems.append(f"GPU VRAM {r.gpu_vram_gib:.1f} GiB < target {cfg.min_gpu_gib:.1f} GiB")
     if r.host_ram_gib < cfg.min_host_gib:
-        problems.append(f"Host RAM {r.host_ram_gib:.1f} GiB < target {cfg.min_host_gib:.1f} GiB")
+        problems.append(f"Host RAM {r.host_ram_gib:.1f} GiB < minimum {cfg.min_host_gib:.1f} GiB")
     if r.disk_free_gib < cfg.min_disk_free_gib:
         problems.append(
             f"Free disk at {r.disk_path} {r.disk_free_gib:.1f} GiB < target {cfg.min_disk_free_gib:.1f} GiB "
             "(official FP8 checkpoint is about 185.5 GB / 173 GiB before cache overhead)"
         )
+
+    if cfg.adaptive_expert_placement and r.gpu_vram_gib is not None:
+        from .planner import build_hybrid_placement_plan
+        plan = build_hybrid_placement_plan(
+            cfg, host_ram_gib=r.host_ram_gib, gpu_vram_gib=r.gpu_vram_gib
+        )
+        if not plan.feasible:
+            problems.append("adaptive expert placement infeasible: " + plan.reason)
+
     if strict and problems:
         raise RuntimeError("; ".join(problems))
     return problems
@@ -108,7 +117,6 @@ def benchmark_h2d_gbps(size_mib: int = 256, repeats: int = 12, pinned: bool = Tr
     src = torch.empty(n, dtype=torch.uint8, pin_memory=pinned)
     dst = torch.empty(n, dtype=torch.uint8, device="cuda")
     stream = torch.cuda.Stream()
-    # Warmup
     for _ in range(2):
         with torch.cuda.stream(stream):
             dst.copy_(src, non_blocking=pinned)
@@ -140,11 +148,10 @@ def benchmark_host_copy_gbps(size_mib: int = 512, repeats: int = 6) -> float:
 
 
 def profile_bandwidth() -> BandwidthProfile:
-    # The host memcpy number is only a first-pass proxy. Runtime expert execution
-    # benchmarks should replace it before enabling hybrid_reference.
-    pcie = benchmark_h2d_gbps()
-    host = benchmark_host_copy_gbps()
-    return BandwidthProfile(pcie_h2d_gbps=pcie, host_effective_gbps=host)
+    return BandwidthProfile(
+        pcie_h2d_gbps=benchmark_h2d_gbps(),
+        host_effective_gbps=benchmark_host_copy_gbps(),
+    )
 
 
 def nvidia_smi_snapshot() -> str:

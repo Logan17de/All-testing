@@ -11,7 +11,7 @@ from typing import Any
 from .config import GIB, RuntimeConfig
 from .gpu_cache import GPUExpertSlotCache
 from .metrics import RuntimeStats
-from .qstar import BandwidthProfile, qstar_split
+from .qstar import BandwidthProfile
 
 
 @dataclass(slots=True)
@@ -37,16 +37,10 @@ class LayerView:
 
 
 class FullLayerDoubleBuffer:
-    """Two GPU FP8 layer buffers plus one host staging bank.
-
-    The next layer is staged/copied on a background worker while the current GPU
-    layer executes. If pinned allocation is unavailable, the same schedule still
-    works with pageable staging (less overlap, but no correctness change).
-    """
+    """Two GPU FP8 layer buffers plus one host staging bank."""
 
     def __init__(self, cfg: RuntimeConfig, device="cuda"):
         import torch
-        from concurrent.futures import ThreadPoolExecutor
 
         self.cfg = cfg
         self.device = torch.device(device)
@@ -80,14 +74,20 @@ class FullLayerDoubleBuffer:
 
     @property
     def bytes_allocated(self) -> int:
-        return sum(x.numel() * x.element_size() for x in (self.gate_up, self.gate_scale, self.down, self.down_scale))
+        return sum(
+            x.numel() * x.element_size()
+            for x in (self.gate_up, self.gate_scale, self.down, self.down_scale)
+        )
 
     def _stage_and_copy(self, buf: int, layer_id: int, experts) -> None:
         import torch
-        self.stage_gate_up.copy_(experts.gate_up_proj.detach().cpu())
-        self.stage_gate_scale.copy_(experts.gate_up_proj_scale_inv.detach().cpu())
-        self.stage_down.copy_(experts.down_proj.detach().cpu())
-        self.stage_down_scale.copy_(experts.down_proj_scale_inv.detach().cpu())
+
+        if experts.gate_up_proj.device.type != "cpu":
+            raise RuntimeError("Full-layer prefill staging is only valid for CPU-authoritative expert banks")
+        self.stage_gate_up.copy_(experts.gate_up_proj.detach())
+        self.stage_gate_scale.copy_(experts.gate_up_proj_scale_inv.detach())
+        self.stage_down.copy_(experts.down_proj.detach())
+        self.stage_down_scale.copy_(experts.down_proj_scale_inv.detach())
         with torch.cuda.stream(self.copy_stream):
             self.gate_up[buf].copy_(self.stage_gate_up, non_blocking=self.staging_pinned)
             self.gate_scale[buf].copy_(self.stage_gate_scale, non_blocking=self.staging_pinned)
@@ -98,16 +98,21 @@ class FullLayerDoubleBuffer:
         self._loaded[buf] = layer_id
 
     def prefetch(self, layer_id: int, experts) -> None:
+        if experts.gate_up_proj.device.type != "cpu":
+            return
         buf = layer_id & 1
         with self._lock:
             if self._loaded[buf] == layer_id:
                 return
             fut = self._futures.get(layer_id)
             if fut is None:
-                self._futures[layer_id] = self._worker.submit(self._stage_and_copy, buf, layer_id, experts)
+                self._futures[layer_id] = self._worker.submit(
+                    self._stage_and_copy, buf, layer_id, experts
+                )
 
     def acquire(self, layer_id: int, experts) -> LayerView:
         import torch
+
         buf = layer_id & 1
         self.prefetch(layer_id, experts)
         fut = self._futures.pop(layer_id, None)
@@ -149,8 +154,12 @@ class FreeTokenRuntime:
         self.prefill_buffers = prefill_buffers
         self.stats = RuntimeStats()
         self.expert_modules: dict[int, Any] = {}
+        self.gpu_resident_layers: set[int] = set()
+        self.cpu_resident_layers: set[int] = set()
         self.copy_stream = torch.cuda.Stream()
-        threads = cfg.cpu_threads if cfg.cpu_threads > 0 else max(1, min(8, (__import__("os").cpu_count() or 2) // 2))
+        threads = cfg.cpu_threads if cfg.cpu_threads > 0 else max(
+            1, min(8, (__import__("os").cpu_count() or 2) // 2)
+        )
         self.cpu_pool = ThreadPoolExecutor(max_workers=threads, thread_name_prefix="ft-cpu")
         self._trace_handle = None
         if cfg.route_trace_path:
@@ -169,13 +178,15 @@ class FreeTokenRuntime:
 
         free_bytes, _ = torch.cuda.mem_get_info()
         raw, scales = estimate_expert_bytes(cfg)
-        expert_bytes = (raw + scales) if cfg.cache_format == "fp8" else (raw * 2)
+        cache_expert_bytes = (raw + scales) if cfg.cache_format == "fp8" else (raw * 2)
         prefill_reserve = 0
-        if cfg.enable_prefill_double_buffer:
-            prefill_reserve = 2 * cfg.num_experts * expert_bytes
+        if cfg.enable_prefill_double_buffer and len(cfg.gpu_expert_layers) < cfg.num_layers:
+            # Full-layer buffers are always checkpoint FP8 + scales, even when
+            # the decode cache stores BF16.
+            prefill_reserve = 2 * cfg.num_experts * (raw + scales)
         usable = max(0, free_bytes - int(cfg.gpu_safety_gib * GIB) - prefill_reserve)
         requested = min(cfg.cache_bytes, usable)
-        slots = max(1, requested // expert_bytes)
+        slots = max(1, requested // cache_expert_bytes)
         cache = GPUExpertSlotCache(
             slots=slots,
             hidden=cfg.hidden_size,
@@ -184,7 +195,7 @@ class FreeTokenRuntime:
             cache_format=cfg.cache_format,
         )
         prefill = None
-        if cfg.enable_prefill_double_buffer:
+        if cfg.enable_prefill_double_buffer and len(cfg.gpu_expert_layers) < cfg.num_layers:
             try:
                 prefill = FullLayerDoubleBuffer(cfg)
             except torch.OutOfMemoryError:
@@ -198,7 +209,11 @@ class FreeTokenRuntime:
         matched = 0
         pattern = re.compile(r"(?:^|\.)layers\.(\d+)\.mlp\.experts$")
         for name, module in model.named_modules():
-            if not (hasattr(module, "gate_up_proj") and hasattr(module, "down_proj") and hasattr(module, "num_experts")):
+            if not (
+                hasattr(module, "gate_up_proj")
+                and hasattr(module, "down_proj")
+                and hasattr(module, "num_experts")
+            ):
                 continue
             m = pattern.search(name)
             if m is None:
@@ -207,6 +222,10 @@ class FreeTokenRuntime:
             module._freetoken_runtime = self
             module._freetoken_layer_id = layer
             self.expert_modules[layer] = module
+            if module.gate_up_proj.device.type == "cuda":
+                self.gpu_resident_layers.add(layer)
+            else:
+                self.cpu_resident_layers.add(layer)
             matched += 1
         if matched != self.cfg.num_layers:
             raise RuntimeError(
@@ -219,15 +238,32 @@ class FreeTokenRuntime:
         if self._trace_handle is None:
             return
         import json
-        self._trace_handle.write(json.dumps({"layer": layer, "experts": ids, "prefill": prefill}) + "\n")
+
+        self._trace_handle.write(
+            json.dumps(
+                {
+                    "layer": layer,
+                    "experts": ids,
+                    "prefill": prefill,
+                    "residency": "gpu" if layer in self.gpu_resident_layers else "cpu",
+                }
+            )
+            + "\n"
+        )
         self._trace_handle.flush()
 
+    def _next_cpu_layer(self, layer: int) -> int | None:
+        for nxt in range(layer + 1, self.cfg.num_layers):
+            if nxt in self.cpu_resident_layers:
+                return nxt
+        return None
+
     def get_prefill_view(self, layer: int, experts):
-        if self.prefill_buffers is None:
+        if self.prefill_buffers is None or layer in self.gpu_resident_layers:
             return None
         view = self.prefill_buffers.acquire(layer, experts)
-        nxt = layer + 1
-        if nxt in self.expert_modules:
+        nxt = self._next_cpu_layer(layer)
+        if nxt is not None:
             self.prefill_buffers.prefetch(nxt, self.expert_modules[nxt])
         self.stats.prefill_layers += 1
         return view

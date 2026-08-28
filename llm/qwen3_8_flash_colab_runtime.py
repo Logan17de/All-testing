@@ -18,6 +18,7 @@ import os
 from qwen38_flash_freetoken.config import RuntimeConfig
 from qwen38_flash_freetoken.hardware import collect_hardware_report, validate_colab_target
 from qwen38_flash_freetoken.manifest import inspect_remote_model, validate_manifest
+from qwen38_flash_freetoken.planner import build_hybrid_placement_plan
 from qwen38_flash_freetoken.relay import run_colab_harness_worker
 
 HARNESS_MODEL_ID = "qwen3.8-27b"
@@ -33,7 +34,6 @@ def _colab_secret(name: str) -> str | None:
         return value.strip()
     try:
         from google.colab import userdata  # type: ignore
-
         value = userdata.get(name)
         return value.strip() if value and value.strip() else None
     except Exception:
@@ -50,7 +50,7 @@ def load_optional_hf_token() -> None:
 
 
 def build_config() -> RuntimeConfig:
-    """Build the Flash runtime while advertising the same Harness context slot."""
+    """Build the adaptive Flash runtime while advertising the old Harness slot."""
     return RuntimeConfig(
         cache_dir="/content/hf_cache",
         local_model_dir="/content/qwen38_flash_next_fp8",
@@ -60,11 +60,11 @@ def build_config() -> RuntimeConfig:
         max_new_tokens=HARNESS_MAX_TOKENS,
         text_only=True,
         drop_vision_after_load=True,
+        adaptive_expert_placement=True,
     )
 
 
 def preflight(*, inspect_checkpoint: bool = True) -> RuntimeConfig:
-    """Validate A100/RAM/disk and optionally verify the remote architecture."""
     load_optional_hf_token()
     os.environ.setdefault("QWEN_RELAY_ID", HARNESS_RELAY_ID)
     cfg = build_config()
@@ -77,6 +77,13 @@ def preflight(*, inspect_checkpoint: bool = True) -> RuntimeConfig:
         for problem in problems:
             print(" -", problem)
     validate_colab_target(cfg, strict=True)
+
+    if report.gpu_vram_gib is not None:
+        plan = build_hybrid_placement_plan(
+            cfg, host_ram_gib=report.host_ram_gib, gpu_vram_gib=report.gpu_vram_gib
+        )
+        print("\nAdaptive authoritative placement:")
+        print(json.dumps(plan.as_dict(), indent=2))
 
     if inspect_checkpoint:
         manifest = inspect_remote_model(cfg)
@@ -97,7 +104,6 @@ def preflight(*, inspect_checkpoint: bool = True) -> RuntimeConfig:
 
 
 def main() -> None:
-    """Start Qwen Flash as a drop-in replacement for the old Qwen3.8-27B worker."""
     load_optional_hf_token()
     os.environ.setdefault("QWEN_RELAY_ID", HARNESS_RELAY_ID)
     cfg = build_config()
@@ -105,7 +111,8 @@ def main() -> None:
     print(f"  Harness model : {HARNESS_MODEL_ID}")
     print(f"  Relay ID      : {os.environ['QWEN_RELAY_ID']}")
     print(f"  Windows URL   : {HARNESS_BASE_URL}")
-    print("  Backend       : Qwen3.8-Flash-Next-FP8 + FreeToken-style offload")
+    print("  Backend       : Qwen3.8-Flash-Next-FP8 + adaptive FreeToken-style offload")
+    print("  Placement     : whole expert banks split CPU/GPU with no duplicate authority")
     print("  Local Harness configuration remains unchanged ✅\n")
     run_colab_harness_worker(cfg)
 

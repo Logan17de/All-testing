@@ -24,6 +24,8 @@ def _apply_cached_expert(experts, hidden_states, top_k_index, top_k_weights, exp
         gu = view.gate_up
         down = view.down
     else:
+        # Dynamic-cache FP8 is a portability fallback. Whole GPU-authoritative
+        # banks use Transformers' native grouped FP8 kernel on Hopper/Blackwell.
         gu = dequantize_fp8(view.gate_up, view.gate_up_scale, block, torch.bfloat16)
         down = dequantize_fp8(view.down, view.down_scale, block, torch.bfloat16)
     gate_up = F.linear(current, gu)
@@ -34,7 +36,7 @@ def _apply_cached_expert(experts, hidden_states, top_k_index, top_k_weights, exp
 
 
 def _apply_raw_fp8_expert(experts, hidden_states, top_k_index, top_k_weights, expert: int, view):
-    """A100-safe prefill path: full layer is FP8-resident; dequantize one used expert at a time."""
+    """Portable one-expert FP8-storage/BF16-compute path."""
     import torch
     import torch.nn.functional as F
 
@@ -42,14 +44,44 @@ def _apply_raw_fp8_expert(experts, hidden_states, top_k_index, top_k_weights, ex
     if token_idx.numel() == 0:
         return None, None
     block = tuple(getattr(experts, "block_size", (128, 128)) or (128, 128))
-    gu = dequantize_fp8(view.gate_up_proj[expert], view.gate_up_proj_scale_inv[expert], block, torch.bfloat16)
-    down = dequantize_fp8(view.down_proj[expert], view.down_proj_scale_inv[expert], block, torch.bfloat16)
+    gu = dequantize_fp8(
+        view.gate_up_proj[expert], view.gate_up_proj_scale_inv[expert], block, torch.bfloat16
+    )
+    down = dequantize_fp8(
+        view.down_proj[expert], view.down_proj_scale_inv[expert], block, torch.bfloat16
+    )
     current = hidden_states[token_idx].to(torch.bfloat16)
     gate_up = F.linear(current, gu)
     activated = experts._apply_gate(gate_up)
     out = F.linear(activated, down)
     out = out * top_k_weights[token_idx, top_k_pos, None].to(out.dtype)
     return token_idx, out
+
+
+def _apply_gpu_authoritative_layer(experts, hidden_states, top_k_index, top_k_weights, unique):
+    """Execute a complete GPU-authoritative expert bank with no CPU duplicate.
+
+    Hopper/Blackwell use Transformers' native fine-grained FP8 grouped GEMM.
+    SM80 falls back to our portable one-expert dequant/BF16 path.
+    """
+    import torch
+
+    cc = torch.cuda.get_device_capability(hidden_states.device)
+    if cc >= (9, 0):
+        from transformers.integrations.finegrained_fp8 import fp8_grouped_mm_experts_forward
+
+        return fp8_grouped_mm_experts_forward(
+            experts, hidden_states, top_k_index, top_k_weights
+        )
+
+    final = torch.zeros_like(hidden_states)
+    for expert in unique:
+        token_idx, out = _apply_raw_fp8_expert(
+            experts, hidden_states, top_k_index, top_k_weights, expert, experts
+        )
+        if out is not None:
+            final.index_add_(0, token_idx, out.to(final.dtype))
+    return final
 
 
 def _cpu_expert(experts, hidden_states, top_k_index, top_k_weights, expert: int):
@@ -62,12 +94,7 @@ def _cpu_expert(experts, hidden_states, top_k_index, top_k_weights, expert: int)
 
 
 def freetoken_fp8_experts_forward(self, hidden_states, top_k_index, top_k_weights):
-    """FP8-storage/BF16-compute FreeToken-style backend for A100.
-
-    All router-selected contributions are executed. `gpu_fill` is the default
-    production-experiment path; `hybrid_reference` additionally validates q* exact
-    CPU/GPU merging using a deliberately slow CPU implementation.
-    """
+    """FP8 heterogeneous experts backend with Blackwell-native GPU banks."""
     import torch
 
     runtime = getattr(self, "_freetoken_runtime", None)
@@ -83,23 +110,37 @@ def freetoken_fp8_experts_forward(self, hidden_states, top_k_index, top_k_weight
     runtime.stats.unique_experts += len(unique)
     runtime.trace_route(layer, unique, prefill=is_prefill)
 
+    # Complete GPU-authoritative banks never enter the LRU and have no CPU copy.
+    # G4/Blackwell executes these directly with native grouped FP8 matmuls.
+    if self.gate_up_proj.device.type == "cuda":
+        if is_prefill:
+            runtime.stats.prefill_layers += 1
+        else:
+            runtime.stats.decode_layers += 1
+        return _apply_gpu_authoritative_layer(
+            self, hidden_states, top_k_index, top_k_weights, unique
+        )
+
     if is_prefill and runtime.prefill_buffers is not None:
         view = runtime.get_prefill_view(layer, self)
-        final = torch.zeros_like(hidden_states)
-        for expert in unique:
-            token_idx, out = _apply_raw_fp8_expert(self, hidden_states, top_k_index, top_k_weights, expert, view)
-            if out is not None:
-                final.index_add_(0, token_idx, out.to(final.dtype))
-        # Seed the global decode cache from the final prompt token without any
-        # extra PCIe transfer. This avoids a completely cold first decode token.
-        warm_ids = torch.unique(top_k_index[-1]).detach().cpu().tolist()
-        for expert in (int(e) for e in warm_ids if 0 <= int(e) < self.num_experts):
-            runtime.cache.admit_from_gpu_fp8(
-                (layer, expert),
-                view.gate_up_proj[expert], view.gate_up_proj_scale_inv[expert],
-                view.down_proj[expert], view.down_proj_scale_inv[expert],
-            )
-        return final
+        if view is not None:
+            final = torch.zeros_like(hidden_states)
+            for expert in unique:
+                token_idx, out = _apply_raw_fp8_expert(
+                    self, hidden_states, top_k_index, top_k_weights, expert, view
+                )
+                if out is not None:
+                    final.index_add_(0, token_idx, out.to(final.dtype))
+            warm_ids = torch.unique(top_k_index[-1]).detach().cpu().tolist()
+            for expert in (int(e) for e in warm_ids if 0 <= int(e) < self.num_experts):
+                runtime.cache.admit_from_gpu_fp8(
+                    (layer, expert),
+                    view.gate_up_proj[expert],
+                    view.gate_up_proj_scale_inv[expert],
+                    view.down_proj[expert],
+                    view.down_proj_scale_inv[expert],
+                )
+            return final
 
     runtime.stats.decode_layers += 1
     hits: list[tuple[int, int]] = []
@@ -131,7 +172,9 @@ def freetoken_fp8_experts_forward(self, hidden_states, top_k_index, top_k_weight
         gpu_fill_ids, cpu_ids = split.gpu_fill, split.cpu_execute
 
     cpu_futures = {
-        e: runtime.cpu_pool.submit(_cpu_expert, self, hidden_states, top_k_index, top_k_weights, e)
+        e: runtime.cpu_pool.submit(
+            _cpu_expert, self, hidden_states, top_k_index, top_k_weights, e
+        )
         for e in cpu_ids
     }
     runtime.stats.cpu_experts += len(cpu_ids)
@@ -139,21 +182,29 @@ def freetoken_fp8_experts_forward(self, hidden_states, top_k_index, top_k_weight
     for expert in gpu_fill_ids:
         key = (layer, expert)
         before = runtime.cache.evictions
-        slot = runtime.cache.admit(key, self, expert, stream=runtime.copy_stream, pin_staging=False)
+        slot = runtime.cache.admit(
+            key, self, expert, stream=runtime.copy_stream, pin_staging=False
+        )
         runtime.copy_stream.synchronize()
         runtime.stats.evictions += runtime.cache.evictions - before
         runtime.stats.gpu_fills += 1
-        # PCIe traffic is checkpoint FP8 + scales even when the GPU cache stores BF16.
         runtime.stats.h2d_bytes += payload_nbytes(
-            self.gate_up_proj[expert], self.gate_up_proj_scale_inv[expert],
-            self.down_proj[expert], self.down_proj_scale_inv[expert],
+            self.gate_up_proj[expert],
+            self.gate_up_proj_scale_inv[expert],
+            self.down_proj[expert],
+            self.down_proj_scale_inv[expert],
         )
         hits.append((expert, slot))
 
     final = torch.zeros_like(hidden_states)
     for expert, slot in hits:
         token_idx, out = _apply_cached_expert(
-            self, hidden_states, top_k_index, top_k_weights, expert, runtime.cache.view(slot)
+            self,
+            hidden_states,
+            top_k_index,
+            top_k_weights,
+            expert,
+            runtime.cache.view(slot),
         )
         if out is not None:
             final.index_add_(0, token_idx, out.to(final.dtype))
@@ -173,10 +224,12 @@ def freetoken_fp8_experts_forward(self, hidden_states, top_k_index, top_k_weight
 
 def register_backend() -> None:
     from transformers.integrations.moe import ALL_EXPERTS_FUNCTIONS
+
     if _BACKEND_NAME not in ALL_EXPERTS_FUNCTIONS._global_mapping:
         ALL_EXPERTS_FUNCTIONS.register(_BACKEND_NAME, freetoken_fp8_experts_forward)
     try:
         from transformers.integrations.finegrained_fp8 import ALL_FP8_EXPERTS_FUNCTIONS
+
         if _BACKEND_NAME not in ALL_FP8_EXPERTS_FUNCTIONS._global_mapping:
             ALL_FP8_EXPERTS_FUNCTIONS.register(_BACKEND_NAME, freetoken_fp8_experts_forward)
     except ImportError:

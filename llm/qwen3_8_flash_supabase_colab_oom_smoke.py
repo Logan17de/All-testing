@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
-"""Expected-OOM validation for Qwen3.8 Flash-Next + FreeToken-style Harness stack.
+"""Expected-OOM validation for Qwen3.8 Flash-Next + heterogeneous Harness stack.
 
-The purpose of this mode is NOT to prove the model fits. It is to exercise the
-real production code path as far as possible and treat only a GPU-memory limit as
-success. Any import/config/checkpoint/backend/runtime error before the memory wall
-is a real failure that should be fixed before the normal worker is used.
-
-Unlike the 27B smoke test, the heterogeneous Flash runtime can adapt its expert
-cache to smaller GPUs and may therefore avoid a natural OOM. If the real model
-loads and a short generation succeeds, this smoke test deliberately requests more
-CUDA memory than remains. Reaching that final sentinel OOM proves the production
-model/backend/generation path got past the places we actually want to validate.
+Only a CUDA/VRAM memory limit counts as PASS. The smoke path uses the same
+adaptive CPU/GPU authoritative expert placement as production. If the real model
+loads and a routed generation succeeds, a final sentinel allocation deliberately
+exceeds remaining VRAM so Section 2A still ends at the expected memory wall.
 """
 
 from __future__ import annotations
@@ -24,6 +18,7 @@ from qwen38_flash_freetoken.hardware import collect_hardware_report
 from qwen38_flash_freetoken.inference import generate_text
 from qwen38_flash_freetoken.loader import load_qwen_runtime
 from qwen38_flash_freetoken.manifest import inspect_remote_model, validate_manifest
+from qwen38_flash_freetoken.planner import build_hybrid_placement_plan
 
 EXPECTED_MEMORY_MARKERS = (
     "cuda out of memory",
@@ -47,7 +42,7 @@ def _prepare_relay() -> None:
     if not relay_secret:
         raise RuntimeError(
             "Add QWEN_RELAY_SECRET in Colab Secrets and enable notebook access. "
-            "Section 2A intentionally validates the same relay preflight as production."
+            "Section 2A validates the same relay preflight as production."
         )
     os.environ["QWEN_RELAY_SECRET"] = relay_secret
     os.environ["QWEN_RELAY_ID"] = flash.HARNESS_RELAY_ID
@@ -67,18 +62,17 @@ def _validate_smoke_hardware(cfg) -> None:
     report = collect_hardware_report(cfg.cache_dir)
     print(json.dumps(report.as_dict(), indent=2), flush=True)
 
-    if report.gpu_name is None or report.compute_capability is None:
+    if report.gpu_name is None or report.compute_capability is None or report.gpu_vram_gib is None:
         raise RuntimeError("CUDA GPU not detected")
     major = int(report.compute_capability.split(".", 1)[0])
     if major < 8:
         raise RuntimeError(
             f"GPU compute capability {report.compute_capability} is below SM80. "
-            "Use an SM80+ GPU so FP8/BF16 runtime compatibility is tested before OOM."
+            "Use an SM80+ GPU so the real FP8/BF16 path is tested before OOM."
         )
     if report.host_ram_gib < cfg.min_host_gib:
         raise RuntimeError(
-            f"Host RAM {report.host_ram_gib:.1f} GiB < {cfg.min_host_gib:.1f} GiB. "
-            "Flash smoke mode uses the real ~185 GB checkpoint, so host RAM cannot be relaxed."
+            f"Host RAM {report.host_ram_gib:.1f} GiB < absolute minimum {cfg.min_host_gib:.1f} GiB."
         )
     if report.disk_free_gib < cfg.min_disk_free_gib:
         raise RuntimeError(
@@ -86,8 +80,20 @@ def _validate_smoke_hardware(cfg) -> None:
             "The real Flash FP8 checkpoint must be available for this smoke test."
         )
 
-    print("Expected-OOM hardware gate: SM80+ / RAM / disk OK ✅", flush=True)
-    print("GPU VRAM minimum is intentionally NOT enforced in Section 2A.", flush=True)
+    plan = build_hybrid_placement_plan(
+        cfg, host_ram_gib=report.host_ram_gib, gpu_vram_gib=report.gpu_vram_gib
+    )
+    print("\nAdaptive authoritative placement:", flush=True)
+    print(json.dumps(plan.as_dict(), indent=2), flush=True)
+    if not plan.feasible:
+        raise RuntimeError("This RAM/VRAM combination cannot host the real Flash path: " + plan.reason)
+
+    print("Expected-OOM hardware/placement gate: OK ✅", flush=True)
+    print(
+        f"Plan will keep {len(plan.gpu_expert_layers)} complete expert layers on GPU "
+        f"without CPU duplicates and {len(plan.cpu_expert_layers)} in host RAM.",
+        flush=True,
+    )
 
 
 def _force_terminal_cuda_oom() -> None:
@@ -102,8 +108,6 @@ def _force_terminal_cuda_oom() -> None:
         f"{total_bytes / 1024**3:.2f} GiB device...",
         flush=True,
     )
-    # Keep the loaded model/runtime resident. The allocation is deliberately
-    # larger than currently free VRAM, so the only acceptable result is CUDA OOM.
     _ = torch.empty(request_bytes, dtype=torch.uint8, device="cuda")
     raise RuntimeError("Terminal OOM sentinel unexpectedly allocated more than reported free VRAM")
 
@@ -121,7 +125,7 @@ def main() -> None:
     print("Any other exception before OOM is a real issue to fix.\n", flush=True)
 
     try:
-        stage = "hardware"
+        stage = "hardware + adaptive placement"
         _validate_smoke_hardware(cfg)
 
         stage = "relay preflight"
@@ -131,17 +135,18 @@ def main() -> None:
         manifest = inspect_remote_model(cfg)
         print("Remote checkpoint:", flush=True)
         print(json.dumps(manifest.as_dict(), indent=2), flush=True)
-        checks = validate_manifest(manifest, cfg)
-        for check in checks:
+        for check in validate_manifest(manifest, cfg):
             print(" -", check, flush=True)
         print("Checkpoint architecture: OK ✅", flush=True)
 
         stage = "real model/runtime load"
         print("\nLoading REAL Qwen3.8-Flash-Next-FP8 production weights...", flush=True)
         loaded = load_qwen_runtime(cfg, measure_bandwidth=True, strict_hardware=False)
-        print("Model + custom FreeToken backend loaded: OK ✅", flush=True)
-        print(f"Bound expert layers: {len(loaded.runtime.expert_modules)}", flush=True)
-        print(f"GPU expert slots  : {loaded.runtime.cache.slots}", flush=True)
+        print("Model + custom heterogeneous expert backend loaded: OK ✅", flush=True)
+        print(f"Bound expert layers       : {len(loaded.runtime.expert_modules)}", flush=True)
+        print(f"Permanent GPU layers      : {len(loaded.runtime.gpu_resident_layers)}", flush=True)
+        print(f"CPU-authoritative layers  : {len(loaded.runtime.cpu_resident_layers)}", flush=True)
+        print(f"Dynamic GPU expert slots  : {loaded.runtime.cache.slots}", flush=True)
 
         stage = "real routed generation"
         result = generate_text(
@@ -170,14 +175,14 @@ def main() -> None:
             print(f"OOM stage: {stage}", flush=True)
             if stage == "deliberate terminal OOM sentinel":
                 print(
-                    "The real checkpoint, custom expert backend, runtime binding and a real "
+                    "Real checkpoint load, adaptive placement, custom expert backend and "
                     "routed generation all succeeded before the intentional memory wall.",
                     flush=True,
                 )
             else:
                 print(
-                    "The real production path reached a genuine GPU-memory limit on this "
-                    "runtime. Non-memory failures would have been re-raised.",
+                    "The real production path reached a genuine GPU-memory limit. "
+                    "Non-memory failures would have been re-raised.",
                     flush=True,
                 )
             return
@@ -196,7 +201,6 @@ def main() -> None:
         gc.collect()
         try:
             import torch
-
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception:
