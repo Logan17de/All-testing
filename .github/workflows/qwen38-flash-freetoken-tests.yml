@@ -19,5 +19,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install -U pip pytest torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install -U pip pytest
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: PYTHONPATH=llm pytest -q llm/qwen38_flash_freetoken/tests
