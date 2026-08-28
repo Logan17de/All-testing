@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "all-testing-llm"
-version = "0.3.5"
+version = "0.3.6"
 description = "Colab-first LLM workers and local Harness bridges"
 requires-python = ">=3.10"
 dependencies = [
