@@ -38,6 +38,7 @@ class HybridPlacementPlan:
     host_headroom_gib: float
     prefill_reserve_gib: float
     gpu_nonexpert_reserve_gib: float
+    context_cache_reserve_gib: float
     gpu_safety_gib: float
     recommended_cache_gib: float
     gpu_headroom_after_cache_gib: float
@@ -61,6 +62,50 @@ def estimate_expert_bytes(cfg: RuntimeConfig) -> tuple[int, int]:
     return raw, gu_scale + down_scale
 
 
+def estimate_context_cache_gib(cfg: RuntimeConfig) -> float:
+    """Conservative batch-1 VRAM reserve for the configured total context length.
+
+    Qwen3.8 Flash is hybrid GDN + QSA, so only the 12 QSA layers grow a normal
+    sequence-length KV history. The GDN layers keep recurrent state. The estimate
+    includes QSA K+V, one MTP attention layer, the QSA indexer key history, and an
+    explicit state/allocator margin. It intentionally assumes BF16 cache storage.
+    """
+    tokens = max(1, int(cfg.max_context_tokens))
+    b = max(1, int(cfg.kv_cache_dtype_bytes))
+
+    qsa_kv = (
+        tokens
+        * cfg.qsa_layers
+        * 2  # K + V
+        * cfg.qsa_kv_heads
+        * cfg.qsa_head_dim
+        * b
+        / GIB
+    )
+    mtp_kv = (
+        tokens
+        * cfg.mtp_cache_layers
+        * 2
+        * cfg.qsa_kv_heads
+        * cfg.qsa_head_dim
+        * b
+        / GIB
+    )
+    # The QSA indexer is MQA: one shared key head per QSA layer. We reserve its
+    # complete history even though the implementation may compress it further.
+    indexer = (
+        tokens
+        * cfg.qsa_layers
+        * cfg.qsa_indexer_kv_heads
+        * cfg.qsa_indexer_head_dim
+        * b
+        / GIB
+    )
+    total = qsa_kv + mtp_kv + indexer + cfg.context_state_safety_gib
+    # Quarter-GiB rounding makes the printed plan stable and leaves a small pad.
+    return ceil(total * 4.0) / 4.0
+
+
 def build_memory_plan(cfg: RuntimeConfig, ngram_host_gib: float | None = None) -> MemoryPlan:
     raw, scales = estimate_expert_bytes(cfg)
     fp8_expert = raw + scales
@@ -72,7 +117,8 @@ def build_memory_plan(cfg: RuntimeConfig, ngram_host_gib: float | None = None) -
     ngram = cfg.ngram_host_estimate_gib if ngram_host_gib is None else ngram_host_gib
     notes = (
         "The current Qwen4Exp implementation keeps the giant PLE/ngram embedding host-resident; budget ~95 GiB unless live measurements say otherwise.",
-        "Routed experts remain checkpoint FP8 for storage/PCIe; A100 cache entries default to BF16 compute.",
+        "Routed experts remain checkpoint FP8 for storage/PCIe; complete G4/Blackwell GPU-authoritative banks can execute with native FP8 grouped kernels.",
+        "The hybrid planner separately reserves long-context KV/indexer/GDN state VRAM before assigning the dynamic expert cache.",
         "Adaptive placement can move complete expert layers permanently to GPU with no CPU duplicate when host RAM is constrained.",
     )
     return MemoryPlan(
@@ -108,8 +154,9 @@ def build_hybrid_placement_plan(
     """Plan authoritative expert-layer placement without CPU/GPU duplication.
 
     We first move only enough complete expert banks to GPU to make host RAM safe.
-    Whatever VRAM remains after permanent experts, non-expert reserve, prefill
-    buffers and safety becomes the dynamic global expert-cache budget.
+    VRAM is then reserved for ordinary model components, full-layer prefill buffers,
+    the configured long-context KV/state budget and allocator safety. Only the
+    remainder is offered to the global dynamic expert cache.
     """
     raw, scales = estimate_expert_bytes(cfg)
     one_expert = raw + scales
@@ -119,7 +166,11 @@ def build_hybrid_placement_plan(
 
     host_budget_for_experts = host_ram_gib - ngram - cfg.host_safety_gib
     move_gib = max(0.0, pool_gib - host_budget_for_experts)
-    required_gpu_layers = min(cfg.num_layers, int(ceil(move_gib / layer_gib - 1e-12))) if move_gib > 0 else 0
+    required_gpu_layers = (
+        min(cfg.num_layers, int(ceil(move_gib / layer_gib - 1e-12)))
+        if move_gib > 0
+        else 0
+    )
 
     gpu_layers = _spread_layers(cfg.num_layers, required_gpu_layers)
     gpu_perm = len(gpu_layers) * layer_gib
@@ -127,8 +178,19 @@ def build_hybrid_placement_plan(
     estimated_host = ngram + host_experts
     host_headroom = host_ram_gib - estimated_host
 
-    prefill = 2.0 * layer_gib if (cfg.enable_prefill_double_buffer and len(gpu_layers) < cfg.num_layers) else 0.0
-    fixed_gpu = gpu_perm + cfg.gpu_nonexpert_reserve_gib + cfg.gpu_safety_gib + prefill
+    prefill = (
+        2.0 * layer_gib
+        if (cfg.enable_prefill_double_buffer and len(gpu_layers) < cfg.num_layers)
+        else 0.0
+    )
+    context_reserve = estimate_context_cache_gib(cfg)
+    fixed_gpu = (
+        gpu_perm
+        + cfg.gpu_nonexpert_reserve_gib
+        + context_reserve
+        + cfg.gpu_safety_gib
+        + prefill
+    )
     cache_cap = max(0.0, gpu_vram_gib - fixed_gpu)
     recommended_cache = min(cfg.expert_cache_gib, cache_cap)
     gpu_headroom = gpu_vram_gib - fixed_gpu - recommended_cache
@@ -146,7 +208,9 @@ def build_hybrid_placement_plan(
     if cache_cap < cfg.min_dynamic_cache_gib:
         feasible = False
         reasons.append(
-            f"only {cache_cap:.1f} GiB remains for dynamic cache; minimum is {cfg.min_dynamic_cache_gib:.1f} GiB"
+            f"only {cache_cap:.1f} GiB remains for dynamic cache after reserving "
+            f"{context_reserve:.1f} GiB for {cfg.max_context_tokens:,}-token context; "
+            f"minimum cache is {cfg.min_dynamic_cache_gib:.1f} GiB"
         )
     if fixed_gpu > gpu_vram_gib:
         feasible = False
@@ -167,6 +231,7 @@ def build_hybrid_placement_plan(
         host_headroom_gib=host_headroom,
         prefill_reserve_gib=prefill,
         gpu_nonexpert_reserve_gib=cfg.gpu_nonexpert_reserve_gib,
+        context_cache_reserve_gib=context_reserve,
         gpu_safety_gib=cfg.gpu_safety_gib,
         recommended_cache_gib=recommended_cache,
         gpu_headroom_after_cache_gib=gpu_headroom,
