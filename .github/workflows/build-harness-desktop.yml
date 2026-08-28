@@ -1,0 +1,56 @@
+name: Build Harness Desktop EXE
+
+on:
+  push:
+    branches:
+      - harness-desktop-v1
+    paths:
+      - 'harness-desktop/**'
+      - '.github/workflows/build-harness-desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: harness-desktop
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Test plugin validator
+        run: npm test
+
+      - name: Build Windows installer
+        run: npm run dist
+
+      - name: Create SHA256
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
+          if (-not $exe) { throw 'No EXE produced.' }
+          (Get-FileHash $exe.FullName -Algorithm SHA256).Hash + '  ' + $exe.Name | Set-Content dist\SHA256.txt
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-desktop-windows-x64
+          path: |
+            harness-desktop/dist/*.exe
+            harness-desktop/dist/SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
