@@ -18,10 +18,21 @@ class HarnessRuntime {
 
     this.dshPackageRoot = path.dirname(require.resolve('@deepseek-ai/dsh/package.json'));
     this.dshCli = path.join(this.dshPackageRoot, 'lib', 'bin.js');
-    this.pnpmPackageRoot = path.dirname(require.resolve('pnpm/package.json'));
-    const pnpmManifest = JSON.parse(fs.readFileSync(path.join(this.pnpmPackageRoot, 'package.json'), 'utf8'));
+
+    // pnpm does not export ./package.json, so require.resolve('pnpm/package.json')
+    // throws ERR_PACKAGE_PATH_NOT_EXPORTED on current pnpm releases. Resolve the
+    // bundled dependency directly from the app root instead; this works both in
+    // development and in the unpacked Electron application produced by builder.
+    this.pnpmPackageRoot = path.join(this.appRoot, 'node_modules', 'pnpm');
+    const pnpmManifestPath = path.join(this.pnpmPackageRoot, 'package.json');
+    if (!fs.existsSync(pnpmManifestPath)) {
+      throw new Error(`Bundled pnpm package was not found at ${pnpmManifestPath}`);
+    }
+    const pnpmManifest = JSON.parse(fs.readFileSync(pnpmManifestPath, 'utf8'));
     const pnpmBin = typeof pnpmManifest.bin === 'string' ? pnpmManifest.bin : pnpmManifest.bin?.pnpm;
+    if (!pnpmBin) throw new Error('Bundled pnpm package does not define a pnpm binary.');
     this.pnpmCli = path.join(this.pnpmPackageRoot, pnpmBin);
+
     this.shimDir = path.join(os.tmpdir(), 'harness-desktop-runtime-bin');
     this.ensureRuntimeShims();
   }
