@@ -23,7 +23,16 @@ if (!fs.existsSync(profile)) {
   fs.writeFileSync(path.join(profile, 'pnpm-workspace.yaml'), 'packages: []\n');
 }
 
-const suites = ['e2e-real', 'e2e-recovery', 'e2e-starter', 'e2e-restore-core', 'e2e-providers', 'real-verify', 'ui-smoke'];
+const suites = [
+  'e2e-real',
+  'e2e-recovery',
+  'e2e-starter',
+  'e2e-copycat-bridge',
+  'e2e-restore-core',
+  'e2e-providers',
+  'real-verify',
+  'ui-smoke',
+];
 let failed = 0;
 for (const suite of suites) {
   const result = spawnSync(process.execPath, [path.join(__dirname, `${suite}.js`)], {
