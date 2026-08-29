@@ -1,0 +1,18 @@
+{
+  "name": "dsh-harness-desktop-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "harnessDesktop": {
+    "permissions": ["workspace"]
+  }
+}

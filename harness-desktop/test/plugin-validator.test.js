@@ -38,3 +38,38 @@ test('rejects a bundle patch escaping the plugin root', () => {
   const result = validatePluginDirectory(dir);
   assert.equal(result.ok, false);
 });
+
+test('rejects path-like names and malformed versions', () => {
+  const dir = tempPlugin({
+    name: '..',
+    version: '../1',
+    dsh: { bundle: { patch: './cordis.patch.yml' } },
+  });
+  const result = validatePluginDirectory(dir);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /npm-style package name/);
+  assert.match(result.errors.join(' '), /semantic version/);
+});
+
+test('accepts scoped package names and semver prereleases', () => {
+  const dir = tempPlugin({
+    name: '@scope/dsh-example',
+    version: '1.2.3-rc.1+windows',
+    dsh: { bundle: { patch: './cordis.patch.yml' } },
+  });
+  assert.equal(validatePluginDirectory(dir).ok, true);
+});
+
+test('rejects an empty build command and malformed permissions', () => {
+  const dir = tempPlugin({
+    name: 'dsh-example',
+    version: '1.0.0',
+    scripts: { build: '   ' },
+    harnessDesktop: { permissions: ['network', 42] },
+    dsh: { bundle: { patch: './cordis.patch.yml' } },
+  });
+  const result = validatePluginDirectory(dir);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /scripts\.build/);
+  assert.match(result.errors.join(' '), /permissions/);
+});

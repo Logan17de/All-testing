@@ -10,6 +10,9 @@ const SAFE_PERMISSION_NAMES = new Set([
   'workspace',
 ]);
 
+const PACKAGE_NAME_PATTERN = /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/;
+const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
 function validatePluginDirectory(pluginDir) {
   const errors = [];
   const warnings = [];
@@ -28,9 +31,13 @@ function validatePluginDirectory(pluginDir) {
 
   if (typeof manifest.name !== 'string' || !manifest.name.trim()) {
     errors.push('package.json must contain a non-empty "name".');
+  } else if (manifest.name.length > 214 || !PACKAGE_NAME_PATTERN.test(manifest.name)) {
+    errors.push('package.json "name" must be a safe npm-style package name.');
   }
   if (typeof manifest.version !== 'string' || !manifest.version.trim()) {
     errors.push('package.json must contain a non-empty "version".');
+  } else if (manifest.version.length > 128 || !SEMVER_PATTERN.test(manifest.version)) {
+    errors.push('package.json "version" must be a valid semantic version.');
   }
 
   const patch = manifest?.dsh?.bundle?.patch;
@@ -42,11 +49,14 @@ function validatePluginDirectory(pluginDir) {
       errors.push('dsh.bundle.patch must point to a file inside the plugin.');
     } else if (!fs.existsSync(path.join(pluginDir, normalized))) {
       errors.push(`Declared bundle patch does not exist: ${patch}`);
+    } else if (!fs.statSync(path.join(pluginDir, normalized)).isFile()) {
+      errors.push(`Declared bundle patch is not a file: ${patch}`);
     }
   }
 
-  if (manifest.scripts?.build !== undefined && typeof manifest.scripts.build !== 'string') {
-    errors.push('scripts.build must be a string when present.');
+  if (manifest.scripts?.build !== undefined
+      && (typeof manifest.scripts.build !== 'string' || !manifest.scripts.build.trim())) {
+    errors.push('scripts.build must be a non-empty string when present.');
   }
 
   const requested = manifest?.harnessDesktop?.permissions;
@@ -73,4 +83,9 @@ function validatePluginDirectory(pluginDir) {
   };
 }
 
-module.exports = { validatePluginDirectory, SAFE_PERMISSION_NAMES };
+module.exports = {
+  validatePluginDirectory,
+  SAFE_PERMISSION_NAMES,
+  PACKAGE_NAME_PATTERN,
+  SEMVER_PATTERN,
+};

@@ -1,0 +1,3 @@
+- insert:
+    - id: harness-desktop-build-failure
+      name: dsh-harness-desktop-build-failure

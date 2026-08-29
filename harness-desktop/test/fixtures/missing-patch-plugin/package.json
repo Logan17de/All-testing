@@ -1,0 +1,9 @@
+{
+  "name": "dsh-harness-desktop-missing-patch",
+  "version": "1.0.0",
+  "dsh": {
+    "bundle": {
+      "patch": "./missing.yml"
+    }
+  }
+}

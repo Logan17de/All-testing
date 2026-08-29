@@ -1,0 +1,3 @@
+- insert:
+    - id: harness-desktop-e2e
+      name: dsh-harness-desktop-e2e
