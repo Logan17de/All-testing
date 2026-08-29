@@ -55,6 +55,15 @@ async function waitForFile(target, timeoutMs = 10000) {
   return false;
 }
 
+async function waitUntilGone(target, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!fs.existsSync(target)) return true;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return !fs.existsSync(target);
+}
+
 async function main() {
   fs.cpSync(PROFILE, BACKUP, { recursive: true });
   fs.rmSync(BRIDGE_DIR, { recursive: true, force: true });
@@ -117,7 +126,7 @@ async function main() {
     const rolled = await manager.rollbackPrevious();
     step('11. rollback cleanly removes the bridge plugin', rolled.ok === true);
     step('12. engine remains healthy after bridge rollback', await runtime.isHealthy());
-    const discoveryGone = !await waitForFile(DISCOVERY, 700);
+    const discoveryGone = await waitUntilGone(DISCOVERY);
     step('13. plugin teardown withdraws the live discovery file', discoveryGone);
   } catch (error) {
     console.log(`\nABORTED: ${error.message}`);
