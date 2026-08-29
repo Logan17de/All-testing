@@ -23,6 +23,25 @@ let connectionAttempt = null;
 const userDataOverride = process.env.HARNESS_DESKTOP_USER_DATA?.trim();
 if (userDataOverride) app.setPath('userData', path.resolve(userDataOverride));
 
+function canSendToRenderer() {
+  return Boolean(
+    mainWindow
+    && !mainWindow.isDestroyed()
+    && mainWindow.webContents
+    && !mainWindow.webContents.isDestroyed()
+  );
+}
+
+function sendToRenderer(channel, ...args) {
+  if (!canSendToRenderer()) return false;
+  try {
+    mainWindow.webContents.send(channel, ...args);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function log(source, message) {
   if (!message) return;
   for (const line of String(message).split(/\r?\n/)) {
@@ -33,7 +52,7 @@ function log(source, message) {
     if (logFile) {
       try { fs.appendFileSync(logFile, `${JSON.stringify(item)}\n`); } catch {}
     }
-    mainWindow?.webContents.send('log:line', item);
+    sendToRenderer('log:line', item);
   }
 }
 
@@ -86,6 +105,7 @@ async function createWindow() {
       sandbox: true,
     },
   });
+  mainWindow.once('closed', () => { mainWindow = null; });
   mainWindow.webContents.on('did-fail-load', (_event, code, description, validatedUrl, isMainFrame) => {
     if (isMainFrame) log('app', `Window load failed (${code} ${description}) for ${validatedUrl}.`);
   });
@@ -111,7 +131,7 @@ async function bootHarness(interruptedBoot = false) {
       await pluginManager.recoverPendingChange();
       safeMode = false;
       writeBootState('healthy');
-      mainWindow?.webContents.send('harness:status', runtime.status());
+      sendToRenderer('harness:status', runtime.status());
       return;
     } catch (error) {
       safeMode = true;
@@ -136,7 +156,7 @@ async function bootHarness(interruptedBoot = false) {
           await pluginManager.recoverPendingChange();
           safeMode = false;
           writeBootState('healthy');
-          mainWindow?.webContents.send('harness:status', runtime.status());
+          sendToRenderer('harness:status', runtime.status());
           return;
         } catch (error) {
           log('plugin', `Automatic post-restart rollback failed: ${error.message}`);
@@ -151,7 +171,7 @@ async function bootHarness(interruptedBoot = false) {
     log('app', `Harness engine is ready (DSH ${ready.dshVersion}, pnpm ${ready.pnpmVersion}) over ${ready.transport}.`);
     log('workspace', `Using workspace ${settings.workspace}.`);
     writeBootState('healthy');
-    mainWindow?.webContents.send('harness:status', runtime.status());
+    sendToRenderer('harness:status', runtime.status());
   } else {
     if (pending) {
       try {
@@ -159,7 +179,7 @@ async function bootHarness(interruptedBoot = false) {
         await pluginManager.recoverPendingChange();
         safeMode = false;
         writeBootState('healthy');
-        mainWindow?.webContents.send('harness:status', runtime.status());
+        sendToRenderer('harness:status', runtime.status());
         return;
       } catch (error) {
         log('plugin', `Automatic post-restart rollback failed: ${error.message}`);
@@ -167,7 +187,7 @@ async function bootHarness(interruptedBoot = false) {
     }
     safeMode = true;
     log('app', 'Harness failed its startup health check. Entering Safe Mode.');
-    mainWindow?.webContents.send('harness:status', runtime.status());
+    sendToRenderer('harness:status', runtime.status());
   }
 }
 
@@ -179,7 +199,7 @@ async function connectHarness({ restart = false } = {}) {
     }
     safeMode = false;
     writeBootState('booting');
-    mainWindow?.webContents.send('harness:status', { ...runtime.status(), connecting: true, safeMode: false });
+    sendToRenderer('harness:status', { ...runtime.status(), connecting: true, safeMode: false });
     try {
       const result = restart
         ? await runtime.restart(settings.workspace)
@@ -201,7 +221,7 @@ async function connectHarness({ restart = false } = {}) {
       log('app', `Connection failed: ${reason}`);
       return { ok: false, reason, status: runtime.status() };
     } finally {
-      mainWindow?.webContents.send('harness:status', { ...runtime.status(), connecting: false, safeMode });
+      sendToRenderer('harness:status', { ...runtime.status(), connecting: false, safeMode });
     }
   })();
   try { return await connectionAttempt; }
@@ -579,13 +599,21 @@ function registerIpc() {
   });
 
   // Frameless-style window controls in the header need real window actions.
-  ipcMain.handle('window:minimize', async () => { mainWindow?.minimize(); return { ok: true }; });
+  ipcMain.handle('window:minimize', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
+    mainWindow.minimize();
+    return { ok: true };
+  });
   ipcMain.handle('window:maximize', async () => {
-    if (!mainWindow) return { ok: false };
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
     if (mainWindow.isMaximized()) mainWindow.unmaximize(); else mainWindow.maximize();
     return { ok: true, maximized: mainWindow.isMaximized() };
   });
-  ipcMain.handle('window:close', async () => { mainWindow?.close(); return { ok: true }; });
+  ipcMain.handle('window:close', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
+    mainWindow.close();
+    return { ok: true };
+  });
 
   // Switch to a project already known to the engine, without a file dialog.
   ipcMain.handle('workspace:set', async (_event, target) => {
@@ -703,9 +731,9 @@ app.whenReady().then(async () => {
     dshHome: path.join(app.getPath('userData'), 'dsh-home'),
     profileName: 'desktop',
   });
-  runtime.on('event', (message) => mainWindow?.webContents.send('engine:event', message));
+  runtime.on('event', (message) => sendToRenderer('engine:event', message));
   runtime.on('status', (status) => {
-    mainWindow?.webContents.send('harness:status', { ...runtime.status(), ...status });
+    sendToRenderer('harness:status', { ...runtime.status(), ...status });
     // An engine that dies on its own must not leave a 'healthy' boot state behind:
     // a profile can pass the ready handshake and only then fail its own activation.
     if (status.running === false && !status.expected && !quitting) {
