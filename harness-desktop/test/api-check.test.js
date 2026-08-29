@@ -61,6 +61,19 @@ test('API check returns the provider model catalogue and blocks remote plain HTT
   assert.match(insecure.error, /require HTTPS/);
 });
 
+test('unsupported models endpoints fall through to engine discovery', async () => {
+  for (const status of [404, 405, 501]) {
+    const result = await testApiConnection(
+      { baseUrl: 'https://provider.example/v1', apiKey: 'test-key' },
+      { fetch: async () => new Response('not supported', { status }) },
+    );
+    assert.equal(result.ok, true, `HTTP ${status} should be a soft probe result`);
+    assert.equal(result.probeUnsupported, true);
+    assert.deepEqual(result.models, []);
+    assert.equal(result.error, null);
+  }
+});
+
 test('API check reports provider errors and network failures clearly', async () => {
   const denied = await testApiConnection(
     { baseUrl: 'https://provider.example/v1' },
