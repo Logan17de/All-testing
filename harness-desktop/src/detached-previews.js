@@ -5,6 +5,8 @@
 
   const style = document.createElement('style');
   style.textContent = `
+    .work-body.enhanced-viewers-open .viewer-col-head { display: none; }
+    .work-body.enhanced-viewers-open .viewer-col { padding-top: 10px; }
     .enhanced-artifact-popup.detached {
       position: fixed !important;
       z-index: 130;
@@ -27,11 +29,24 @@
 
   const detached = new Set();
   const stack = document.querySelector('#viewerCol');
+  const workBody = document.querySelector('.work-body');
   if (!stack) return;
+  let closeTimer;
 
   const keyFor = (panel) => panel?.querySelector('.enhanced-artifact-head strong')?.getAttribute('title')
     || panel?.querySelector('.enhanced-artifact-head strong')?.textContent
     || '';
+
+  function syncShell() {
+    const hasEnhanced = Boolean(stack.querySelector('.enhanced-artifact-popup'));
+    workBody?.classList.toggle('enhanced-viewers-open', hasEnhanced);
+    clearTimeout(closeTimer);
+    if (!hasEnhanced && !stack.querySelector('.viewer') && workBody && !workBody.classList.contains('hide-viewer')) {
+      closeTimer = setTimeout(() => {
+        if (!stack.querySelector('.enhanced-artifact-popup, .viewer')) document.querySelector('#closePanels')?.click();
+      }, 120);
+    }
+  }
 
   function applyDetachedState() {
     stack.querySelectorAll('.enhanced-artifact-popup').forEach((panel) => {
@@ -45,6 +60,7 @@
         button.textContent = isDetached ? '↙' : '↗';
       }
     });
+    syncShell();
   }
 
   stack.addEventListener('click', (event) => {
