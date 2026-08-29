@@ -10,6 +10,11 @@ const detached = fs.readFileSync(path.join(ROOT, 'src', 'detached-previews.js'),
 const preload = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8');
 const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
 
+test('enhancement scripts parse as JavaScript', () => {
+  assert.doesNotThrow(() => new Function(enhancements));
+  assert.doesNotThrow(() => new Function(detached));
+});
+
 test('left rail keeps Plugins, Artifacts, and Skills together in that order', () => {
   const plugins = html.indexOf('data-view="plugins"');
   const artifacts = html.indexOf('data-view="artifacts"');
