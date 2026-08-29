@@ -26,6 +26,27 @@ test('API check sends a bearer token and accepts a successful models response', 
   assert.deepEqual(result.models, []);
 });
 
+test('Anthropic checks use x-api-key and anthropic-version instead of bearer auth', async () => {
+  let observed;
+  const result = await testApiConnection(
+    {
+      provider: 'anthropic',
+      api: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com/v1',
+      apiKey: 'anthropic-test-key',
+    },
+    { fetch: async (url, init) => {
+      observed = { url: String(url), headers: init.headers };
+      return new Response('{"data":[]}', { status: 200 });
+    } },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(observed.url, 'https://api.anthropic.com/v1/models');
+  assert.equal(observed.headers['x-api-key'], 'anthropic-test-key');
+  assert.equal(observed.headers['anthropic-version'], '2023-06-01');
+  assert.equal(observed.headers.Authorization, undefined);
+});
+
 test('API check returns the provider model catalogue and blocks remote plain HTTP', async () => {
   const result = await testApiConnection(
     { baseUrl: 'https://provider.example/v1', apiKey: 'test-key' },
