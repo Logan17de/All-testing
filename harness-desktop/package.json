@@ -7,7 +7,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/api-check.test.js test/packaging.test.js test/plugin-manager.test.js test/plugin-template.test.js test/plugin-validator.test.js test/runtime.test.js test/ui-bindings.test.js test/workspace-files.test.js",
+    "test": "node --test test/api-check.test.js test/enhancements.test.js test/packaging.test.js test/plugin-manager.test.js test/plugin-template.test.js test/plugin-validator.test.js test/runtime.test.js test/ui-bindings.test.js test/workspace-files.test.js",
     "dist": "electron-builder --win nsis --x64",
     "live": "node scripts/live.js",
     "preview": "node scripts/build-preview.js",
