@@ -6,6 +6,7 @@ const test = require('node:test');
 const SRC = path.join(__dirname, '..', 'src');
 const html = fs.readFileSync(path.join(SRC, 'index.html'), 'utf8');
 const renderer = fs.readFileSync(path.join(SRC, 'renderer.js'), 'utf8');
+const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 
 const ids = new Set([...html.matchAll(/id="([A-Za-z0-9_-]+)"/g)].map((m) => m[1]));
 
@@ -80,4 +81,12 @@ test('provider setup discovers models and starts real authorization flows', () =
   assert.match(renderer, /desktop\.discoverProviderModels\(providerConfig\(\)\)/);
   assert.match(renderer, /desktop\.beginAuthorization/);
   assert.match(renderer, /event\?\.stream === 'authorization'/);
+});
+
+test('main-process renderer sends are guarded against a closed Electron window', () => {
+  assert.match(main, /function canSendToRenderer\(\)/);
+  assert.match(main, /!mainWindow\.isDestroyed\(\)/);
+  assert.match(main, /!mainWindow\.webContents\.isDestroyed\(\)/);
+  assert.doesNotMatch(main, /mainWindow\?\.webContents\.send\(/,
+    'direct optional-chained sends can still throw after BrowserWindow destruction');
 });
