@@ -57,6 +57,10 @@ function skillSlug(name) {
     .slice(0, 64);
 }
 
+function comparablePath(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
 async function createSkill(input = {}) {
   const name = String(input.name || '').trim();
   if (!name) throw new Error('Enter a skill name.');
@@ -66,6 +70,16 @@ async function createSkill(input = {}) {
   if (!workspace?.path) throw new Error('Open a workspace before creating a skill.');
   const cleanDescription = String(input.description || '').replace(/[\r\n]+/g, ' ').trim();
   const target = `${String(workspace.path).replace(/[\\/]+$/, '')}/.dsh/skills/${slug}/SKILL.md`;
+
+  try {
+    const listed = await ipcRenderer.invoke('skills:list');
+    if ((listed?.items || []).some((item) => comparablePath(item.manifest) === comparablePath(target))) {
+      throw new Error(`A skill named "${name}" already exists in this workspace.`);
+    }
+  } catch (error) {
+    if (/already exists/.test(String(error?.message || ''))) throw error;
+  }
+
   const safeName = name.replace(/"/g, '\\"');
   const safeDescription = cleanDescription.replace(/"/g, '\\"');
   const text = `---\nname: "${safeName}"\ndescription: "${safeDescription}"\n---\n\n# ${name}\n\n${cleanDescription || 'Describe the reusable workflow and instructions for this skill here.'}\n`;
@@ -147,6 +161,7 @@ contextBridge.exposeInMainWorld('desktop', {
   createSkill,
   readFile: (target) => ipcRenderer.invoke('files:read', target),
   previewFile,
+  openFile: (target) => ipcRenderer.invoke('files:reveal', target),
   revealFile: (target) => ipcRenderer.invoke('files:reveal', target),
   getLogs: () => ipcRenderer.invoke('logs:get'),
   reportLog: (source, message) => ipcRenderer.send('log:renderer', source, message),
@@ -161,6 +176,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const script = document.createElement('script');
     script.src = src;
     script.defer = true;
+    script.addEventListener('load', () => ipcRenderer.send('log:renderer', 'renderer-enhancements', `${src} loaded`));
+    script.addEventListener('error', () => ipcRenderer.send('log:renderer', 'renderer', `Failed to load ${src}`));
     document.head.appendChild(script);
   }
 });
