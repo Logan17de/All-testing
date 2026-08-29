@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'" />
+  <title>Harness Desktop</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+
+    <!-- ───────────────────────────── LEFT RAIL ───────────────────────────── -->
+    <aside class="rail">
+      <div class="rail-brand">
+        <span class="brand-mark" aria-hidden="true">H</span>
+        <strong>Harness Desktop</strong>
+        <button id="toggleRail" class="ghost-icon rail-collapse" title="Collapse sidebar (Ctrl+B)" aria-label="Collapse sidebar" aria-expanded="true">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>
+        </button>
+      </div>
+
+      <nav class="rail-nav" aria-label="Sections">
+        <button class="rail-item" data-view="plugins">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2v3H3v6h3v3h4v-3h3V5h-3V2z"/></svg>
+          <span>Plugins</span><em id="countPlugins">0</em>
+        </button>
+        <button class="rail-item" data-view="artifacts">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 14 5v6l-6 3.5L2 11V5z"/></svg>
+          <span>Artifacts</span><em id="countArtifacts">0</em>
+        </button>
+        <button class="rail-item" data-view="skills">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 9.7 6h4.6l-3.7 2.7 1.4 4.5L8 10.4l-4 2.8 1.4-4.5L1.7 6h4.6z"/></svg>
+          <span>Skills</span><em id="countSkills">0</em>
+        </button>
+      </nav>
+
+      <div class="rail-section">
+        <span class="rail-label">Projects</span>
+        <button id="addProject" class="rail-add" title="Add project" aria-label="Add project">+</button>
+      </div>
+      <div id="projectList" class="rail-projects" role="list">
+        <div class="rail-empty">Loading…</div>
+      </div>
+
+      <div class="rail-foot">
+        <button id="openSettings" class="rail-item settings-item">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5m6-.6-1.3-.4-.4-.9.6-1.2-1.3-1.3-1.2.6-.9-.4L9.1 0H6.9l-.4 1.3-.9.4-1.2-.6-1.3 1.3.6 1.2-.4.9L2 4.9v2.2l1.3.4.4.9-.6 1.2 1.3 1.3 1.2-.6.9.4.4 1.3h2.2l.4-1.3.9-.4 1.2.6 1.3-1.3-.6-1.2.4-.9 1.3-.4z"/></svg>
+          <span>Settings</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="splitter rail-splitter" data-split="rail" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize sidebar"><i></i></div>
+
+    <button id="showRail" class="show-rail" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>
+    </button>
+
+    <!-- ───────────────────────────── WORK VIEW ───────────────────────────── -->
+    <main id="view-work" class="view active">
+      <header class="work-top">
+        <button id="projectSwitch" class="project-switch">
+          <strong id="projectName">Workspace</strong>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4z"/></svg>
+        </button>
+        <select id="taskSelect" class="task-select" aria-label="Task"><option value="">No tasks yet</option></select>
+        <button id="newTask" class="ghost-icon" title="New task" aria-label="New task">+</button>
+        <button id="stopRun" class="ghost-icon danger-icon hidden" title="Stop this run" aria-label="Stop this run">■</button>
+        <button id="workMore" class="ghost-icon" title="Workspace options" aria-label="Workspace options">···</button>
+        <div class="pane-toggles">
+          <button id="toggleEditor" class="ghost-icon on" title="Show or hide the editor" aria-pressed="true" aria-label="Toggle editor">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>
+          </button>
+          <button id="togglePanels" class="ghost-icon on" title="Show or hide the artifact panels" aria-pressed="true" aria-label="Toggle artifact panels">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/></svg>
+          </button>
+          <button id="focusMode" class="ghost-icon" title="Focus mode — chat only" aria-label="Focus mode">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 1.5H2.5a1 1 0 0 0-1 1V6M10 1.5h3.5a1 1 0 0 1 1 1V6M6 14.5H2.5a1 1 0 0 1-1-1V10M10 14.5h3.5a1 1 0 0 0 1-1V10"/></svg>
+          </button>
+        </div>
+        <div class="win-controls"><button class="wc" data-win="minimize" title="Minimize" aria-label="Minimize">–</button><button class="wc" data-win="maximize" title="Maximize" aria-label="Maximize">▢</button><button class="wc close" data-win="close" title="Close" aria-label="Close">✕</button></div>
+      </header>
+
+      <div id="safeModeBanner" class="banner hidden" role="status">
+        <div><strong>Recovery mode</strong><p>Chat connection is unavailable because the app was opened with --safe-mode.</p></div>
+      </div>
+
+      <div class="work-body">
+        <!-- chat column -->
+        <section class="chat-col" aria-label="Conversation">
+          <div id="chatStream" class="chat-stream">
+            <div class="chat-empty">
+              <span class="eyebrow">Local agent workspace</span>
+              <h2>What should Harness work on?</h2>
+              <p>Messages, tool activity, and run state stay in this window.</p>
+            </div>
+          </div>
+
+          <div class="composer">
+            <div id="connectionNotice" class="connection-notice hidden" role="status" aria-live="polite"></div>
+            <div class="composer-box">
+              <textarea id="promptInput" rows="1" placeholder="Ask Harness anything…" aria-label="Message Harness"></textarea>
+              <button id="sendPrompt" class="enter-key" title="Send (Enter)" aria-label="Send">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 4v3.5a2 2 0 0 1-2 2H4"/><path d="m6.5 7-2.5 2.5L6.5 12"/></svg>
+              </button>
+            </div>
+            <div class="composer-bar">
+              <button id="permMode" class="cb-text" title="Permission preset for this session">Standard</button>
+              <button id="composerAdd" class="cb-icon" title="Attach context" aria-label="Attach context">+</button>
+              <button id="composerTune" class="cb-icon" title="Run options" aria-label="Run options">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h7M11 4h3M2 8h3M7 8h7M2 12h9M13 12h1"/></svg>
+              </button>
+              <button id="composerTuneMenu" class="cb-chev" title="More run options" aria-label="More run options">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10l4-3.5"/></svg>
+              </button>
+              <span class="cb-spacer"></span>
+              <select id="modelSelect" class="cb-select" aria-label="Model"><option>Auto</option></select>
+              <select id="effortSelect" class="cb-select hidden" aria-label="Reasoning effort"></select>
+              <span id="presetLabel" class="cb-static">Standard</span>
+              <span id="statusRing" class="status-ring off" title="Connection status"></span>
+            </div>
+          </div>
+        </section>
+
+        <div class="splitter" data-split="chat" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize chat panel"><i></i></div>
+
+        <!-- editor column -->
+        <section class="editor-col" aria-label="Editor">
+          <div class="tabstrip">
+            <div id="editorTabs" class="tabs"></div>
+            <select id="openFile" class="task-select" aria-label="Open a workspace file"><option value="">Open file…</option></select>
+            <button id="saveFile" class="ghost-icon" title="Save (Ctrl+S)" aria-label="Save">⤓</button>
+            <button id="newTab" class="ghost-icon" title="New file" aria-label="New file">+</button>
+            <button id="closeEditor" class="ghost-icon" title="Close editor panel" aria-label="Close editor panel">✕</button>
+          </div>
+          <div class="format-bar" role="toolbar" aria-label="Formatting">
+            <button class="fb" data-cmd="undo" title="Undo" aria-label="Undo">↶</button>
+            <button class="fb" data-cmd="redo" title="Redo" aria-label="Redo">↷</button>
+            <span class="fb-sep"></span>
+            <button class="fb" data-cmd="h1" title="Heading 1">H1</button>
+            <button class="fb" data-cmd="h2" title="Heading 2">H2</button>
+            <button class="fb" data-cmd="h3" title="Heading 3">H3</button>
+            <span class="fb-sep"></span>
+            <button class="fb" data-cmd="ul" title="Bulleted list">•—</button>
+            <button class="fb" data-cmd="ol" title="Numbered list">1—</button>
+            <span class="fb-sep"></span>
+            <button class="fb strong" data-cmd="bold" title="Bold">B</button>
+            <button class="fb ital" data-cmd="italic" title="Italic">I</button>
+            <button class="fb" data-cmd="code" title="Code">&lt;/&gt;</button>
+            <button class="fb" data-cmd="link" title="Link">🔗</button>
+            <button class="fb" data-cmd="table" title="Table">▦</button>
+            <button class="fb" data-cmd="more" title="More">···</button>
+            <button class="fb grow-end" data-cmd="expand" title="Expand">⤢</button>
+          </div>
+          <textarea id="editorArea" class="editor-area" spellcheck="false" aria-label="File contents"></textarea>
+          <div class="editor-status">
+            <span id="editorLang">Markdown</span>
+            <span id="editorWords">0 words</span>
+            <span id="editorCaret">Ln 1, Col 1</span>
+            <span id="editorSaved" class="saved-dot" title="Saved">✓</span>
+          </div>
+        </section>
+
+        <div class="splitter" data-split="viewer" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize artifact panel"><i></i></div>
+
+        <!-- artifact viewers -->
+        <aside class="viewer-col" aria-label="Artifact viewers">
+          <div class="viewer-col-head"><span>Panels</span><button id="closePanels" class="ghost-icon" title="Close artifact panels" aria-label="Close artifact panels">✕</button></div>
+          <div id="viewerCol" class="viewer-stack"></div>
+        </aside>
+      </div>
+    </main>
+
+    <!-- ──────────────────────────── PLUGINS VIEW ──────────────────────────── -->
+    <main id="view-plugins" class="view">
+      <header class="page-head">
+        <div>
+          <h1>Plugins</h1>
+          <p>Install, manage, and keep your extensions up to date.</p>
+        </div>
+        <div class="head-actions">
+          <div class="menu-wrap">
+            <button id="addPluginMenu" class="btn ghost" aria-haspopup="true" aria-expanded="false">Plugin format</button>
+            <div id="pluginMenu" class="menu hidden" role="menu">
+              <button role="menuitem" data-menu="guide">Download format guide (.txt)</button>
+              <button role="menuitem" data-menu="starter">Download starter plugin (.zip)</button>
+            </div>
+          </div>
+        </div>
+        <div class="win-controls"><button class="wc" data-win="minimize" title="Minimize" aria-label="Minimize">–</button><button class="wc" data-win="maximize" title="Maximize" aria-label="Maximize">▢</button><button class="wc close" data-win="close" title="Close" aria-label="Close">✕</button></div>
+      </header>
+
+      <div class="plugins-body">
+        <section class="col-a">
+          <div class="card">
+            <div class="card-head"><h2>Install plugin</h2></div>
+            <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Drop plugin ZIP here or click to browse">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0L8 8m4-4 4 4M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></svg>
+              <strong>Drop plugin ZIP here</strong>
+              <small>or click to browse</small>
+            </div>
+            <div id="candidatePanel" class="candidate hidden"></div>
+            <ol id="pipeline" class="pipeline" aria-label="Install pipeline">
+              <li data-step="receive"><span class="node"></span><em>Receive</em></li>
+              <li data-step="validate"><span class="node"></span><em>Validate</em></li>
+              <li data-step="compat"><span class="node"></span><em>Compat.</em></li>
+              <li data-step="stage"><span class="node"></span><em>Stage</em></li>
+              <li data-step="build"><span class="node"></span><em>Build</em></li>
+              <li data-step="activate"><span class="node"></span><em>Activate</em></li>
+            </ol>
+          </div>
+        </section>
+
+        <div class="splitter" data-split="cola" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize install panel"><i></i></div>
+
+        <section class="col-b">
+          <div class="card grow">
+            <div class="card-head with-action">
+              <h2 id="pluginListTitle">Active plugins <span id="installedCount" class="count">(0)</span></h2>
+              <button id="seeAllPlugins" class="btn ghost sm">See all</button>
+            </div>
+            <div class="list-tools">
+              <div class="search">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10m4-1 4 4"/></svg>
+                <input id="pluginSearch" type="search" placeholder="Search plugins" aria-label="Search plugins" />
+              </div>
+              <button id="refreshPlugins" class="ghost-icon" title="Refresh" aria-label="Refresh">↻</button>
+            </div>
+            <div id="pluginList" class="plugin-list"><div class="inline-state">Loading…</div></div>
+            <div class="card-foot"><span id="pluginFootCount">0 plugins</span></div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <!-- ─────────────────────── ARTIFACTS / SKILLS VIEWS ─────────────────────── -->
+    <main id="view-artifacts" class="view">
+      <header class="page-head">
+        <div><h1>Artifacts</h1><p>Plugin builds, restore points, archives, and logs Harness Desktop manages.</p></div>
+        <div class="win-controls"><button class="wc" data-win="minimize" title="Minimize" aria-label="Minimize">–</button><button class="wc" data-win="maximize" title="Maximize" aria-label="Maximize">▢</button><button class="wc close" data-win="close" title="Close" aria-label="Close">✕</button></div>
+      </header>
+      <div class="page-tools">
+        <div class="search">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10m4-1 4 4"/></svg>
+          <input id="artifactSearch" type="search" placeholder="Search artifacts" aria-label="Search artifacts" />
+        </div>
+        <span id="artifactCount" class="tool-count">—</span>
+        <button id="refreshArtifacts" class="btn ghost sm">↻ Refresh</button>
+      </div>
+      <div class="pad-body"><div id="artifactList" class="file-list"></div></div>
+    </main>
+
+    <main id="view-skills" class="view">
+      <header class="page-head">
+        <div><h1>Skills</h1><p>SKILL.md folders the engine loads from this workspace and your Harness home.</p></div>
+        <div class="win-controls"><button class="wc" data-win="minimize" title="Minimize" aria-label="Minimize">–</button><button class="wc" data-win="maximize" title="Maximize" aria-label="Maximize">▢</button><button class="wc close" data-win="close" title="Close" aria-label="Close">✕</button></div>
+      </header>
+      <div class="page-tools">
+        <div class="search">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10m4-1 4 4"/></svg>
+          <input id="skillSearch" type="search" placeholder="Search skills" aria-label="Search skills" />
+        </div>
+        <span id="skillCount" class="tool-count">—</span>
+        <button id="refreshSkills" class="btn ghost sm">↻ Refresh</button>
+      </div>
+      <div class="pad-body"><div id="skillList" class="skill-grid"></div><div id="skillRoots" class="roots-note"></div></div>
+    </main>
+  </div>
+
+  <!-- ──────────────────────────── SETTINGS MODAL ──────────────────────────── -->
+  <div id="settingsOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Settings">
+    <div class="modal">
+      <aside class="modal-nav">
+        <div class="modal-nav-head">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5"/></svg>
+          <strong>Settings</strong>
+        </div>
+        <button class="mnav" data-pane="general"><span class="mi">⚙</span>General</button>
+        <button class="mnav active" data-pane="models"><span class="mi">◧</span>Models &amp; Providers</button>
+        <button class="mnav" data-pane="appearance"><span class="mi">◐</span>Appearance</button>
+        <button class="mnav" data-pane="diagnostics"><span class="mi">⌁</span>Diagnostics &amp; Logs</button>
+      </aside>
+
+      <div class="modal-main">
+        <button id="closeSettings" class="modal-close" title="Close settings" aria-label="Close settings">✕</button>
+
+        <!-- Models & Providers -->
+        <section class="pane active" data-pane="models">
+          <div class="pane-head">
+            <div>
+              <h2>Models &amp; Providers</h2>
+              <p>Configure AI providers, accounts, and usage limits for Harness Desktop.</p>
+            </div>
+          </div>
+
+          <h3 class="sec-title">Default providers</h3>
+          <p class="sec-sub">Well-known routes this engine can serve. Connect one with an API key.</p>
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr><th class="w-chev"></th><th>Provider</th><th>Status</th><th>Auth</th><th>Models</th><th class="w-act">Actions</th></tr>
+              </thead>
+              <tbody id="providerRows"></tbody>
+            </table>
+          </div>
+
+          <div class="sec-row">
+            <div>
+              <h3 class="sec-title">OAuth accounts</h3>
+              <p class="sec-sub">Routes that sign in with an account instead of an API key.</p>
+            </div>
+            <button id="addOauth" class="btn ghost">+ Add OAuth account</button>
+          </div>
+          <div id="oauthCards" class="oauth-grid"></div>
+
+          <div id="signInBanner" class="banner sign-in hidden" role="status">
+            <div><strong>A provider is asking you to sign in</strong><p id="signInMessage"></p></div>
+            <button id="signInOpen" class="btn primary">Open sign-in page</button>
+          </div>
+          <div id="authPrompt" class="provider-form hidden" role="group" aria-label="Authorization question">
+            <label id="authPromptLabel">Authorization response<input id="authPromptInput" autocomplete="off" /></label>
+            <select id="authPromptSelect" class="hidden" aria-label="Authorization choice"></select>
+            <div class="provider-form-actions">
+              <button type="button" id="authPromptSubmit" class="btn primary sm">Continue</button>
+              <button type="button" id="authPromptCancel" class="btn ghost sm">Cancel</button>
+            </div>
+          </div>
+
+          <div class="sec-row">
+            <div>
+              <h3 class="sec-title">Custom / private providers</h3>
+              <p class="sec-sub">Self-hosted or private endpoints you have added.</p>
+            </div>
+            <button id="addProviderCustom" class="btn ghost">+ Add provider</button>
+          </div>
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr><th>Provider</th><th>Endpoint / Base URL</th><th>Auth</th><th>Default model</th><th>Status</th><th class="w-act">Actions</th></tr>
+              </thead>
+              <tbody id="customRows"></tbody>
+            </table>
+          </div>
+
+          <form id="providerForm" class="provider-form hidden">
+            <h3 class="sec-title" id="providerFormTitle">Configure provider</h3>
+            <label>API base URL<input id="apiBaseUrl" type="url" placeholder="https://api.example.com/v1" /></label>
+            <label id="apiKeyRow">API key<input id="apiKey" type="password" autocomplete="off" placeholder="Leave blank to keep the stored key" /></label>
+            <label>Model<select id="apiModel"><option value="">Connect to load models</option></select></label>
+            <label id="apiProtocolRow" class="hidden">Wire protocol<select id="apiProtocol">
+              <option value="openai-completions">openai-completions</option>
+              <option value="openai-responses">openai-responses</option>
+              <option value="openai">openai</option>
+              <option value="anthropic-messages">anthropic-messages</option>
+              <option value="azure-openai-responses">azure-openai-responses</option>
+              <option value="bedrock-converse-stream">bedrock-converse-stream</option>
+              <option value="openai-codex-responses">openai-codex-responses</option>
+            </select></label>
+            <label id="apiKeyRefRow" class="hidden">Credential name<input id="apiKeyRef" placeholder="MY_PROVIDER_API_KEY" /></label>
+            <div class="provider-form-actions">
+              <span id="apiResult" class="form-result">Models have not been fetched yet.</span>
+              <button type="button" id="testApi" class="btn ghost sm">Refresh models</button>
+              <button type="button" id="saveProvider" class="btn primary sm">Save provider</button>
+              <button type="button" id="cancelProvider" class="btn ghost sm">Cancel</button>
+            </div>
+          </form>
+
+          <h3 class="sec-title">Credentials</h3>
+          <p class="sec-sub">Keys and account records the engine stores for these routes.</p>
+          <div id="accountsPane" class="sub-card"></div>
+          <div class="pane-single">
+            <div class="sub-card">
+              <div class="sub-head"><h3>Diagnostics &amp; Logs</h3></div>
+              <p class="sub-sub">Quick access to diagnostics and recent logs.</p>
+              <div class="diag-grid">
+                <div class="diag-box">
+                  <strong>System health</strong>
+                  <span id="diagHealth" class="good-text">Checking…</span>
+                  <small id="diagChecked">Last checked: —</small>
+                </div>
+                <div class="diag-box">
+                  <strong>Log level</strong>
+                  <select id="logLevel" aria-label="Log level"><option>Info</option><option>Debug</option><option>Warn</option><option>Error</option></select>
+                  <small>Retention: session</small>
+                </div>
+                <div class="diag-box wide">
+                  <strong>Recent log entries</strong>
+                  <div id="diagRecent" class="diag-recent"></div>
+                </div>
+              </div>
+              <button id="openDiagnostics" class="btn ghost wide-btn">Open diagnostics</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- General -->
+        <section class="pane" data-pane="general">
+          <div class="pane-head"><div><h2>General</h2><p>Application behaviour and recovery.</p></div></div>
+          <div class="sub-card">
+            <div class="field-row"><div><strong>Harness data root</strong><small id="genDshHome">—</small></div></div>
+            <div class="field-row"><div><strong>Relaunch application</strong><small>Restarts the desktop window and reconnects when chat is used.</small></div><button id="genRelaunch" class="btn ghost sm">Relaunch</button></div>
+            <div class="field-row"><div><strong>Recovery mode</strong><small>Opens without connecting so plugin recovery stays reachable.</small></div><button id="genSafeInfo" class="btn ghost sm">Copy recovery command</button></div>
+            <div class="field-row"><div><strong>Restore Harness</strong><small>Reset to the core state: only the plugins and skills that ship with Harness.</small></div><button id="restoreHarness" class="btn danger sm">Restore Harness</button></div>
+          </div>
+        </section>
+
+        <!-- Appearance -->
+        <section class="pane" data-pane="appearance">
+          <div class="pane-head"><div><h2>Appearance</h2><p>Theme and density.</p></div></div>
+          <div class="sub-card">
+            <div class="field-row"><div><strong>Theme</strong><small>Harness Desktop ships a single dark control-room theme.</small></div><span class="pill">Dark</span></div>
+          </div>
+        </section>
+
+        <!-- Diagnostics -->
+        <section class="pane" data-pane="diagnostics">
+          <div class="pane-head"><div><h2>Diagnostics &amp; Logs</h2><p>App, connection, plugin, build, and runtime records.</p></div>
+            <div class="head-actions"><button id="diagRestart" class="btn ghost sm">Retry connection</button><button id="clearLogView" class="btn ghost sm">Clear view</button></div></div>
+          <div class="log-toolbar"><span>Persistent JSONL log</span><span id="logCount">0 entries</span></div>
+          <pre id="logOutput" class="log-output" tabindex="0"></pre>
+        </section>
+
+        <footer class="modal-foot">
+            <button id="settingsDone" class="btn primary">Done</button>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <div id="pluginOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Plugin details">
+    <div class="sheet">
+      <button id="closePluginSheet" class="modal-close" title="Close" aria-label="Close">✕</button>
+      <div id="pluginSheetBody"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="renderer.js"></script>
+</body>
+</html>

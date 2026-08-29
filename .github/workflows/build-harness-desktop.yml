@@ -1,0 +1,89 @@
+name: Build Harness Desktop EXE
+
+on:
+  push:
+    branches:
+      - harness-desktop-v1
+    paths:
+      - 'harness-desktop/**'
+      - '.github/workflows/build-harness-desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      PNPM_CONFIG_AUTO_INSTALL_PEERS: 'true'
+      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: harness-desktop
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        run: npm install --global pnpm@11.24.0 --no-audit --no-fund
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit production dependencies
+        run: pnpm audit --prod
+
+      - name: Run unit tests
+        run: pnpm test
+
+      - name: Run real-engine and Electron smoke tests
+        run: pnpm run test:e2e
+
+      - name: Require Windows signing credentials
+        shell: pwsh
+        run: |
+          if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) {
+            throw 'Set WINDOWS_CSC_LINK and WINDOWS_CSC_KEY_PASSWORD repository secrets before producing a release installer.'
+          }
+
+      - name: Build Windows installer
+        run: pnpm run dist
+
+      - name: Smoke-test packaged application
+        shell: pwsh
+        run: |
+          $env:HARNESS_DESKTOP_EXE = (Resolve-Path 'dist\win-unpacked\Harness Desktop.exe').Path
+          pnpm run test:packaged
+
+      - name: Create SHA256
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
+          if (-not $exe) { throw 'No EXE produced.' }
+          (Get-FileHash $exe.FullName -Algorithm SHA256).Hash + '  ' + $exe.Name | Set-Content dist\SHA256.txt
+
+      - name: Verify Authenticode signature
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
+          $signature = Get-AuthenticodeSignature $exe.FullName
+          if ($signature.Status -ne 'Valid') { throw "Installer signature is $($signature.Status)." }
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-desktop-windows-x64
+          path: |
+            harness-desktop/dist/*.exe
+            harness-desktop/dist/SHA256.txt
+          if-no-files-found: error
+          retention-days: 30

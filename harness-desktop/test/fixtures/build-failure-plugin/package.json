@@ -1,0 +1,13 @@
+{
+  "name": "dsh-harness-desktop-build-failure",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"console.error('intentional build failure'); process.exit(7)\""
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

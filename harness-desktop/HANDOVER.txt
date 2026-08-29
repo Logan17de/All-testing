@@ -1,0 +1,295 @@
+===============================================================================
+HARNESS DESKTOP - ENGINEERING HANDOVER
+Windows x64 - v0.1.0 - Electron 44 / Node 24 / pnpm 11.24.0 / DSH 0.1.1-rc.2
+===============================================================================
+
+A native Electron client for DeepSeek Harness (DSH). The engine runs as a child
+process spoken to over stdin/stdout JSON-RPC. There is no webview, no localhost
+UI and no bundled web server - that constraint is deliberate and enforced by a
+test.
+
+This document is everything needed to keep working on it, including the traps
+that already cost time.
+
+
+-------------------------------------------------------------------------------
+1. START HERE
+-------------------------------------------------------------------------------
+
+  From harness-desktop/ :
+
+    npm test          72 unit tests, no engine needed          (~5s)
+    npm run test:e2e  7 suites against a REAL engine           (~4 min)
+    npm run live      launch against an isolated engine home
+    npm start         launch against the user's real ~/.dsh
+    npm run preview   self-contained UI page for design review
+    npm run dist      NSIS installer -> dist/                  (~15 min)
+
+  Both test commands must pass before claiming anything works. `npm test` alone
+  is NOT evidence: most real defects in this project only appeared against the
+  live engine or in a running Electron window.
+
+
+-------------------------------------------------------------------------------
+2. WHAT EACH FILE OWNS
+-------------------------------------------------------------------------------
+
+  main.js                     Electron main. 38 IPC channels, boot-state
+                              machine, Safe Mode, crash guard, plugin /
+                              provider / file handlers.
+
+  preload.js                  The only renderer surface. 40+ allowlisted calls,
+                              contextIsolation on, no Node in the renderer.
+
+  lib/runtime.js              Spawns and supervises the DSH child, IPC framing,
+                              health + settle, boot-failure diagnostics.
+
+  lib/engine-bridge.mjs       A cordis plugin injected into DSH.
+                              METHOD ALLOWLIST - anything not listed here is
+                              unreachable from the app. See trap 5.
+
+  lib/native-engine.patch.yml Disables the whole browser surface (webserver,
+                              web-runtime, every ui-*) and mounts the bridge.
+
+  lib/plugin-manager.js       Transactional plugin pipeline: stage -> build ->
+                              snapshot -> activate -> verify -> rollback, plus
+                              restoreCore().
+
+  lib/plugin-validator.js     Manifest rules. Single source of truth for what an
+                              acceptable plugin is.
+
+  lib/plugin-template.js      Generates the format guide and starter ZIP FROM
+                              the validator, so the docs cannot drift.
+
+  lib/workspace-files.js      Artifacts, skills, and path-scoped read/write.
+                              All renderer-supplied paths gated by isInside().
+
+  lib/api-check.js            Provider connection check (/models probe).
+
+  src/index.html              Markup: rail, Work, Plugins, Artifacts, Skills,
+                              Settings modal, plugin detail sheet.
+  src/renderer.js             All UI logic, 1,634 lines. Contains NO sample
+                              data - see trap 9.
+  src/styles.css              Dark control-room theme.
+
+  scripts/build-preview.js    Builds the self-contained preview, and FAILS if
+                              the stylesheet or script is missing.
+  scripts/live.js             Launches the app against the isolated home.
+
+  test/e2e/*.js               Real-engine suites + run-all.js runner.
+
+
+-------------------------------------------------------------------------------
+3. TRAPS - READ BEFORE TOUCHING ANYTHING
+-------------------------------------------------------------------------------
+
+Each of these was a real defect that shipped or nearly shipped. Ordered by how
+much time they cost.
+
+  [1] electron-builder only collects `dependencies`                     SEVERE
+      The engine reaches ~19 packages through peerDependencies (satisfied in dev
+      by pnpm autoInstallPeers) and its native binaries through platform
+      optionalDependencies. None of them ship. The installed app then launches
+      fine and dies with:
+          Cannot find package '@deepseek-ai/cordis-plugin-group'
+      GUARD: 31 packages are pinned as direct dependencies.
+             test/packaging.test.js fails if a DSH upgrade adds a new peer.
+
+  [2] Never cpSync a DSH_HOME                                           SEVERE
+      pnpm's node_modules is a symlink farm. A recursive copy dereferences it
+      and DSH's boot then fails on `stat.isSymbolicLink`. A test of mine did
+      this and destroyed the isolated profile twice - once by copying, once by
+      restoring only two files after an rmSync of the whole home.
+      FIX: Back up only the files you actually change (settings.yaml,
+           .credentials.yaml) or the tiny profiles/web directory. Never the tree
+           containing node_modules.
+
+  [3] "Ready" is not the same as "alive"                                SEVERE
+      A profile can mount the bridge - firing the ready handshake - and only
+      then fail its own activation assert, killing the engine ~5s later.
+      start() used to return ok:true for an engine that was already gone, and
+      the app persisted boot state `healthy`, which suppressed Safe Mode on the
+      next launch.
+      FIX: A 6s settle window after ready, plus an event-driven crash guard that
+           forces Safe Mode and writes `crashed` on any unexpected exit.
+
+  [4] A missing element used to kill the whole UI
+      $('#gone').addEventListener(...) throws at load and ABORTS THE REST OF
+      renderer.js, silently leaving every later control unbound. Half the app
+      was dead this way, and a static audit could not see it because the
+      handlers existed in source.
+      RULE: Always bind with on('#id', 'click', fn).
+            test/ui-bindings.test.js fails on any orphaned selector or any use
+            of the raw $('#id').addEventListener form.
+
+  [5] The bridge allowlist is the API boundary
+      The engine exposes far more than the client uses. If a method is not in
+      lib/engine-bridge.mjs you get:
+          "Method x is not available to the desktop client"
+      which reads like the engine lacks the feature. It usually does not.
+      Full apiProxy surface:
+          sessions   list, search, create, history, models, selectModel,
+                     rename, fork, prompt, attachment, updateQueue, cancel
+          subagents  list, history, prompt, interrupt
+          workspace  list, create, rename, delete, insertBefore,
+                     insertSessionBefore, archiveSession
+          host       describe, pickDirectory, listDirectory, createDirectory,
+                     openPath
+          goals      create, edit, pause, resume, complete, clear
+          skills     list
+          agentPresets list, select, read, copy, openDocument, remove
+          settings   describe, openDocument, update, replace, mutate
+          credentials describe, set, unset
+          llm        providers, models, discoverModels
+          events     mux, host
+          downloads  sessionLog
+      CHECK: Before concluding a capability is missing, enumerate ctx.apiProxy
+             from inside the bridge. That is how skills.list and agentPresets
+             were found after being wrongly assumed absent.
+
+  [6] `dsh plugin install` reconciles bundles back
+      Editing dsh.profile.bundles and then running install silently undoes the
+      edit - the reconcile re-adds a bundle for anything still a dependency. A
+      "reset to core" appeared to work and changed nothing.
+      FIX: Remove through the engine:
+           dsh plugin --profile web remove <name>
+
+  [7] Custom providers need `api` AND `models`
+      Writing into llm-pi-ai.providers is rejected without a wire protocol and
+      without at least one model listed. Valid protocols:
+          openai-completions      openai-responses        openai
+          anthropic-messages      azure-openai-responses
+          bedrock-converse-stream openai-codex-responses
+      NOTE: settings.mutate uses optimistic concurrency. Re-read
+            settings.describe for a fresh expectedRevision before every mutate,
+            or you get "changed since it was read".
+
+  [8] Stale child handlers
+      A stopped engine's `exit` fires after the next one has spawned; without an
+      identity check its handler nulled this.child and abandoned a healthy
+      engine. Restarts failed ~1 in 3 in about 500ms with no output, surfacing
+      as spurious plugin rollbacks and orphaned processes.
+      FIX: Every child handler checks it still owns the runtime before touching
+           shared state.
+
+  [9] No fabricated data, ever
+      The renderer once carried a preview bridge with sample projects, chats,
+      plugins and skills so the layout could be reviewed in a browser. The user
+      repeatedly mistook it for the app. It is DELETED, not disabled.
+      GUARD: Three tests fail if sample content, a stub bridge, or the PREVIEW
+             flag returns. Disconnected, the app must say so.
+
+  [10] Smaller ones worth knowing
+      - adm-zip rewrites entry names on BOTH read and write, so a traversal
+        archive must be built byte-by-byte to test the extractor at all.
+      - Cold start after install is ~75s on Windows (Defender scanning ~800 MB
+        of unsigned files) versus ~4s warm. The health ceiling is 180s for this
+        reason - do not "optimise" it back down.
+      - Scripted edits mangle escapes. A literal backspace byte and a raw NUL
+        both landed in renderer.js from inline `node -e` patches. Use a script
+        file for anything containing regexes or template literals.
+
+
+-------------------------------------------------------------------------------
+4. CURRENT STATE - ALL GREEN
+-------------------------------------------------------------------------------
+
+  npm test           72/72   validator, archive safety, plugin manager,
+                             runtime, packaging, UI bindings, workspace files
+  e2e-real           22/22   receive -> validate -> build -> activate ->
+                             restart -> verify -> rollback
+  e2e-recovery       21/21   engine-breaking plugin, disable, interrupted
+                             change, repeat cycles, provider checks
+  e2e-starter        11/11   the starter plugin the app hands out really
+                             installs
+  e2e-restore-core    9/9    reset to shipped bundles, skills parked aside,
+                             rollback restores
+  e2e-providers       7/7    custom route + credential write/remove, Claude and
+                             OpenAI presets accepted by the engine
+  real-verify         8/8    asserts the shipped source contains no hardcoded
+                             vendor / plugin / platform data
+  ui-smoke            pass   renderer runs in real Electron with zero faults
+
+  UI audit: 82 clickable controls, 0 unwired. 0 unused preload APIs.
+
+
+-------------------------------------------------------------------------------
+5. OPEN ITEMS
+-------------------------------------------------------------------------------
+
+  *** THE INSTALLER IN dist/ IS STALE - DO NOT SHIP IT ***
+      It predates the provider rework and the removal of mock data; its packaged
+      renderer still contains the preview bridge. Run `npm run dist`, then
+      install it and confirm the app reaches ready before calling it done.
+      Verify with:
+          diff dist/win-unpacked/resources/app/src/renderer.js src/renderer.js
+
+  - The user's real profile cannot run this client. NOT ACTIONED.
+    Five plugins in ~/.dsh/profiles/web wait on the `webServer` service, which
+    the native client deliberately does not run:
+        dsh-brainstorm-team-local   dsh-solution-explorer
+        @nonamelego/dsh-catppuccin  dsh-session-manager
+        dsh-file-upload
+    DSH fails the whole plugin tree when entries do not activate. This needs the
+    user's decision: drop them from `bundles` for desktop use, or keep using the
+    web profile for them.
+    One earlier blocker, dsh-barricade, WAS removed (it was listed in bundles
+    while its own guard plugin documents it must not be). Backup left at
+    ~/.dsh/profiles/web/package.json.bak-barricade-*
+
+  - OAuth has no "begin login" call. The engine stores oauth-kind credentials
+    and emits auth_url / device_code events, but nothing in the API surface
+    starts a flow. The client surfaces the emitted URL in a banner and opens it
+    externally. DO NOT build a fake "Sign in" button - verify against the API
+    surface first.
+
+  - The installer is unsigned. SmartScreen warns on first run, and this is part
+    of why cold start is slow.
+
+  - The log file is only trimmed at startup. The 5 MB cap is enforced at launch,
+    so one long session with verbose plugin builds can grow it without bound.
+
+  - skills.list is now allowlisted but returned nothing in the test home, so the
+    Skills page falls back to scanning .dsh/skills, .agents/skills and
+    $DSH_HOME/skills. Re-check against a home with engine-registered skills.
+
+  - Model ids in the provider presets are guesses (gpt-5.1, claude-sonnet-4-5,
+    gemini-2.5-pro). They are editable in the form and the engine validates
+    them, but confirm against each vendor before release.
+
+
+-------------------------------------------------------------------------------
+6. WORKING AGREEMENTS
+-------------------------------------------------------------------------------
+
+  - Check the engine before concluding a feature is impossible. Two
+    capabilities - custom providers and skills - were removed as "not supported"
+    when both were fully backed. Enumerate the API surface first.
+
+  - Never leave a control that does nothing. Wire it, or delete it.
+    test/ui-bindings.test.js plus the clickable audit keep this at zero.
+
+  - Prefer the engine's own commands over editing its files. Manifest edits get
+    reconciled away; `dsh plugin remove` sticks.
+
+  - Snapshot before any destructive profile change and record it in history, so
+    the existing Rollback control undoes it. restoreCore() is the pattern to
+    copy.
+
+  - The isolated home at .e2e/source-dsh-home is disposable but MUST exist for
+    the E2E suites. If it breaks, recreate profiles/web with:
+        cordis.yml           containing  []
+        cordis.patch.yml     containing  []
+        package.json         name dsh-profile-web, dependencies {},
+                             dsh.profile.bundles = [ "@deepseek-ai/dsh-base",
+                                                     "@deepseek-ai/dsh-web-app" ]
+        pnpm-workspace.yaml  packages: [ . ], nodeLinker: hoisted,
+                             autoInstallPeers: false
+    Dependencies resolve by walking up to the app's own node_modules.
+
+  - Engine tests mutate a profile. Never point DSH_HOME at a home you care
+    about.
+
+===============================================================================
+END OF HANDOVER
+===============================================================================
