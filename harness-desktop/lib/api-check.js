@@ -1,6 +1,8 @@
 async function testApiConnection(config, options = {}) {
   const baseUrl = String(config?.baseUrl || '').trim().replace(/\/+$/, '');
   const apiKey = String(config?.apiKey || '').trim();
+  const provider = String(config?.provider || '').trim().toLowerCase();
+  const protocol = String(config?.api || '').trim().toLowerCase();
   if (!/^https?:\/\//i.test(baseUrl)) {
     return { ok: false, error: 'Enter a valid http(s) API base URL.' };
   }
@@ -18,9 +20,19 @@ async function testApiConnection(config, options = {}) {
     return { ok: false, error: 'API keys require HTTPS. Plain HTTP is allowed only for a provider running on this computer.' };
   }
 
+  const headers = {};
+  if (apiKey) {
+    if (protocol === 'anthropic-messages' || provider === 'anthropic') {
+      headers['x-api-key'] = apiKey;
+      headers['anthropic-version'] = '2023-06-01';
+    } else {
+      headers.Authorization = `Bearer ${apiKey}`;
+    }
+  }
+
   try {
     const response = await (options.fetch || fetch)(url, {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      headers,
       signal: AbortSignal.timeout(options.timeoutMs || 10_000),
     });
     const text = await response.text();
