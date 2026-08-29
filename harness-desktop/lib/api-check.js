@@ -43,12 +43,20 @@ async function testApiConnection(config, options = {}) {
       ? { id: model, name: model }
       : { id: model?.id || model?.name, name: model?.display_name || model?.displayName || model?.name || model?.id })
       .filter((model) => model.id);
+
+    // Some valid provider protocols do not expose an OpenAI-style /models
+    // endpoint. Treat only the explicit "endpoint not supported" statuses as a
+    // soft probe result so the engine's own llm.discoverModels implementation
+    // still gets a chance. Authentication and other provider errors remain hard
+    // failures and are surfaced immediately.
+    const probeUnsupported = [404, 405, 501].includes(response.status);
     return {
-      ok: response.ok,
+      ok: response.ok || probeUnsupported,
       status: response.status,
       models,
+      probeUnsupported,
       preview: text.slice(0, 500),
-      error: response.ok ? null : (payload?.error?.message || payload?.message || `API returned HTTP ${response.status}`),
+      error: response.ok || probeUnsupported ? null : (payload?.error?.message || payload?.message || `API returned HTTP ${response.status}`),
     };
   } catch (error) {
     return { ok: false, error: error.message };
