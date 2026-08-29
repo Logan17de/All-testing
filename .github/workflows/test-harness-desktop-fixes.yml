@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: harness-desktop-fixes-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-x64-tests:
     runs-on: windows-latest
