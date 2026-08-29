@@ -44,13 +44,19 @@ function readLog(ud) {
 
   const log = readLog(ud);
   const rendererLines = log.filter((l) => l.source === 'renderer');
+  const enhancementLines = log.filter((l) => l.source === 'renderer-enhancements');
+  const loadedEnhancements = new Set(enhancementLines.map((l) => l.message));
+  const enhancementsReady = loadedEnhancements.has('enhancements.js loaded')
+    && loadedEnhancements.has('detached-previews.js loaded');
   const fatalLines = log.filter((l) => /Fatal startup error/.test(l.message));
   const sources = [...new Set(log.map((l) => l.source))];
 
   console.log('app still running :', !exited);
   console.log('log sources       :', sources.join(', '));
   console.log('renderer faults   :', rendererLines.length);
+  console.log('enhancements ready:', enhancementsReady);
   for (const l of rendererLines) console.log('   ! ' + l.message);
+  for (const l of enhancementLines) console.log('   + ' + l.message);
   if (processOutput.trim()) console.log('process output     :', processOutput.trim().slice(-2000));
   console.log('\n--- log ---');
   for (const l of log) console.log(`  [${l.source}] ${String(l.message).slice(0, 150)}`);
@@ -61,7 +67,7 @@ function readLog(ud) {
       k.on('close', resolve); k.on('error', resolve);
     });
   }
-  const ok = !exited && rendererLines.length === 0 && fatalLines.length === 0;
-  console.log(`\n${ok ? 'PASS' : 'FAIL'}  renderer ran clean in Electron`);
+  const ok = !exited && rendererLines.length === 0 && fatalLines.length === 0 && enhancementsReady;
+  console.log(`\n${ok ? 'PASS' : 'FAIL'}  renderer ran clean in Electron with desktop enhancements loaded`);
   process.exit(ok ? 0 : 1);
 })();
