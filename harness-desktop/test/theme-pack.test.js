@@ -46,3 +46,11 @@ test('desktop preload loads the generic theme contribution runtime', () => {
   assert.match(runtime, /harness-desktop\.theme\.v1/);
   assert.match(runtime, /permissions\.includes\('ui'\)/);
 });
+
+test('desktop preload restores the staged plugin candidate renderer', () => {
+  const preload = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8');
+  const candidate = fs.readFileSync(path.join(ROOT, 'src', 'plugin-candidate.js'), 'utf8');
+  assert.match(preload, /plugin-candidate\.js/);
+  assert.match(candidate, /window\.renderCandidate\s*=\s*function renderCandidate/);
+  assert.match(candidate, /data-candidate=\\?"activate\\?"/);
+});
