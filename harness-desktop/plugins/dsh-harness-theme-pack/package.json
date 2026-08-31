@@ -1,0 +1,25 @@
+{
+  "name": "dsh-harness-theme-pack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Eight Harness Desktop themes inspired by the Deep Ocean, Midnight Purple, Carbon Green, Amber Night, Ocean Blue, Forest Green, Purple Twilight, and Warm Sand concepts.",
+  "type": "module",
+  "main": "./index.js",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "harnessDesktop": {
+    "permissions": [
+      "ui"
+    ],
+    "themePack": "./themes.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}
