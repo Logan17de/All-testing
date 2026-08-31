@@ -172,9 +172,10 @@ contextBridge.exposeInMainWorld('desktop', {
 });
 
 window.addEventListener('DOMContentLoaded', () => {
-  for (const src of ['enhancements.js', 'themes.js', 'detached-previews.js']) {
+  for (const src of ['plugin-candidate.js', 'enhancements.js', 'themes.js', 'detached-previews.js']) {
     const script = document.createElement('script');
     script.src = src;
+    script.async = false;
     script.defer = true;
     script.addEventListener('load', () => ipcRenderer.send('log:renderer', 'renderer-enhancements', `${src} loaded`));
     script.addEventListener('error', () => ipcRenderer.send('log:renderer', 'renderer', `Failed to load ${src}`));
