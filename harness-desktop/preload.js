@@ -172,7 +172,7 @@ contextBridge.exposeInMainWorld('desktop', {
 });
 
 window.addEventListener('DOMContentLoaded', () => {
-  for (const src of ['enhancements.js', 'detached-previews.js']) {
+  for (const src of ['enhancements.js', 'themes.js', 'detached-previews.js']) {
     const script = document.createElement('script');
     script.src = src;
     script.defer = true;
