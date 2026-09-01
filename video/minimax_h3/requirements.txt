@@ -1,0 +1,15 @@
+# Installed by setup.sh. Kept here for reference.
+git+https://github.com/huggingface/diffusers.git@refs/pull/14355/head
+transformers
+accelerate
+huggingface_hub
+hf_xet
+safetensors
+av
+imageio
+imageio-ffmpeg
+soundfile
+Pillow
+sentencepiece
+protobuf
+torchao

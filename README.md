@@ -2,6 +2,17 @@
 
 Colab-first experiments for testing AI models and serving local/open models through temporary APIs.
 
+## Video
+
+### MiniMax H3
+
+- `video/MiniMax_H3_Colab.ipynb` — thin Colab launcher: clone branch, copy the H3 runner to `/content`, install dependencies, upload references, and run text/keyframe/omni-reference tests.
+- `video/minimax_h3/run_h3.py` — one CLI for H3 `t2va`, `fl2va`, and `ref2va`, including native video+audio export.
+- `video/minimax_h3/setup.sh` — installs the current H3 Diffusers integration and dependencies.
+- `video/minimax_h3/upload.py` — simple Colab uploader for image/video/audio references.
+
+The H3 runner loads only the requested workflow and automatically chooses BF16 offload or the supported INT8 offload path based on the runtime. For Colab, use an A100 + High RAM.
+
 ## LLM API
 
 ### Qwen3.8-27B
