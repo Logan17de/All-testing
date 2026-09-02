@@ -23,11 +23,24 @@ jobs:
           cp "$BT/zipalign" android-sign-tools/zipalign
           cp "$BT/lib/apksigner.jar" android-sign-tools/apksigner.jar
           chmod +x android-sign-tools/zipalign
+
+          # Bundle the shared libraries needed by zipalign so it can run outside
+          # the GitHub Android SDK image as well.
+          ldd "$BT/zipalign" || true
+          while read -r lib; do
+            [ -f "$lib" ] && cp -L "$lib" android-sign-tools/
+          done < <(ldd "$BT/zipalign" | awk '/=> \/.*\.so/{print $3} /^\//{print $1}')
+
+          # libc++.so can also live beside the Android build-tools binaries.
+          find "$BT" "$ANDROID_HOME" -name 'libc++.so' -type f -print -quit | while read -r lib; do
+            [ -n "$lib" ] && cp -L "$lib" android-sign-tools/libc++.so
+          done
+
           ls -lh android-sign-tools
 
       - name: Upload signing tools
         uses: actions/upload-artifact@v4
         with:
-          name: Android-Signing-Tools
+          name: Android-Signing-Tools-With-Libs
           path: android-sign-tools
           if-no-files-found: error
