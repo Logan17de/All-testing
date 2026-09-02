@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Kanji Recall" />
+  <title>Kanji Recall</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <button id="backBtn" class="icon-btn hidden" aria-label="Back">←</button>
+      <div class="brand-wrap">
+        <div class="brand-mark">漢</div>
+        <div>
+          <div class="brand">Kanji Recall</div>
+          <div id="headerSub" class="header-sub">JLPT N5 → N1</div>
+        </div>
+      </div>
+      <button id="installBtn" class="icon-btn" aria-label="Install app" title="Install app">＋</button>
+    </header>
+
+    <main>
+      <section id="homeView" class="view active">
+        <div class="hero">
+          <div class="eyebrow">BUILD YOUR OWN REVIEW DECK</div>
+          <h1>What do you want to practice?</h1>
+          <p>Mix JLPT levels <b>and</b> memory states. For example: <b>N5 + N4 + N3</b>, then only <b>Little hard + No idea</b>.</p>
+        </div>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <h2>JLPT levels</h2>
+              <p>Select one or combine several.</p>
+            </div>
+            <button id="toggleAllBtn" class="text-btn">Select all</button>
+          </div>
+          <div id="levelGrid" class="level-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <h2>Memory state</h2>
+              <p>Choose exactly what should appear in this deck.</p>
+            </div>
+            <button id="toggleAllStatesBtn" class="text-btn">Select all</button>
+          </div>
+          <div id="stateGrid" class="state-grid"></div>
+          <div class="memory-hint">
+            <b>Tip:</b> select <b>Little hard</b> + <b>No idea</b> when you want a focused weak-kanji session.
+          </div>
+        </section>
+
+        <section class="panel compact-panel">
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Order</div>
+              <div class="setting-sub">Shuffle mixes all selected levels and states together.</div>
+            </div>
+            <label class="switch-wrap">
+              <input id="shuffleToggle" type="checkbox" checked />
+              <span class="switch"></span>
+              <span>Shuffle</span>
+            </label>
+          </div>
+        </section>
+
+        <button id="startBtn" class="primary-btn start-btn">Start studying</button>
+        <div id="deckSummary" class="deck-summary"></div>
+
+        <section class="panel progress-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Your memory map</h2>
+              <p>Saved locally on this device.</p>
+            </div>
+            <button id="resetBtn" class="text-btn danger-text">Reset</button>
+          </div>
+          <div id="overallStats" class="overall-stats memory-stats"></div>
+          <div id="levelStats" class="level-stats"></div>
+        </section>
+      </section>
+
+      <section id="studyView" class="view">
+        <div class="study-meta">
+          <div id="sessionLevels" class="session-levels"></div>
+          <div id="sessionCount" class="session-count">1 / 1</div>
+        </div>
+        <div class="progress-track"><div id="sessionProgress" class="progress-fill"></div></div>
+
+        <article id="flashcard" class="flashcard">
+          <div id="cardLevel" class="level-pill">N5</div>
+          <div id="currentStateBadge" class="current-state-badge hidden"></div>
+          <div id="kanji" class="kanji">休</div>
+          <div id="questionPrompt" class="question-prompt">How well do you know this kanji?</div>
+
+          <div id="reveal" class="reveal hidden">
+            <div class="meaning-block">
+              <div class="micro-label">MEANING</div>
+              <div id="meaning" class="meaning">rest</div>
+            </div>
+
+            <div class="detail-card">
+              <div class="micro-label">BREAKDOWN</div>
+              <div id="breakdown" class="breakdown"></div>
+            </div>
+
+            <div class="memory-card">
+              <div class="micro-label">REMEMBER IT</div>
+              <div id="memory" class="memory"></div>
+              <div id="logic" class="logic"></div>
+            </div>
+
+            <div class="example-card">
+              <div class="micro-label">EASY EXAMPLE</div>
+              <div id="exampleWord" class="example-word"></div>
+              <div id="exampleReading" class="example-reading"></div>
+              <div id="exampleMeaning" class="example-meaning"></div>
+            </div>
+          </div>
+        </article>
+
+        <div id="ratingActions" class="rating-actions">
+          <button data-rating="easy" class="rating-btn rating-easy">
+            <span class="rating-icon">✓</span><span class="rating-copy"><b>Easy</b><small>Well known</small></span>
+          </button>
+          <button data-rating="medium" class="rating-btn rating-medium">
+            <span class="rating-icon">≈</span><span class="rating-copy"><b>Medium</b><small>Almost remember</small></span>
+          </button>
+          <button data-rating="hard" class="rating-btn rating-hard">
+            <span class="rating-icon">?</span><span class="rating-copy"><b>Little hard</b><small>Seen it before</small></span>
+          </button>
+          <button data-rating="none" class="rating-btn rating-none">
+            <span class="rating-icon">×</span><span class="rating-copy"><b>No idea</b><small>Don't know it</small></span>
+          </button>
+        </div>
+        <button id="nextBtn" class="primary-btn next-btn hidden">Next card →</button>
+      </section>
+
+      <section id="finishView" class="view">
+        <div class="finish-card">
+          <div class="finish-icon">✓</div>
+          <div class="eyebrow">SESSION COMPLETE</div>
+          <h1>Memory mapped.</h1>
+          <p id="finishMessage"></p>
+          <div id="finishStats" class="finish-stats four-stats"></div>
+          <button id="studyWeakBtn" class="primary-btn">Practice Little hard + No idea</button>
+          <button id="finishHomeBtn" class="secondary-btn">Back to deck builder</button>
+        </div>
+      </section>
+    </main>
+
+    <div id="installSheet" class="sheet-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="bottom-sheet">
+        <div class="sheet-handle"></div>
+        <h2>Install Kanji Recall</h2>
+        <p id="installHelp">Add it to your home screen for a full-screen, offline app experience.</p>
+        <button id="installActionBtn" class="primary-btn">Install app</button>
+        <button id="closeInstallBtn" class="secondary-btn">Not now</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="data/cards.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
