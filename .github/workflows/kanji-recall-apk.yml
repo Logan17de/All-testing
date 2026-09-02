@@ -1,0 +1,50 @@
+name: Build Kanji Recall APK
+
+on:
+  push:
+    branches:
+      - kanji-recall-apk-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Reconstruct kanji card database
+        working-directory: kanji-recall-android
+        run: |
+          mkdir -p app/src/main/assets/data
+          cat card-data-xz/x* | base64 -d | xz -d > app/src/main/assets/data/cards.js
+          ACTUAL=$(wc -c < app/src/main/assets/data/cards.js)
+          echo "cards.js bytes: $ACTUAL"
+          test "$ACTUAL" -eq 725286
+
+      - name: Build debug APK
+        working-directory: kanji-recall-android
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Verify APK exists
+        run: |
+          test -f kanji-recall-android/app/build/outputs/apk/debug/app-debug.apk
+          unzip -l kanji-recall-android/app/build/outputs/apk/debug/app-debug.apk | grep -q 'assets/data/cards.js'
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kanji-Recall-APK
+          path: kanji-recall-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
