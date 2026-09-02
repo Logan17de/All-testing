@@ -1,0 +1,33 @@
+name: Export Android Signing Tools
+
+on:
+  push:
+    branches:
+      - kanji-recall-apk-build
+  workflow_dispatch:
+
+jobs:
+  export-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Collect Android signing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          echo "Using $BT"
+          mkdir -p android-sign-tools
+          cp "$BT/zipalign" android-sign-tools/zipalign
+          cp "$BT/lib/apksigner.jar" android-sign-tools/apksigner.jar
+          chmod +x android-sign-tools/zipalign
+          ls -lh android-sign-tools
+
+      - name: Upload signing tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-Signing-Tools
+          path: android-sign-tools
+          if-no-files-found: error
