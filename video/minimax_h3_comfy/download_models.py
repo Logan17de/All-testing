@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download the minimal official MiniMax H3 model set used by the Colab Extender workflow."""
+"""Download official MiniMax H3 model sets for the Colab workflows."""
 
 from __future__ import annotations
 
@@ -9,20 +9,35 @@ from huggingface_hub import hf_hub_download
 
 REPO_ID = "Comfy-Org/MiniMax-H3"
 
+COMMON_REF2VA = [
+    "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    "vae/minimax_h3_video_vae_fp16.safetensors",
+    "vae/minimax_h3_audio_vae_fp32.safetensors",
+    "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+]
+COMMON_FL2VA = [
+    "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+    "vae/minimax_h3_video_vae_fp16.safetensors",
+    "vae/minimax_h3_audio_vae_fp32.safetensors",
+    "loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+]
+
 PROFILES = {
-    "ref2va-int8": [
-        "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    # Legacy/general low-footprint profile. NVFP4 is compact, but Ampere/A100
+    # does not execute FP4 natively.
+    "ref2va-int8": COMMON_REF2VA + [
         "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
-        "vae/minimax_h3_video_vae_fp16.safetensors",
-        "vae/minimax_h3_audio_vae_fp32.safetensors",
-        "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
     ],
-    "fl2va-int8": [
-        "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+    "fl2va-int8": COMMON_FL2VA + [
         "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
-        "vae/minimax_h3_video_vae_fp16.safetensors",
-        "vae/minimax_h3_audio_vae_fp32.safetensors",
-        "loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+    ],
+    # A100/Ampere benchmark profile: keep the pruned INT8 ConvRot diffusion
+    # model and use the official INT8 ConvRot Qwen3-VL encoder instead of FP4.
+    "ref2va-a100-int8": COMMON_REF2VA + [
+        "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+    ],
+    "fl2va-a100-int8": COMMON_FL2VA + [
+        "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
     ],
 }
 
