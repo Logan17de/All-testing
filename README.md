@@ -13,6 +13,13 @@ Colab-first experiments for testing AI models and serving local/open models thro
 
 The H3 runner loads only the requested workflow and automatically chooses BF16 offload or the supported INT8 offload path based on the runtime. For Colab, use an A100 + High RAM.
 
+### MiniMax H3 — ComfyUI long-video path
+
+- `video/MiniMax_H3_ComfyUI_Colab.ipynb` — Colab launcher for **ComfyUI + MiniMax H3 Extender**, including optional Drive-backed models/output, current upstream workflow preparation, and a Cloudflare browser URL.
+- `video/minimax_h3_comfy/` — setup, model downloader, workflow normalizer, launcher, and usage notes for continuous multi-clip H3 generation.
+
+Start with the Extender workflow when testing **continuous/consistent long video**. The older direct runner remains useful for raw single-shot H3 tests.
+
 ## LLM API
 
 ### Qwen3.8-27B
