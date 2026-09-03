@@ -6,6 +6,7 @@ H3_DRIVE_ROOT="${H3_DRIVE_ROOT:-}"
 H3_PERSIST_MODELS="${H3_PERSIST_MODELS:-0}"
 H3_PERSIST_OUTPUT="${H3_PERSIST_OUTPUT:-1}"
 EXTENDER_DIR="$COMFY_ROOT/custom_nodes/ComfyUI_MiniMax_H3_Extender"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "== MiniMax H3 + ComfyUI setup =="
 python --version
@@ -35,6 +36,13 @@ else
 fi
 if [[ -f "$EXTENDER_DIR/requirements.txt" ]]; then
   python -m pip install -q -r "$EXTENDER_DIR/requirements.txt"
+fi
+
+# Current ComfyUI Nodes 2.0 can collapse the Extender DOM timeline to roughly
+# one fixed card width after Add/Remove Clip. Keep the upstream 318 px cards and
+# horizontal scrolling, but force the timeline host to use the full node width.
+if [[ -f "$SCRIPT_DIR/patch_extender_ui.py" ]]; then
+  python "$SCRIPT_DIR/patch_extender_ui.py" "$EXTENDER_DIR/web/extender.js"
 fi
 
 if [[ -n "$H3_DRIVE_ROOT" ]]; then
@@ -70,13 +78,6 @@ mkdir -p \
   "$COMFY_ROOT/input" \
   "$COMFY_ROOT/output" \
   "$COMFY_ROOT/user/default/workflows"
-
-if ! command -v cloudflared >/dev/null 2>&1; then
-  echo "Installing cloudflared..."
-  wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-    -O /usr/local/bin/cloudflared
-  chmod +x /usr/local/bin/cloudflared
-fi
 
 echo
 echo "Setup complete."
