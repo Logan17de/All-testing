@@ -2,6 +2,16 @@
 
 Colab-first experiments for testing AI models and serving local/open models through temporary APIs.
 
+## Zet Harness
+
+A new model-agnostic, local-first agent harness is being designed under [`harness/`](./harness/).
+
+- [`harness/README.md`](./harness/README.md) — project overview and design principles.
+- [`harness/PLAN.md`](./harness/PLAN.md) — architecture, data model, APIs, milestones, security, and acceptance criteria.
+- [`harness/TODO.md`](./harness/TODO.md) — ordered implementation checklist to complete one step at a time.
+
+Development is isolated on the `zet-harness-v1` branch while the architecture is established.
+
 ## LLM API
 
 ### Qwen3.8-27B
