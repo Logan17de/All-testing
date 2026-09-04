@@ -6,5 +6,7 @@ export * from "./graph-json-v1-semantic-validator.js";
 export * from "./graph-json-v1-port-compatibility.js";
 // 2.9 owns potential reachability/liveness; SCC rejection remains 2.10.
 export * from "./graph-json-v1-liveness.js";
-// 2.10 rejects every executable SCC/self-loop; 2.11+ owns structured control/loop contracts.
+// 2.10 rejects every executable SCC/self-loop; 2.11 does not grant loop exceptions.
 export * from "./graph-json-v1-acyclicity.js";
+// 2.11 reserves explicit structured control contracts; execution/lowering remains later.
+export * from "./graph-json-v1-structured-control.js";
