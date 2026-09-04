@@ -337,9 +337,9 @@ describe("Graph JSON v1 -> Execution IR v1 lowering", () => {
   });
 
   it("rejects registry provenance drift as a compiler invariant instead of silently lowering", () => {
-    expect(() =>
-      lowerCanonicalGraphJsonV1ToExecutionIr(canonicalSource(), resolver("4")),
-    ).toThrow(/resolved plugin provenance changed during lowering/);
+    expect(() => lowerCanonicalGraphJsonV1ToExecutionIr(canonicalSource(), resolver("4"))).toThrow(
+      /resolved plugin provenance changed during lowering/,
+    );
   });
 
   it("does not lower later loop/human/subgraph execution semantics in 2.22", () => {

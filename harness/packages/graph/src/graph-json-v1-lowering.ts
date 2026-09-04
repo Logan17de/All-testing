@@ -13,11 +13,7 @@ import type {
   ExecutionIrV1,
 } from "./execution-ir-v1.js";
 import { createExecutionIrV1, EXECUTION_IR_FORMAT } from "./execution-ir-v1.js";
-import type {
-  GraphDataEdgeV1,
-  GraphInputBindingV1,
-  GraphNodeV1,
-} from "./graph-json-v1.js";
+import type { GraphDataEdgeV1, GraphInputBindingV1, GraphNodeV1 } from "./graph-json-v1.js";
 import type {
   GraphResolvedNodePinV1,
   NodeResolutionResolver,
@@ -95,16 +91,19 @@ function assertResolvedManifest(
 
   const resolution = resolver.getResolution(node.type, node.version);
   if (resolution === undefined) {
-    return compilerInvariant(`node '${node.id}' no longer resolves as '${node.type}@${node.version}'.`);
+    return compilerInvariant(
+      `node '${node.id}' no longer resolves as '${node.type}@${node.version}'.`,
+    );
   }
   if (resolution.manifest.type !== node.type || resolution.manifest.version !== node.version) {
-    return compilerInvariant(`node '${node.id}' resolved manifest identity changed during lowering.`);
+    return compilerInvariant(
+      `node '${node.id}' resolved manifest identity changed during lowering.`,
+    );
   }
-  if (
-    resolution.plugin.id !== pin.pluginId ||
-    resolution.plugin.version !== pin.pluginVersion
-  ) {
-    return compilerInvariant(`node '${node.id}' resolved plugin provenance changed during lowering.`);
+  if (resolution.plugin.id !== pin.pluginId || resolution.plugin.version !== pin.pluginVersion) {
+    return compilerInvariant(
+      `node '${node.id}' resolved plugin provenance changed during lowering.`,
+    );
   }
 
   return resolution.manifest;
@@ -187,9 +186,7 @@ export function lowerCanonicalGraphJsonV1ToExecutionIr(
     return compilerInvariant("canonical node-pin count does not match canonical node count.");
   }
 
-  const opIndexByNodeId = new Map(
-    semantics.nodes.map((node, index) => [node.id, index] as const),
-  );
+  const opIndexByNodeId = new Map(semantics.nodes.map((node, index) => [node.id, index] as const));
   const graphInputIndexById = new Map(
     semantics.inputs.map((input, index) => [input.id, index] as const),
   );
@@ -288,9 +285,7 @@ export function lowerCanonicalGraphJsonV1ToExecutionIr(
 
   const defaultEntrypointId = semantics.options?.defaultEntrypoint;
   const defaultEntrypoint =
-    defaultEntrypointId === undefined
-      ? undefined
-      : entrypointIndexById.get(defaultEntrypointId);
+    defaultEntrypointId === undefined ? undefined : entrypointIndexById.get(defaultEntrypointId);
   if (defaultEntrypointId !== undefined && defaultEntrypoint === undefined) {
     return compilerInvariant(`default entrypoint '${defaultEntrypointId}' has no canonical index.`);
   }
