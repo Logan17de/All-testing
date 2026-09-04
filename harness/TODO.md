@@ -9,7 +9,7 @@ We implement this list in order. Do not jump ahead unless an earlier item is blo
 - [x] 0.3 Create `apps/web` Next.js app.
 - [x] 0.4 Create `packages/core`, `packages/db`, `packages/models`, `packages/tools`, and `packages/shared`.
 - [x] 0.5 Add `.env.example` with placeholders only.
-- [ ] 0.6 Add `.gitignore` rules for local DB, runtime state, logs, and secrets.
+- [x] 0.6 Add `.gitignore` rules for local DB, runtime state, logs, and secrets.
 - [ ] 0.7 Add `/api/health`.
 - [ ] 0.8 Add basic startup test.
 
@@ -203,4 +203,4 @@ Only after the core loop is stable:
 
 ## Next action
 
-**0.6 — Add `.gitignore` rules for local DB, runtime state, logs, and secrets.**
+**0.7 — Add `/api/health`.**
