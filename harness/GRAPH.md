@@ -97,7 +97,9 @@ Disabled plugins contribute no active definitions/executors.
 
 ## Graph JSON v1
 
-`@zet-harness/graph` defines the portable source contract. The top-level shape is:
+`@zet-harness/graph` defines the portable source contract. The implementation lives in `packages/graph/src/graph-json-v1.ts` and is re-exported from the package entrypoint.
+
+The top-level shape is:
 
 ```json
 {
