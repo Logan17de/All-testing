@@ -117,6 +117,17 @@ control edges = activation/ordering only
 
 All public v1 `JsonSchema` surfaces use **JSON Schema Draft 2020-12**. JSON Schema is for shape/value validation; port compatibility remains a deliberately small deterministic Harness compiler rule rather than arbitrary schema implication.
 
+Validation ownership is permanently separated:
+
+```text
+JSON Schema validation   = shape + local value constraints
+Graph semantic validation = harness meaning
+Port compatibility       = small deterministic rules only
+Runtime validation       = execution-time conditions
+```
+
+Each concern stays at the narrowest layer that owns it. Static validation must not absorb runtime checks, and semantic validation must not become general-purpose JSON-Schema theorem proving.
+
 Then:
 
 ```text
