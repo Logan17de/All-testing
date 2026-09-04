@@ -19,12 +19,20 @@ export interface SchemaReference {
   readonly $ref: string;
 }
 
+/** Public JSON Schema dialect used by every Zet Harness v1 schema surface. */
+export const JSON_SCHEMA_DIALECT_URI = "https://json-schema.org/draft/2020-12/schema" as const;
+
+export type JsonSchemaDialectUri = typeof JSON_SCHEMA_DIALECT_URI;
+
 /**
  * Dependency-free public JSON Schema document shape.
  *
+ * Every `JsonSchema` exposed by the v1 plugin/graph contracts is interpreted as
+ * JSON Schema Draft 2020-12. V1 does not negotiate dialects per node, port, or
+ * graph field. Runtime validation remains outside this package so plugins do not
+ * depend on a validator implementation.
+ *
  * JSON Schema permits an object schema or the boolean schemas `true`/`false`.
- * The exact dialect/version is frozen with Graph JSON in Phase 2; this type is
- * intentionally structural so plugins do not depend on a validator package.
  */
 export type JsonSchema = JsonObject | boolean;
 
