@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { NodeManifest } from "@zet-harness/plugin-api";
 
-import {
-  GRAPH_JSON_VERSION,
-  type GraphJsonV1,
-} from "./graph-json-v1.js";
+import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "./graph-json-v1.js";
 import {
   type NodeManifestResolver,
   validateGraphJsonV1Semantics,
@@ -80,10 +77,18 @@ describe("Graph JSON v1 semantic ID and node resolution validation", () => {
   it("rejects duplicate IDs within every semantic namespace", () => {
     const base = validGraph();
 
-    expect(validateGraphJsonV1Semantics({ ...base, inputs: duplicateAt(base.inputs) }, resolver)).toBe(false);
-    expect(validateGraphJsonV1Semantics({ ...base, outputs: duplicateAt(base.outputs) }, resolver)).toBe(false);
-    expect(validateGraphJsonV1Semantics({ ...base, nodes: duplicateAt(base.nodes) }, resolver)).toBe(false);
-    expect(validateGraphJsonV1Semantics({ ...base, edges: duplicateAt(base.edges) }, resolver)).toBe(false);
+    expect(
+      validateGraphJsonV1Semantics({ ...base, inputs: duplicateAt(base.inputs) }, resolver),
+    ).toBe(false);
+    expect(
+      validateGraphJsonV1Semantics({ ...base, outputs: duplicateAt(base.outputs) }, resolver),
+    ).toBe(false);
+    expect(
+      validateGraphJsonV1Semantics({ ...base, nodes: duplicateAt(base.nodes) }, resolver),
+    ).toBe(false);
+    expect(
+      validateGraphJsonV1Semantics({ ...base, edges: duplicateAt(base.edges) }, resolver),
+    ).toBe(false);
     expect(
       validateGraphJsonV1Semantics(
         { ...base, entrypoints: duplicateAt(base.entrypoints) },
@@ -106,17 +111,11 @@ describe("Graph JSON v1 semantic ID and node resolution validation", () => {
     const graph = validGraph();
     const wrongVersion: GraphJsonV1 = {
       ...graph,
-      nodes: [
-        graph.nodes[0]!,
-        { ...graph.nodes[1]!, version: "2.0.1" },
-      ],
+      nodes: [graph.nodes[0]!, { ...graph.nodes[1]!, version: "2.0.1" }],
     };
     const missingType: GraphJsonV1 = {
       ...graph,
-      nodes: [
-        graph.nodes[0]!,
-        { ...graph.nodes[1]!, type: "missing.finish" },
-      ],
+      nodes: [graph.nodes[0]!, { ...graph.nodes[1]!, type: "missing.finish" }],
     };
 
     expect(validateGraphJsonV1Semantics(wrongVersion, resolver)).toBe(false);

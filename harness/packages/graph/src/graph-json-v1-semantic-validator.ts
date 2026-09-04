@@ -52,7 +52,5 @@ export function validateGraphJsonV1Semantics(
     return false;
   }
 
-  return graph.nodes.every(
-    (node) => resolver.getManifest(node.type, node.version) !== undefined,
-  );
+  return graph.nodes.every((node) => resolver.getManifest(node.type, node.version) !== undefined);
 }
