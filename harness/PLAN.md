@@ -1,59 +1,88 @@
 # Zet Harness — Master Plan
 
-> **Authoritative roadmap.** This file replaces the older milestone ordering. Research reports are inputs, not architecture authority. `TODO.md` is the strict implementation checklist.
+> **Authoritative roadmap.** `TODO.md` is the strict item-by-item execution checklist. Research reports are inputs, not architecture authority.
 
 ## 1. Product goal
 
-Zet Harness is a **lightweight, local-first, provider-neutral AI workflow and agent runtime** with a very small core and a very wide plugin surface.
+Zet Harness is a **lightweight, local-first, provider-neutral AI workflow and agent runtime** with a tiny core and a very wide plugin surface.
 
-The three central rules are:
+Three rules define the architecture:
 
 > **The model does not own workflow state. The harness does.**
 
-> **The visual graph is source code. The Execution IR is the executable. The event journal is runtime truth.**
+> **The visual graph is source code. Execution IR is the executable. Durable events are runtime truth.**
 
-> **Built-ins and third-party extensions must enter through the same public registration path.**
-
-The first useful product should run on one machine without requiring Redis, Postgres, Kafka, Docker, Kubernetes, a vector database, or a workflow control plane.
+> **Built-ins and third-party extensions use the same public registration path.**
 
 Default hard dependency floor:
 
 ```text
 Node.js 24 LTS
-+ SQLite via node:sqlite
++ node:sqlite
 + filesystem
 ```
 
-The web UI is a client. A long-lived Node runtime owns durable execution.
+No required Redis, Postgres, Kafka, Docker, Kubernetes, vector DB, or workflow control plane.
+
+The web app is a client. A long-lived lightweight Node daemon owns execution, persistence, plugins, permissions, and events.
 
 ---
 
-## 2. Current status
+## 2. Where we are now
 
-### Completed foundation
+```text
+Phase 0  Foundation                         ✅ COMPLETE
+Phase 1  Plugin API + universal node      🚧 WE ARE HERE
+           ├─ 1.1 plugin-api package       ✅
+           └─ 1.2 public primitives        ▶ CURRENT
+Phase 2  Graph JSON + compiler + IR        ⏳
+Phase 3  In-memory DAG scheduler           ⏳
+Phase 4  Runtime daemon + SQLite           ⏳
+Phase 5  Effects + permissions + humans    ⏳
+Phase 6  Model + tool adapters             ⏳
+Phase 7  Visual graph + inspector          ⏳  ← Harness v0.1 boundary
+Phase 8  Loops + projects + agent mode     ⏳
+Phase 9  Replay + memory + triggers        ⏳
+Phase 10 MCP + custom-node SDK + trust     ⏳
+Phase 11 Packaging + optional scale-out    ⏳
+```
 
-The following work is already implemented and verified:
+### Phase map
 
-| Original item | Status | Result |
-|---|---:|---|
-| 0.1 | ✅ | npm workspace layout created |
-| 0.2 | ✅ | TypeScript, ESLint, Prettier, Vitest configuration |
-| 0.3 | ✅ | minimal Next.js App Router web app |
-| 0.4 | ✅ | `core`, `db`, `models`, `tools`, `shared` workspaces |
-| 0.5 | ✅ | safe `.env.example` |
-| 0.6 | ✅ | secret/runtime/build `.gitignore` rules |
-| 0.7 | ✅ | `/api/health` |
-| 0.8 | ✅ | startup smoke test |
-| 0.9 | ✅ | workspace-owned TypeScript typechecking |
-| 0.10 | ✅ | lockfile + Node/npm pins + engine strictness |
-| 0.11 | ✅ | Linux + Windows CI |
-| 0.12 | ✅ | tracked `data/` and `tests/` skeletons |
-| 0.13 | ✅ | Next Core Web Vitals + type-aware TS linting |
-| 0.16 | ✅ | unrelated research artifact removed |
-| 0.22 | ✅ | runtime ownership decided: long-lived Node daemon |
-| 3.0 | ✅ | durable agent loop location decided: runtime daemon |
+| Phase | What it means | Status |
+|---|---|---|
+| **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
+| **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | 🚧 In progress — **1.2 current** |
+| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ⏳ Next architecture layer |
+| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ⏳ Planned |
+| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
+| **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
+| **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
+| **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ⏳ **v0.1 finish line** |
+| **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | ⏳ After v0.1 |
+| **9 — Replay/Fork + Memory + Triggers + External clients** | recorded replay, checkpoint forks, lightweight memory, cron/webhook/API triggers, Copycat/client bridge | ⏳ Later |
+| **10 — MCP + Custom-node SDK + Trust tiers** | MCP through normal tool registry, local plugin loading, SDK/package manifests, process/WASI isolation options | ⏳ Later |
+| **11 — Packaging + Optional scale-out** | Windows setup, config wizard, backup/import/export, optional desktop shell, optional Postgres/remote workers | ⏳ Later |
 
-Current CI verifies on **Ubuntu and Windows**:
+### What “done enough to use” means
+
+The first strong product boundary is **end of Phase 7**:
+
+```text
+Graph editor
+→ compile
+→ Execution IR
+→ concurrent scheduler
+→ durable runtime
+→ model/tool plugins
+→ approvals
+→ crash/restart recovery
+→ full run inspection
+```
+
+Phases 8–11 add autonomous-agent/product features and scale without replacing that engine.
+
+Current CI on Ubuntu and Windows verifies:
 
 ```text
 npm ci
@@ -65,20 +94,9 @@ npm ci
 → build
 ```
 
-### Immediate remaining foundation work
-
-Before the new architecture work starts:
-
-1. **0.14** add the project license.
-2. **0.15** wire one internal package into the web app and prove workspace transpilation.
-
-The old deferred health expansion, plugin smoke, and lightweight baseline are retained but moved to the phases where the runtime/plugin system actually exists.
-
 ---
 
-## 3. Architecture after Research #4
-
-Research #4 confirms the lightweight direction and improves the dependency order.
+## 3. Core architecture
 
 ```text
 Visual editor / JSON / SDK / AI-generated graph
@@ -117,36 +135,33 @@ Plugin Host
 └── optional UI contributions later
 ```
 
-The compiler/runtime must not depend on React Flow. React Flow is only an editor implementation.
+React Flow never becomes execution architecture. It is only an editor/view over Harness Graph JSON.
 
 ---
 
-## 4. What we build ourselves
+## 4. What stays in the tiny core
 
-These are the product-defining pieces:
+Build ourselves because these define the product:
 
 ```text
-Node/plugin contracts
+plugin/node contracts
 Graph semantics
-Semantic validator
-Compiler
+semantic validator
+compiler
 Execution IR
-Scheduler
-Persistence protocol
-Permission broker
-Replay/fork model
-Observability model
+scheduler
+persistence protocol
+permission broker
+replay/fork model
+observability model
 ```
 
-Everything integration-specific should be an adapter/plugin where practical:
+Keep integration-specific behavior behind plugins/adapters where practical:
 
 ```text
-OpenAI
-OpenAI-compatible endpoints
-llama.cpp
-Ollama
-vLLM
-SGLang
+OpenAI / OpenAI-compatible
+Qwen / vLLM / SGLang
+llama.cpp / Ollama
 MCP
 GitHub
 browser
@@ -159,42 +174,36 @@ custom local tools
 
 ---
 
-## 5. Public contracts to freeze first
+## 5. Public contracts first
 
-We must freeze these in dependency order before broad runtime implementation.
+### Plugin lifecycle
 
-### 5.1 Plugin lifecycle
-
-A tiny public `@zet-harness/plugin-api` package defines the stable extension boundary.
+`@zet-harness/plugin-api` is intentionally tiny and has zero/near-zero runtime dependencies.
 
 Conceptual lifecycle:
 
 ```text
 load
 → activate(ctx)
-→ register capabilities/services/nodes
+→ tracked registrations
 → run
 → dispose
 ```
 
-Every registration must be tracked so unloading a plugin removes what it registered.
+Unloading a plugin must cleanly remove what it registered.
 
-The plugin API should have no or near-zero runtime dependencies.
+### Universal node definition
 
-### 5.2 Universal node definition
-
-The runtime should understand a small universal lifecycle instead of ten unrelated node engines.
-
-Primitive behavior families:
+The scheduler should understand a small set of primitive behavior families:
 
 ```text
 pure
- effect
+effect
 control
 interrupt
 ```
 
-User-facing node families can map onto those primitives:
+User-visible node families map onto them:
 
 ```text
 LLM        → effect
@@ -210,55 +219,15 @@ Human      → interrupt
 Subgraph   → compile-time structure
 ```
 
-A node manifest must be inspectable without executing plugin code. It should carry schemas, version, capabilities, effect/recovery metadata, timeout/retry defaults, and execution mode.
-
-### 5.3 Graph JSON v1
-
-Graph JSON is the public, portable source format.
-
-It contains semantic nodes, ports, edges, policies, versions, and configuration. UI-only metadata such as position, dimensions, selection, colors, and collapsed groups never becomes runtime semantics.
-
-Graph sources may later come from:
-
-```text
-React Flow
-JSON/YAML
-CLI/SDK
-AI-generated workflows
-```
-
-All sources compile to the same IR.
-
-### 5.4 Execution IR v1
-
-The IR is immutable after a run begins.
-
-It records at minimum:
-
-```text
-IR version
-graph/source hash
-IR hash
-compiler version
-registry hash
-pinned node versions
-indexed operations
-resolved bindings
-dependencies
-normalized policies
-compiled capabilities
-control-flow metadata
-```
-
-Resume requires a compatible plan identity; editing a graph creates a new graph version/fork rather than silently changing a running program.
+A node manifest must be inspectable without executing plugin code and eventually carries schemas, versions, capabilities, effect/recovery metadata, timeout/retry defaults, and execution mode.
 
 ---
 
 ## 6. Graph/compiler rules
 
-Compilation fails before execution whenever the defect is statically knowable.
+Graph JSON is public source. Execution IR is immutable executable state for a run.
 
-Validation layers:
+Compilation rejects statically knowable errors before execution:
 
 ```text
 shape/schema
@@ -268,17 +237,13 @@ types
 reachability/liveness
 control flow
 permissions
-side-effect/recovery policy
+effect/recovery policy
 timeout/retry policy
 secrets
 resource limits
 ```
 
-### Structured control flow
-
-Do **not** allow arbitrary visual cycles in the first implementation.
-
-Initial rule:
+Initial control-flow rule:
 
 ```text
 DAG
@@ -289,39 +254,9 @@ DAG
 + subgraph
 ```
 
-Arbitrary strongly connected components are compile errors.
+No arbitrary visual cycles initially. Every executable loop needs compiler-visible hard bounds.
 
-Every executable loop must have compiler-visible termination limits such as:
-
-```text
-maxIterations
-maxModelCalls
-maxToolCalls
-maxTokens
-maxEstimatedCost
-maxWallTime
-```
-
-### Activation-aware joins
-
-A join waits for branches that were actually activated, not every physical incoming edge.
-
-Runtime control-edge state may be:
-
-```text
-unresolved
-active
-skipped
-completed
-```
-
-This prevents conditional branches from deadlocking joins.
-
-### Deterministic compilation
-
-Canonicalization strips editor metadata, normalizes defaults, resolves node versions, orders maps deterministically, and hashes the result.
-
-Acceptance property:
+Deterministic acceptance property:
 
 ```text
 same source + same registry/compiler
@@ -331,392 +266,37 @@ same source + same registry/compiler
 
 ---
 
-## 7. Execution and recovery semantics
+## 7. Execution, durability, and recovery
 
-The scheduler is a small readiness-driven async engine.
-
-```text
-PENDING
-→ READY
-→ RUNNING
-   ├→ COMPLETED
-   ├→ SKIPPED
-   ├→ WAITING
-   ├→ RETRY_WAIT → READY
-   ├→ FAILED
-   └→ CANCELLED
-```
-
-Use native Promises and bounded semaphores. Do not add a queue service.
-
-Use `AbortController` / `AbortSignal` for cooperative cancellation. Worker threads are for real CPU-heavy work, not every node.
-
-### Side effects are first-class
-
-The node contract must distinguish:
+Run-local operation states:
 
 ```text
-determinism
-external effect
-idempotency
-recovery policy
+PENDING → READY → RUNNING
+                   ├→ COMPLETED
+                   ├→ SKIPPED
+                   ├→ WAITING
+                   ├→ RETRY_WAIT → READY
+                   ├→ FAILED
+                   └→ CANCELLED
 ```
 
-Exact enum names are frozen with the node contract, but the scheduler must be able to distinguish at least:
+Use native Promises, bounded semaphores, and `AbortController`; no queue service by default.
 
-```text
-pure/read/write
-safe rerun/reuse/reconcile/manual
-idempotent/non-idempotent
-```
+Side effects are explicit. The contract must distinguish determinism, effect class, idempotency, and recovery policy. Never claim exactly-once execution for arbitrary third-party effects.
 
-A retry attempt must reuse a stable logical effect/idempotency identity.
+Keep three concepts separate:
 
-The harness must never claim exactly-once execution for arbitrary third-party side effects.
+1. **Resume** — continue unfinished work using committed outputs.
+2. **Recorded replay** — replay with recorded external/model/tool/human results.
+3. **Fork** — create a new run from a checkpoint and execute downstream work again.
 
-### Three different replay concepts
-
-Do not collapse these into one "replay" button:
-
-1. **Resume** — continue unfinished work using durable completed outputs.
-2. **Recorded replay** — replay control logic while substituting recorded external/model/tool/human results.
-3. **Fork** — create a new run from a prior checkpoint and deliberately execute downstream work again.
-
-Historical runs remain immutable.
+Persistence uses `node:sqlite` directly with WAL and short writes. Large immutable values live in a content-addressed filesystem blob store. Downstream work becomes runnable only after the upstream durable completion transaction succeeds.
 
 ---
 
-## 8. Persistence doctrine
+## 8. Lightweight budget
 
-Use Node 24 `node:sqlite` directly; no ORM initially.
-
-Enable WAL and keep write transactions short.
-
-Durable runtime data will include:
-
-```text
-graph/source versions
-compiled plans
-runs
-node attempts
-append-only durable events
-checkpoints
-approvals
-projects/goals/todos
-conversations/messages
-artifact metadata
-```
-
-Large immutable values go to a filesystem content-addressed blob store:
-
-```text
-data/blobs/<prefix>/<sha256>
-```
-
-SQLite stores metadata and references rather than giant images/video/model outputs.
-
-A node completion becomes runnable downstream **only after** its durable completion transaction commits.
-
-The persistence layer sits behind narrow interfaces so a future Postgres/remote implementation does not change Graph JSON or IR semantics.
-
----
-
-## 9. Observability doctrine
-
-Durability events are also the source of audit/debug information.
-
-Persist meaningful state transitions, not every streamed token.
-
-Examples:
-
-```text
-run.created
-run.started
-run.waiting
-run.resumed
-run.completed
-run.failed
-node.ready
-node.started
-node.completed
-node.failed
-node.retry_scheduled
-model.routed
-model.completed
-tool.requested
-tool.completed
-permission.denied
-checkpoint.created
-human.requested
-human.responded
-```
-
-Fine-grained streaming is live/transient; durable history stores coalesced/summarized events.
-
-Default logging must not store secrets or raw sensitive payloads.
-
----
-
-## 10. Ordered milestones
-
-### M0 — Foundation closeout — **IN PROGRESS**
-
-Remaining:
-
-- license
-- one real workspace dependency wired into the web app
-
-Exit:
-
-```text
-Linux + Windows CI green on final Phase 0 tree
-```
-
-### M1 — Plugin + Node Contract — **NOT STARTED**
-
-Deliver:
-
-- `@zet-harness/plugin-api`
-- JSON value/schema/diagnostic primitives
-- universal node manifest/definition
-- plugin host lifecycle
-- registry
-- built-in and external/local plugin through the exact same path
-- plugin smoke test in CI
-
-Exit:
-
-```text
-one built-in node plugin
-+
-one local/external test plugin
-→ identical registration/execution path
-```
-
-### M2 — Graph JSON + Compiler + IR — **NOT STARTED**
-
-Deliver:
-
-- Graph JSON v1 schema
-- one deliberate JSON-schema validator dependency if needed (Ajv is the current candidate)
-- semantic validation
-- node/port diagnostics
-- registry/version resolution
-- control-flow analysis
-- permission/effect analysis
-- canonicalization
-- Execution IR v1
-- graph/IR/registry hashing
-- deterministic compiler tests
-
-Exit:
-
-```text
-invalid graphs fail deterministically with useful diagnostics
-valid graph → stable canonical IR/hash
-```
-
-### M3 — In-memory DAG Scheduler — **NOT STARTED**
-
-Deliver:
-
-- ready queue
-- bounded concurrency
-- dependency tracking
-- routers
-- activation-aware joins
-- cancellation
-- timeouts
-- retry scheduling
-- typed runtime events
-- deterministic mock-node stress tests
-
-No SQLite is required to prove this milestone.
-
-Exit:
-
-```text
-A→B→C
-A→[B,C]→D
-router→branch→join
-cancel/timeout/retry
-all pass offline
-```
-
-### M4 — Runtime Daemon + SQLite Durability — **NOT STARTED**
-
-Deliver:
-
-- `apps/runtime`
-- loopback `node:http` API + SSE
-- `node:sqlite`
-- ordered migrations
-- WAL
-- run/node/event/checkpoint storage
-- content-addressed blob store
-- atomic completion transactions
-- crash/resume reconstruction
-- backup/restore
-- runtime/database health checks
-- fault-injection restart tests
-- lightweight baseline measurement
-
-Exit:
-
-```text
-kill runtime during execution
-→ restart
-→ committed work is reused
-→ unfinished work is classified and resumed safely
-```
-
-### M5 — Effects + Permission Broker + Human Interrupts — **NOT STARTED**
-
-Deliver:
-
-- effect/idempotency/recovery policy enforcement
-- stable logical idempotency IDs
-- compile-time capability checks
-- runtime capability broker
-- secret references
-- structured denial results
-- approval records
-- durable human interrupt/resume
-- redaction
-- loopback/origin protections
-
-Exit:
-
-```text
-external write pauses/approves/executes
-crash ambiguity is reconciled or surfaced for review
-model cannot grant itself capabilities
-```
-
-### M6 — Model + Tool Adapters — **NOT STARTED**
-
-Deliver:
-
-- model adapter contract
-- tool adapter contract
-- scripted/mock adapter
-- generic OpenAI-compatible adapter
-- first-party OpenAI adapter where provider-specific behavior is needed
-- capability-based model routing
-- local endpoint path for llama.cpp/Ollama
-- safe filesystem read tools
-- controlled shell/Git tools
-- provider usage/cost metadata
-
-Later adapters such as vLLM/SGLang remain external integration work, not core runtime dependencies.
-
-Exit:
-
-```text
-same graph
-→ mock provider
-→ cloud/OpenAI-compatible provider
-→ local OpenAI-compatible endpoint
-without core-code changes
-```
-
-### M7 — Visual Graph Editor + Run Inspector — **NOT STARTED**
-
-Deliver:
-
-- React Flow as UI-only dependency
-- node palette
-- schema-derived basic config forms
-- ports/connections
-- compile diagnostics overlays
-- run button
-- live graph status
-- node inspector
-- approval/resume UI
-
-Exit:
-
-```text
-draw graph
-→ compile
-→ run
-→ inspect every durable node transition
-```
-
-This is the first strong **Harness v0.1** product boundary when combined with M0–M6.
-
-### M8 — Structured Loops, Subgraphs, Projects, Goals, Todos, Agent Mode — **NOT STARTED**
-
-Deliver:
-
-- bounded loop regions
-- subgraph lowering/namespacing
-- projects
-- conversations + structured messages
-- goals/todos
-- deterministic next-todo selection
-- context builder with hard budget hooks
-- model-visible task actions
-- bounded agent loop expressed through the same scheduler
-- multi-step golden trace test
-
-Exit:
-
-```text
-three-todo coding goal
-→ model/tool loop
-→ persistent progress
-→ restart-safe completion
-```
-
-### M9 — Replay, Fork, Memory, Triggers, External Clients — **NOT STARTED**
-
-Deliver:
-
-- recorded replay
-- checkpoint fork
-- semantic run/graph diff foundations
-- lightweight project memory
-- SQLite FTS only if needed
-- cron/webhook/API triggers
-- trigger dedupe receipts
-- authenticated external client sessions/events
-- Copycat/client bridge path
-
-### M10 — MCP + Custom Node SDK + Sandboxed Extensions — **NOT STARTED**
-
-Deliver:
-
-- MCP adapter
-- local folder/package plugin loading
-- custom-node SDK
-- package manifests
-- generated editor forms from schemas
-- execution trust tiers
-- optional WASI sandbox for untrusted portable compute
-
-A plugin marketplace does **not** open before capability and sandbox foundations are mature.
-
-### M11 — Packaging + Optional Scale-Out — **LATER**
-
-Deliver when real usage demands it:
-
-- Windows installer/start flow
-- config wizard
-- export/import/backup
-- optional desktop shell
-- optional Postgres `RunStore`
-- optional remote executor/worker
-- optional stronger Linux sandboxes
-- marketplace/signatures/revocation
-
-The same Graph JSON/IR must remain valid when these are added.
-
----
-
-## 11. Lightweight budget
-
-Before v0.1, measure the harness separately from model inference:
+Before v0.1 measure:
 
 ```text
 runtime startup latency
@@ -727,49 +307,44 @@ SQLite commit latency
 direct runtime dependency count
 ```
 
-Do not optimize from vibes. Add a dependency only when it buys enough correctness or developer value to justify its installation/runtime cost.
+Add dependencies only when measured correctness/developer value justifies their weight.
 
-Current policy:
+Explicitly deferred from the default core:
 
 ```text
-No Redis
-No Kafka
-No required Postgres
-No required Docker
-No ORM initially
-No vector DB in core
-No mandatory MCP
-No general embedded eval
-No arbitrary cycles initially
-No multi-agent framework in core
-No distributed scheduler in v0.1
+Redis
+Kafka/message broker
+required Postgres
+required Docker/Kubernetes
+vector DB dependency
+arbitrary graph cycles
+multi-agent framework
+microservices
+active-active multi-host scheduler
+CRDT graph collaboration
+automatic marketplace installs
+microVM sandbox by default
 ```
 
 ---
 
-## 12. Definition of v0.1 success
+## 9. Definition of Harness v0.1
 
-Zet Harness v0.1 succeeds when a user can:
+By the end of **Phase 7**, a user can:
 
-1. launch it locally;
+1. launch Zet Harness locally;
 2. visually create or load a graph;
-3. compile it into a stable IR;
+3. compile it into deterministic IR;
 4. run independent nodes concurrently;
-5. call a mock, cloud, or local model through adapters;
+5. call mock/cloud/local models through plugins;
 6. call capability-gated tools;
 7. pause for human approval;
-8. kill/restart the runtime without losing committed work;
-9. inspect what happened from durable events;
-10. do all of the above with one runtime process, SQLite, and filesystem as the default infrastructure.
-
-After v0.1, agent/project features build on the same execution engine rather than creating a second orchestration path.
+8. kill/restart without losing committed work;
+9. inspect durable execution history;
+10. do this with one runtime process, SQLite, and filesystem as default infrastructure.
 
 ---
 
-## 13. Next action
+## 10. Next action
 
-The immediate next implementation item remains:
-
-> **0.14 — Add the project `LICENSE`.**
-
-Then finish 0.15 and begin M1: the public plugin/node contract.
+> **Phase 1 / Item 1.2 — Define public JSON, schema-reference, diagnostic, capability, and version primitives in `@zet-harness/plugin-api`.**
