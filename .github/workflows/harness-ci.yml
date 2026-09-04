@@ -62,6 +62,9 @@ jobs:
       - name: Tests
         run: npm test
 
+      - name: Plugin smoke
+        run: npm run test:plugin-smoke --workspace @zet-harness/core
+
       - name: Startup smoke
         run: npm run test:startup
 
