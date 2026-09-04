@@ -10,5 +10,5 @@ export * from "./graph-json-v1-liveness.js";
 export * from "./graph-json-v1-acyclicity.js";
 // 2.11 reserves/validates static structured control ports only; execution and IR lowering remain future stages.
 export * from "./graph-json-v1-structured-control.js";
-// 2.12 requires a finite compiler-visible per-instance loop bound; cycles remain rejected by 2.10.
+// 2.12 requires a finite compiler-visible per-instance loop bound; loop execution/lowering still lands later.
 export * from "./graph-json-v1-loop-bounds.js";
