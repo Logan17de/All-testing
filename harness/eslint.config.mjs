@@ -11,12 +11,7 @@ const nodeFiles = [
 
 export default tseslint.config(
   {
-    ignores: [
-      "**/node_modules/**",
-      "**/dist/**",
-      "**/.next/**",
-      "coverage/**",
-    ],
+    ignores: ["**/node_modules/**", "**/dist/**", "**/.next/**", "coverage/**"],
   },
   {
     ...js.configs.recommended,
@@ -35,10 +30,7 @@ export default tseslint.config(
   {
     files: typedFiles,
     rules: {
-      "@typescript-eslint/consistent-type-imports": [
-        "error",
-        { prefer: "type-imports" },
-      ],
+      "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
     },
   },
 );

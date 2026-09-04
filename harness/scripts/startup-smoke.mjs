@@ -80,9 +80,7 @@ async function waitForHealth() {
     await sleep(pollIntervalMs);
   }
 
-  throw new Error(
-    `Zet Harness did not become healthy within ${startupTimeoutMs}ms.\n${output}`,
-  );
+  throw new Error(`Zet Harness did not become healthy within ${startupTimeoutMs}ms.\n${output}`);
 }
 
 try {
