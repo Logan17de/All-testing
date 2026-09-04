@@ -3,10 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { NodeInputPort, NodeManifest, NodeOutputPort } from "@zet-harness/plugin-api";
 
 import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "./graph-json-v1.js";
-import {
-  checkGraphJsonV1Liveness,
-  validateGraphJsonV1Liveness,
-} from "./graph-json-v1-liveness.js";
+import { checkGraphJsonV1Liveness, validateGraphJsonV1Liveness } from "./graph-json-v1-liveness.js";
 import { validateGraphJsonV1PortCompatibility } from "./graph-json-v1-port-compatibility.js";
 import type { NodeManifestResolver } from "./graph-json-v1-semantic-validator.js";
 
@@ -71,7 +68,11 @@ function baseGraph(): GraphJsonV1 {
     revisionId: "rev-001",
     inputs: [],
     outputs: [],
-    nodes: [node("start", "source.string"), node("middle", "pass.string"), node("end", "sink.string")],
+    nodes: [
+      node("start", "source.string"),
+      node("middle", "pass.string"),
+      node("end", "sink.string"),
+    ],
     edges: [dataEdge("start-middle", "start", "middle"), dataEdge("middle-end", "middle", "end")],
     entrypoints: [{ id: "default", nodeId: "start" }],
   };
