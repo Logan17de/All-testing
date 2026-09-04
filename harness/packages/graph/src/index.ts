@@ -26,3 +26,5 @@ export * from "./graph-json-v1-normalization.js";
 export * from "./graph-json-v1-ui-metadata.js";
 // 2.19 projects executable semantics and applies deterministic Harness canonical ordering/JSON; Execution IR remains 2.20 and hashes remain 2.21.
 export * from "./graph-json-v1-canonical.js";
+// 2.20 freezes the compact immutable indexed Execution IR contract; hashing remains 2.21 and Graph-to-IR lowering remains 2.22.
+export * from "./execution-ir-v1.js";
