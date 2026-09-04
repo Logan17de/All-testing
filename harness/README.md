@@ -106,7 +106,8 @@ Phase 0 is complete. Phase 1 is in progress on `zet-harness-v1`:
 1.8 behavior metadata        ✅
 1.9 static manifest inspect  ✅
 1.10 built-in/external path  ✅
-1.11 lifecycle/unload tests  ▶ CURRENT
+1.11 lifecycle/unload tests  ✅
+1.12 plugin smoke in CI      ▶ CURRENT
 ```
 
 Then:
