@@ -113,13 +113,72 @@ export interface HarnessPlugin {
 /** Stable globally-namespaced node type, for example `builtin.transform.json`. */
 export type NodeType = string;
 
+/** Small scheduler/compiler-facing primitive families. */
+export type NodePrimitiveFamily = "pure" | "effect" | "control" | "interrupt";
+
+/** Whether repeating an execution with the same inputs is expected to match. */
+export type NodeDeterminism = "deterministic" | "nondeterministic";
+
+/** Observable side-effect class used for policy, retry, and recovery decisions. */
+export type NodeEffectClass = "none" | "external-read" | "external-write";
+
+/**
+ * Idempotency promise for repeated execution of one logical operation.
+ *
+ * `idempotency-key` means the executor/integration can honor a stable key owned
+ * by the harness. `unknown` means the harness must not assume a repeat is safe.
+ */
+export type NodeIdempotency =
+  | "not-applicable"
+  | "idempotent"
+  | "idempotency-key"
+  | "unknown";
+
+/** Crash/restart strategy available to the future durable runtime. */
+export type NodeRecoveryPolicy =
+  | "not-applicable"
+  | "rerun"
+  | "reuse"
+  | "reconcile"
+  | "manual";
+
+/**
+ * Where a node implementation is intended to execute.
+ *
+ * `none` is for compile-time/control structures that have no runtime executor.
+ * Process/WASM isolation are contract reservations; supporting them is later work.
+ */
+export type NodeExecutionMode = "none" | "in-process" | "process" | "wasm";
+
+/** Static retry defaults; compiler/runtime policy may further restrict them. */
+export interface NodeRetryDefaults {
+  readonly maxAttempts: number;
+  readonly backoffMs?: number;
+}
+
+/**
+ * Static scheduler/compiler-facing behavior metadata for one node type.
+ *
+ * Numeric bounds and cross-field consistency are validated later by the graph
+ * compiler/runtime. Keeping this structural preserves a dependency-free API.
+ */
+export interface NodeBehavior {
+  readonly primitiveFamily: NodePrimitiveFamily;
+  readonly determinism: NodeDeterminism;
+  readonly effect: NodeEffectClass;
+  readonly idempotency: NodeIdempotency;
+  readonly recovery: NodeRecoveryPolicy;
+  readonly executionMode: NodeExecutionMode;
+  readonly timeoutMs?: number;
+  readonly retry?: NodeRetryDefaults;
+  readonly requiredCapabilities: readonly CapabilityId[];
+}
+
 /**
  * Static metadata for one versioned node type.
  *
- * Input/config/output schemas are always present so the compiler/editor can
- * inspect a node contract without executing its implementation. Behavior,
- * effects, recovery policy, execution mode, and capabilities are layered on by
- * the next contract step.
+ * Schemas and behavior metadata are always present so the compiler/editor can
+ * inspect the node contract without executing its implementation.
  */
 export interface NodeManifest {
   readonly type: NodeType;
@@ -129,6 +188,7 @@ export interface NodeManifest {
   readonly inputSchema: JsonSchema;
   readonly configSchema: JsonSchema;
   readonly outputSchema: JsonSchema;
+  readonly behavior: NodeBehavior;
 }
 
 /** JSON-safe values supplied to one node execution. */
@@ -157,8 +217,8 @@ export type NodeExecutor = (
  * Universal public node definition.
  *
  * `execute` is optional because some node types are compile-time/control
- * structures rather than directly executable operations. Later manifest
- * behavior metadata tells the compiler/runtime which shapes are valid.
+ * structures rather than directly executable operations. Manifest behavior
+ * metadata gives the compiler/runtime the static execution intent.
  */
 export interface NodeDefinition {
   readonly manifest: NodeManifest;
