@@ -20,3 +20,5 @@ export * from "./graph-json-v1-effect-recovery.js";
 export * from "./graph-json-v1-secret-bindings.js";
 // 2.16 exposes one stable compiler/editor diagnostic shape over the frozen validation stack.
 export * from "./graph-json-v1-diagnostics.js";
+// 2.17 materializes closed Harness defaults and records exact node/plugin pins; UI stripping/canonicalization remain 2.18-2.19.
+export * from "./graph-json-v1-normalization.js";
