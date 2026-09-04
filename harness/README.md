@@ -104,6 +104,15 @@ Phase 1 plugin + node contract  ✅ COMPLETE
 2.4+ validator/compiler/IR      ⏳
 ```
 
+The 2.2 freeze review is explicitly checking four invariants before the validator starts:
+
+```text
+node ports are first-class manifest data
+document hash and semantic hash have separate domains
+graphs request/restrict capabilities but never grant themselves authority
+data edges carry values and imply execution dependencies
+```
+
 Then:
 
 ```text
