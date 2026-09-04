@@ -505,7 +505,25 @@ semanticHash + registryHash + compilerVersion
 
 The canonical IR then receives its **own content hash** (`irHash`). This keeps the IR hash about IR content while still recording the semantic source, registry, and compiler provenance separately.
 
-Actual canonicalization/hash computation lands later in Phase 2; this section freezes which fields belong to each domain now.
+2.21 implements these identities with `recordGraphCompilerIdentityV1`. All content hashes use SHA-256 with explicit Harness v1 domain separation and are serialized as `sha256:<64 lowercase hex digits>`. Hashing uses Web Crypto (`crypto.subtle`) so the graph package does not gain a Node-only crypto import. The compiler behavior identity is the explicit constant `harness.compiler/v1`; it is recorded separately and must be bumped when deterministic lowering semantics change.
+
+`documentHash` hashes the complete 2.17 normalized authoring document. It therefore includes `graphId`, `revisionId`, human metadata, editor state, semantic source, and normalized Harness-owned defaults. Object-key insertion order is removed by `stringifyCanonicalJsonV1`, while authoring/source arrays remain ordered so the document hash continues to identify the exact normalized saved document. `semanticHash` hashes only the 2.19 `canonicalSemanticsJson`, so graph/revision/human/editor-only changes cannot alter executable semantic identity.
+
+`registryHash` hashes the canonical resolved registry slice used by compilation: sorted per-node pins (`nodeId`, node `type@version`, owning plugin id/version) plus deduplicated/sorted plugin pins. A plugin resolution/version change can therefore alter registry identity without altering the graph's semantic source. The immutable identity record also carries those exact node/plugin pins directly for provenance. `irHash` hashes only serialized `ExecutionIrV1` content, so it remains a pure content identity rather than a compound provenance key.
+
+The frozen relationship is therefore unchanged:
+
+```text
+semanticHash + registryHash + compilerVersion
+                    ↓
+            deterministic compile
+                    ↓
+              canonical IR
+                    ↓
+                 irHash
+```
+
+2.21 does not lower Graph JSON into IR and does not define hard-coded digest golden vectors. 2.22 owns DAG/router/join lowering; 2.23 owns stable canonical hash vectors/tests.
 
 ## Policies and options
 
