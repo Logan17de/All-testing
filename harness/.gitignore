@@ -16,7 +16,8 @@ coverage/
 !.env.*.example
 
 # Local Harness persistence
-/data/
+/data/*
+!/data/.gitkeep
 /runtime/
 /state/
 /tmp/
