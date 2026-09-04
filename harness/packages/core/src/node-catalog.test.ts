@@ -10,9 +10,17 @@ function makeDefinition(type: string, version: string, onExecute: () => void): N
       type,
       version,
       title: `${type}@${version}`,
-      inputSchema: true,
+      inputs: {
+        request: { schema: true, required: true },
+        credential: {
+          schema: { type: "string" },
+          secret: true,
+        },
+      },
+      outputs: {
+        response: { schema: true, required: true },
+      },
       configSchema: true,
-      outputSchema: true,
       behavior: {
         primitiveFamily: "effect",
         determinism: "nondeterministic",
@@ -42,7 +50,9 @@ describe("NodeCatalog", () => {
 
     expect(executions).toBe(0);
     expect(manifest.type).toBe("test.http");
-    expect(manifest.inputSchema).toBe(true);
+    expect(manifest.inputs.request).toEqual({ schema: true, required: true });
+    expect(manifest.inputs.credential?.secret).toBe(true);
+    expect(manifest.outputs.response).toEqual({ schema: true, required: true });
     expect(manifest.behavior.effect).toBe("external-read");
     expect(manifest.behavior.requiredCapabilities).toEqual(["network:http"]);
     expect(catalog.listManifests()).toEqual([manifest]);
