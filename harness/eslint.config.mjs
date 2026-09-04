@@ -1,7 +1,13 @@
 import js from "@eslint/js";
+import globals from "globals";
 import tseslint from "typescript-eslint";
 
 const typedFiles = ["**/*.ts", "**/*.tsx"];
+const nodeFiles = [
+  "scripts/**/*.{js,mjs,cjs}",
+  "apps/runtime/**/*.{js,mjs,cjs,ts,tsx}",
+  "packages/**/*.{js,mjs,cjs,ts,tsx}",
+];
 
 export default tseslint.config(
   {
@@ -17,13 +23,9 @@ export default tseslint.config(
     files: ["**/*.js", "**/*.mjs", "**/*.cjs"],
   },
   {
-    files: ["scripts/**/*.mjs"],
+    files: nodeFiles,
     languageOptions: {
-      globals: {
-        process: "readonly",
-        fetch: "readonly",
-        console: "readonly",
-      },
+      globals: globals.nodeBuiltin,
     },
   },
   ...tseslint.configs.recommended.map((config) => ({
