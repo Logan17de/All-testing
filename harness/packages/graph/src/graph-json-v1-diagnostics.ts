@@ -19,6 +19,7 @@ import {
   checkGraphJsonV1LoopBounds,
   type GraphLoopBoundDiagnosticCode,
 } from "./graph-json-v1-loop-bounds.js";
+import type { GraphNormalizationDiagnosticCode } from "./graph-json-v1-normalization.js";
 import {
   checkGraphJsonV1PortCompatibility,
   type GraphPortCompatibilityDiagnosticCode,
@@ -49,7 +50,8 @@ export type GraphDiagnosticCode =
   | GraphLoopBoundDiagnosticCode
   | GraphCapabilityPolicyDiagnosticCode
   | GraphEffectRecoveryDiagnosticCode
-  | GraphSecretBindingDiagnosticCode;
+  | GraphSecretBindingDiagnosticCode
+  | GraphNormalizationDiagnosticCode;
 
 export type GraphDiagnosticStage =
   | "shape"
@@ -61,7 +63,8 @@ export type GraphDiagnosticStage =
   | "loop-bounds"
   | "capability-policy"
   | "effect-recovery"
-  | "secret-bindings";
+  | "secret-bindings"
+  | "normalization";
 
 /**
  * Stable compiler/editor-facing Graph JSON diagnostic.
