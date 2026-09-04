@@ -123,6 +123,8 @@ Ajv is confined to `@zet-harness/graph` as an internal Draft 2020-12 shape/value
 
 `GRAPH_JSON_V1_SCHEMA` plus `validateGraphJsonV1Shape(value)` form the 2.5 outer gate: they accept `unknown` and establish only Graph JSON structure/local constraints. Semantic meaning and stable Harness diagnostics remain separate later passes.
 
+The 2.6 semantic pass uses a registry-neutral `NodeManifestResolver`: semantic IDs are unique only within their own namespaces, and every graph node must resolve an exact pinned `type@version`. `@zet-harness/graph` still does not depend on private core registry implementations.
+
 Validation ownership is permanently separated:
 
 ```text
