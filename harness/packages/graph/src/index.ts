@@ -14,5 +14,5 @@ export * from "./graph-json-v1-structured-control.js";
 export * from "./graph-json-v1-loop-bounds.js";
 // 2.13 intersects graph/node capability demand with external grants and applies graph self-deny; Graph JSON never grants authority.
 export * from "./graph-json-v1-capability-policy.js";
-// 2.14 validates static effect/idempotency/retry/recovery consistency; it never claims exactly-once execution.
+// 2.14 validates static effect/idempotency/retry/recovery consistency; determinism is not a retry-safety grant and exactly-once is never inferred.
 export * from "./graph-json-v1-effect-recovery.js";
