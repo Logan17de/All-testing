@@ -1,0 +1,58 @@
+name: Harness refresh lint lock
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-refresh-lint-lock.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    defaults:
+      run:
+        working-directory: harness
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Sync latest branch
+        working-directory: .
+        run: |
+          git fetch origin zet-harness-v1
+          git reset --hard origin/zet-harness-v1
+
+      - name: Refresh lockfile
+        env:
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Commit lockfile
+        working-directory: .
+        run: |
+          if git diff --quiet -- harness/package-lock.json; then
+            echo "Lockfile already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/package-lock.json
+          git commit -m "build(harness): refresh lint dependencies lockfile"
+          git push origin HEAD:zet-harness-v1
