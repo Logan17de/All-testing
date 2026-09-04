@@ -13,6 +13,7 @@ permissions:
 jobs:
   lockfile:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,12 +22,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24.20.0
-          cache: npm
-          cache-dependency-path: harness/package.json
 
       - name: Generate lockfile
         working-directory: harness
-        run: npm install --package-lock-only --ignore-scripts
+        env:
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+        run: npm install --package-lock-only --ignore-scripts --prefer-online
 
       - name: Upload lockfile
         uses: actions/upload-artifact@v4
