@@ -242,7 +242,15 @@ The resolver remains a small structural `NodeManifestResolver` interface rather 
 
 2.8 is a separate compiler-facing stage/API and is not merged into the 2.6–2.7 semantic validator. Its v1 rules are intentionally closed: exact schema equality, an impossible (`false`) source, a universal target, the same explicitly declared primitive type into an unconstrained target, and `integer` → `number`. Anything requiring JSON-Schema implication reasoning — including `enum`, numeric/string constraints, `allOf`, `$ref`, or constrained targets — is rejected as `GRAPH_PORT_COMPATIBILITY_UNSUPPORTED` unless the schemas are exactly equal. Unknown compatibility is never silently accepted.
 
-An impossible (`false`) source is mathematically compatible with any target, but that says nothing about whether the producer can ever yield a live value. Reachability/liveness owns that question in 2.9; compatibility must not hide or absorb it. Structured control-port meaning, cycles, policies, secret-only enforcement, and generalized stable diagnostics remain later passes.
+An impossible (`false`) source is mathematically compatible with any target, but that says nothing about whether the producer can ever yield a live value. Reachability/liveness owns that question in 2.9; compatibility must not hide or absorb it.
+
+### Graph JSON v1 reachability/liveness
+
+2.9 is a separate potential-reachability/liveness stage. Starting from declared entrypoints, both data and control edges contribute directed potential reachability. It rejects unreachable nodes/outputs and live value flows backed by literal `false` source schemas. It deliberately does not interpret control-port names, branch satisfiability, or structured loop semantics.
+
+### Graph JSON v1 acyclicity
+
+2.10 is a separate acyclicity stage over the executable dependency graph. Both data and control edges participate. Every strongly connected component with more than one node is rejected, as is any one-node self-loop. No control-port name, node family, or loop-looking marker grants an exception in the initial executable graph. SCC diagnostics are deterministic in graph source order, and the implementation uses iterative traversal rather than recursive DFS. Structured control contracts remain 2.11+, while bounded executable loop semantics land later. Policies, secret-only enforcement, and generalized stable diagnostics also remain later passes.
 
 Ajv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
 

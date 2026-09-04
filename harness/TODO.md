@@ -69,8 +69,8 @@ Goal: freeze what workflows mean before adding durable execution.
 - [x] 2.6 Add semantic validation for unique IDs and node type/version resolution.
 - [x] 2.7 Add port existence, cardinality, and binding validation.
 - [x] 2.8 Add deliberately constrained port type compatibility; do not attempt arbitrary JSON-Schema implication.
-- [ ] 2.9 Add reachability/liveness validation.
-- [ ] 2.10 Reject arbitrary cycles/SCCs in the initial executable graph.
+- [x] 2.9 Add reachability/liveness validation.
+- [x] 2.10 Reject arbitrary cycles/SCCs in the initial executable graph.
 - [ ] 2.11 Reserve explicit structured control contracts for router, join, loop, human interrupt, and subgraph.
 - [ ] 2.12 Require compiler-visible bounds for executable loops when loop execution lands.
 - [ ] 2.13 Add compile-time capability/policy validation.
