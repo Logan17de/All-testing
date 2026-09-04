@@ -16,3 +16,5 @@ export * from "./graph-json-v1-loop-bounds.js";
 export * from "./graph-json-v1-capability-policy.js";
 // 2.14 validates static effect/idempotency/retry/recovery consistency; determinism is not a retry-safety grant and exactly-once is never inferred.
 export * from "./graph-json-v1-effect-recovery.js";
+// 2.15 enforces secret-only input source rules without inspecting, resolving, or echoing secret material.
+export * from "./graph-json-v1-secret-bindings.js";
