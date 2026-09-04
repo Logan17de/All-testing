@@ -14,9 +14,13 @@ function makePureEchoNode(type: string, title: string): NodeDefinition {
       type,
       version: "1",
       title,
-      inputSchema: true,
+      inputs: {
+        value: { schema: true },
+      },
+      outputs: {
+        value: { schema: true },
+      },
       configSchema: true,
-      outputSchema: true,
       behavior: {
         primitiveFamily: "pure",
         determinism: "deterministic",
@@ -60,9 +64,13 @@ async function loadExternalLocalPlugin(): Promise<HarnessPlugin> {
             type: "local.external.echo",
             version: "1",
             title: "External Local Echo",
-            inputSchema: true,
+            inputs: {
+              value: { schema: true }
+            },
+            outputs: {
+              value: { schema: true }
+            },
             configSchema: true,
-            outputSchema: true,
             behavior: {
               primitiveFamily: "pure",
               determinism: "deterministic",
@@ -107,6 +115,9 @@ describe("built-in and external/local plugin parity", () => {
     expect(host.nodes.requireManifest("local.external.echo", "1").title).toBe(
       "External Local Echo",
     );
+    expect(host.nodes.requireManifest("builtin.test.echo", "1").inputs.value).toEqual({
+      schema: true,
+    });
 
     await host.unload("builtin.test-parity");
 
