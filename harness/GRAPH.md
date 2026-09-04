@@ -318,6 +318,16 @@ The stripping rule is deliberately narrow: the entire top-level `GraphEditorMeta
 
 2.18 does not canonicalize or reorder collections, project `GraphSemanticsV1`, compute document/semantic/registry/IR hashes, or lower Execution IR. Source order is preserved for 2.19, which owns deterministic canonical source semantics. The separate document-hash domain remains free to cover the complete normalized editable document, while executable semantic identity will exclude editor state by construction.
 
+### Graph JSON v1 canonical source semantics
+
+2.19 introduces `canonicalizeGraphJsonV1Semantics(source)` over 2.18 compiler source. It projects exactly the frozen `GraphSemanticsV1` executable domain, so `graphId`, `revisionId`, human-facing metadata, and editor metadata are absent. Resolved node/plugin provenance remains beside the semantic projection for later registry/compiler identity and is not included in `canonicalSemanticsJson`. No hash is computed here.
+
+Canonical ordering is intentionally semantic, not a blanket rule that every array is a set. Graph inputs, outputs, nodes, edges, and entrypoints are identity-addressed collections with validated stable ids, so 2.19 sorts each by `id`. Graph capability `required`, `optional`, and `deny` buckets are sets and are sorted lexically. Node pins are sorted by `nodeId`; plugin pins by plugin id then version. In contrast, arbitrary JSON arrays inside schemas, config, defaults, and literal values remain in source order, and node `bindings` remain ordered because v1 has not declared multi-source aggregation commutative.
+
+`stringifyCanonicalJsonV1` defines the Harness-owned deterministic JSON byte precursor for later hashing. JSON object keys are ordered by lexical JavaScript UTF-16 string comparison, arrays retain their established order, and primitive encoding delegates to ECMAScript `JSON.stringify`. This contract deliberately does not claim an external canonical-JSON standard profile. Non-finite numbers are rejected defensively even though valid Graph JSON has already excluded them. Equivalent executable semantics therefore produce identical `canonicalSemanticsJson` despite source object-key insertion order, identity-collection ordering, or graph/revision/human metadata differences.
+
+2.19 remains pre-IR and pre-hash: 2.20 owns compact immutable Execution IR v1, while 2.21 owns document hash, semantic hash, registry/compiler identity, and IR hash.
+
 ## Graph JSON v1
 
 `@zet-harness/graph` defines the portable source contract. The implementation lives in `packages/graph/src/graph-json-v1.ts` and is re-exported from the package entrypoint.

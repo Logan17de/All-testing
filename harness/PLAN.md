@@ -64,7 +64,8 @@ Phase 2  Graph JSON + compiler + IR        🚧 WE ARE HERE
            ├─ 2.16 structured diagnostics                  ✅
            ├─ 2.17 normalization/version pins                 ✅
            ├─ 2.18 UI metadata stripping                      ✅
-           └─ 2.19 canonical source semantics                   ▶ CURRENT
+           ├─ 2.19 canonical source semantics                   ✅
+           └─ 2.20 Execution IR v1                              ▶ CURRENT
 Phase 3  In-memory DAG scheduler           ⏳
 Phase 4  Runtime daemon + SQLite           ⏳
 Phase 5  Effects + permissions + humans    ⏳
@@ -82,7 +83,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 |---|---|---|
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
-| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.19 current** |
+| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.20 current** |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ⏳ Planned |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
@@ -298,7 +299,7 @@ DAG
 
 No arbitrary visual cycles initially. Every executable loop needs compiler-visible hard bounds. In Graph JSON v1, a node resolved to a structured loop contract must carry a per-invocation top-level `config.maxIterations` positive safe integer. This reserves a deterministic hard ceiling for later lowering/execution without weakening current SCC rejection. Capability/policy validation is a separate compile-time stage: node manifest requirements plus graph-required capability requests must be present in external compile authority, optional requests are opportunistic, and graph deny can only reduce authority. A loop bound greater than graph `maxNodeExecutions` is rejected as a statically known policy contradiction.
 
-Source normalization begins only after those validation stages succeed. 2.17 materializes the closed Graph JSON v1 defaults (`required: false`, empty bindings/capability buckets/options), verifies exact resolved node identity, and records the active plugin id/version that registered each node. Plugin provenance is host registry metadata, not authority authored into Graph JSON. JSON Schema `default` annotations do not mutate executable config. 2.17 does not strip editor metadata or reorder source collections; those remain 2.18 and 2.19 respectively. 2.18 removes only the top-level Graph JSON `editor` bucket from compiler-facing source; human metadata, document identity, normalized fields, resolved pins, and source ordering remain intact. The stripping stage is pure and does not recursively delete config keys named `editor`. Hash domains, semantic projection, canonical ordering, digests, registry identity, and IR lowering remain later compiler items starting with 2.19.
+Source normalization begins only after those validation stages succeed. 2.17 materializes the closed Graph JSON v1 defaults (`required: false`, empty bindings/capability buckets/options), verifies exact resolved node identity, and records the active plugin id/version that registered each node. Plugin provenance is host registry metadata, not authority authored into Graph JSON. JSON Schema `default` annotations do not mutate executable config. 2.17 does not strip editor metadata or reorder source collections; those remain 2.18 and 2.19 respectively. 2.18 removes only the top-level Graph JSON `editor` bucket from compiler-facing source; human metadata, document identity, normalized fields, resolved pins, and source ordering remain intact. The stripping stage is pure and does not recursively delete config keys named `editor`. 2.19 projects the exact executable `GraphSemanticsV1` domain and canonicalizes it deterministically. Identity-addressed graph collections are sorted by stable id and capability buckets lexically; arbitrary JSON arrays and node binding order remain significant. Canonical JSON sorts object keys using lexical JavaScript string comparison while preserving array order and ECMAScript JSON primitive encoding. Graph/revision/human/editor identity and registry provenance remain outside the canonical semantic JSON. Resolved pins are sorted separately for later registry/compiler identity. No digest is computed in 2.19; Execution IR begins in 2.20 and document/semantic/registry/IR hashes remain 2.21.
 
 Deterministic acceptance property:
 
@@ -391,4 +392,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 2 / Item 2.19 — Canonicalize source semantics deterministically.**
+> **Phase 2 / Item 2.20 — Define compact immutable Execution IR v1 with indexed ops and resolved references.**
