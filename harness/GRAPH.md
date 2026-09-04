@@ -531,7 +531,7 @@ semanticHash + registryHash + compilerVersion
                  irHash
 ```
 
-2.21 does not lower Graph JSON into IR and does not define hard-coded digest golden vectors. 2.22 owns DAG/router/join lowering; 2.23 owns stable canonical hash vectors/tests.
+2.21 does not lower Graph JSON into IR; 2.22 owns DAG/router/join lowering. 2.23 now freezes exact `harness.compiler/v1` hash vectors in `compiler-identity-v1.golden.test.ts` using the real canonicalization and lowering pipeline. The fixture locks all four domain-separated SHA-256 outputs, proves cloned identical input produces identical canonical semantics/IR/identity, and proves editor-only changes affect `documentHash` while the semantic, registry, and IR golden hashes remain unchanged. This adds no new production hash semantics; a future intentional canonical-byte or lowering change must update the compatibility/version contract rather than casually rewriting the vectors.
 
 ## Policies and options
 

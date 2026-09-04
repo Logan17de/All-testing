@@ -83,7 +83,7 @@ Goal: freeze what workflows mean before adding durable execution.
 - [x] 2.20 Define compact immutable Execution IR v1 with indexed ops and resolved references.
 - [x] 2.21 Record document hash, semantic hash, IR hash, compiler version, registry hash, and pinned node versions.
 - [x] 2.22 Lower basic DAG dependencies, routers, and join descriptors into the IR.
-- [ ] 2.23 Add stable canonical hash tests.
+- [x] 2.23 Add stable canonical hash tests.
 - [ ] 2.24 Add invalid-graph golden diagnostic tests.
 - [ ] 2.25 Add generated-graph compiler stress tests.
 
