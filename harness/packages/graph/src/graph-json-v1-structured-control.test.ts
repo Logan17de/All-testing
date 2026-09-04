@@ -35,7 +35,7 @@ function manifest(
       executionMode: "none",
       requiredCapabilities: [],
     },
-    control,
+    ...(control === undefined ? {} : { control }),
   };
 }
 
