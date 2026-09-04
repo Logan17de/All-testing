@@ -70,12 +70,71 @@ Small normalized IR used by the scheduler. It eventually resolves:
 
 The compiler output is runtime data, not an editor format.
 
+## First-class node ports
+
+Graph JSON names ports explicitly, so node manifests must expose those ports explicitly too. The compiler must never infer a port model by reverse-engineering arbitrary object-shaped JSON Schema.
+
+The public node contract therefore has compiler-readable input/output maps:
+
+```ts
+interface NodeInputPort {
+  schema: JsonSchema;
+  required?: boolean;
+  multiple?: boolean;
+  secret?: boolean;
+}
+
+interface NodeOutputPort {
+  schema: JsonSchema;
+  required?: boolean;
+}
+
+interface NodeManifest {
+  type: NodeType;
+  version: Version;
+  title: string;
+  inputs: Readonly<Record<string, NodeInputPort>>;
+  outputs: Readonly<Record<string, NodeOutputPort>>;
+  configSchema: JsonSchema;
+  behavior: NodeBehavior;
+}
+```
+
+`multiple` is input connection/binding cardinality metadata. Its deterministic aggregation behavior is enforced when port/cardinality validation lands.
+
+A secret-only input such as:
+
+```ts
+apiKey: {
+  schema: { type: "string" },
+  required: true,
+  secret: true
+}
+```
+
+must eventually reject literal, public graph-input, and node-data-edge bindings. Only an opaque secret reference may bind it. Secret material itself never belongs in Graph JSON.
+
 ## Separate data and control edges
 
-Do not make one arrow mean two things.
+Do not make one arrow mean two things, but also do not require two arrows for ordinary value flow.
 
-- **Data edge**: moves a typed value from an output port to an input port.
-- **Control edge**: determines scheduling/control flow and carries no value.
+- **Data edge**: moves a typed value **and creates an execution dependency**. The target cannot consume that input before the source produces it.
+- **Control edge**: adds ordering/activation semantics without carrying a value.
+
+Therefore this is enough for an ordinary pipeline:
+
+```text
+A.response ──data──> B.prompt
+```
+
+There is no duplicate `A ─control→ B` requirement.
+
+Control edges are reserved for things such as:
+
+- router/conditional activation;
+- joins;
+- human approval/interrupt flow;
+- ordering where no data moves.
 
 Node-to-node values are expressed only with data edges. Node input `bindings` are reserved for literals, public graph inputs, and secret references. This prevents two competing representations of the same dependency.
 
@@ -161,29 +220,118 @@ Edges are tagged and semantically separate:
 
 ```json
 {
-  "id": "control-a-b",
+  "id": "control-b-audit",
   "kind": "control",
-  "from": { "nodeId": "a", "port": "success" },
-  "to": { "nodeId": "b" }
+  "from": { "nodeId": "b", "port": "success" },
+  "to": { "nodeId": "audit" }
 }
 ```
 
 Named control ports are reserved for later structured router/join/loop/human/subgraph semantics. Graph JSON v1 does not grant models arbitrary jump-to-node behavior.
 
-### Policies and options
+## Capability semantics: request, never grant
+
+A graph document may be untrusted, so Graph JSON can **request authority but cannot grant itself authority**.
+
+Graph capability intent is:
+
+```ts
+interface GraphCapabilityIntentV1 {
+  required?: CapabilityId[];
+  optional?: CapabilityId[];
+  deny?: CapabilityId[];
+}
+```
+
+Semantics:
+
+```text
+graph required/optional requests
+        ∩
+user/project/runtime grants
+        −
+graph self-deny
+        ↓
+effective authority
+```
+
+`required` means compilation/execution must fail if the external authority is unavailable. `optional` may be used only when externally granted. `deny` is a graph self-restriction and can only reduce authority.
+
+There is deliberately no graph-level `allow` field that grants power.
+
+The host/runtime may always impose stricter policy.
+
+## Document hash, semantic hash, and IR hash
+
+Executable identity must not change because somebody dragged a box around or renamed a workflow.
+
+Graph JSON therefore defines two source hash domains:
+
+### Document hash
+
+Covers the canonical normalized authoring document, including:
+
+```text
+graphId
+revisionId
+metadata
+editor state
+semantic source
+```
+
+This identifies an exact saved document/revision.
+
+### Semantic hash
+
+Covers only the canonical normalized `GraphSemanticsV1` projection:
+
+```text
+schemaVersion
+public inputs/outputs
+pinned nodes + configs + bindings
+data/control edges
+entrypoints
+execution policies
+execution options
+```
+
+It explicitly excludes:
+
+```text
+graphId
+revisionId
+title/description/labels
+editor positions/viewport/annotations
+```
+
+Therefore moving a node 30 pixels or saving the same behavior under another revision does not change executable identity.
+
+The deterministic compile identity is:
+
+```text
+semanticHash + registryHash + compilerVersion
+                    ↓
+            deterministic compile
+                    ↓
+              canonical IR
+```
+
+The canonical IR then receives its **own content hash** (`irHash`). This keeps the IR hash about IR content while still recording the semantic source, registry, and compiler provenance separately.
+
+Actual canonicalization/hash computation lands later in Phase 2; this section freezes which fields belong to each domain now.
+
+## Policies and options
 
 Graph-local policies may carry hard execution limits such as:
 
 - maximum node executions;
 - maximum parallelism;
 - maximum wall time;
-- capability allow/deny constraints.
-
-The host/runtime may always impose stricter limits.
+- capability requests/self-restrictions.
 
 The initial options surface contains only a default entrypoint selection. Additional execution semantics should be added deliberately, not as an open bag of runtime flags.
 
-### Editor-only metadata
+## Editor-only metadata
 
 All authoring/layout state lives under the top-level `editor` bucket:
 
