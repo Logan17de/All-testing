@@ -3,6 +3,7 @@ name: Zet Harness CI
 on:
   push:
     branches:
+      - main
       - zet-harness-v1
     paths:
       - "harness/**"
@@ -15,10 +16,20 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: harness-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
     defaults:
       run:
         working-directory: harness
@@ -43,6 +54,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
 
       - name: Tests
         run: npm test
