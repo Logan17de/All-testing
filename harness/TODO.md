@@ -51,7 +51,7 @@ Goal: freeze the smallest stable extension boundary before graph/runtime code de
 - [x] 1.9 Ensure manifests can be inspected without executing plugin node code.
 - [x] 1.10 Prove one built-in plugin and one external/local test plugin use the exact same host/registry path.
 - [x] 1.11 Add plugin lifecycle/unload tests.
-- [ ] 1.12 Add plugin smoke to CI.
+- [x] 1.12 Add plugin smoke to CI.
 
 **Checkpoint:** built-in and local/external test plugins register the same kind of node through the same public path and unload cleanly.
 
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**1.12 — Add plugin smoke to CI.**
+**2.1 — Create a lightweight `packages/graph` workspace for Graph source, compiler, and IR modules.**
