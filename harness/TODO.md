@@ -15,8 +15,8 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md`, `PLUGINS.md`, 
 - [x] 0.7 Add `/api/health`.
 - [x] 0.8 Add basic startup test.
 - [x] 0.9 Fix the root typecheck so each workspace owns its own TypeScript configuration.
-- [x] 0.10 Commit `package-lock.json`; pin Node 24.20.0 LTS and npm 12.0.2.
-- [x] 0.11 Add CI for clean install, typecheck, lint, tests, startup smoke, and build.
+- [x] 0.10 Commit `package-lock.json`; pin Node 24.20.0 LTS and npm 12.0.2; enforce both through `.npmrc` engine strictness.
+- [x] 0.11 Add Linux + Windows CI for clean install, typecheck, lint, format check, tests, startup smoke, and build.
 - [x] 0.12 Add `data/.gitkeep` with the matching `.gitignore` negation, plus `tests/`.
 - [ ] 0.13 Add Next/React lint rules and move TypeScript linting to type-checked rules.
 - [ ] 0.14 Add a project `LICENSE`.
@@ -25,8 +25,8 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md`, `PLUGINS.md`, 
 - [ ] 0.17 Extend `/api/health` with runtime/database checks once those components exist. Deferred; not a Phase 0 blocker.
 - [ ] 0.18 Create tiny public `@zet-harness/plugin-api` package with no/near-zero runtime dependencies.
 - [ ] 0.19 Implement plugin host lifecycle in `core`: load → activate → tracked registrations → dispose.
-- [ ] 0.20 Prove one built-in plugin and one external/local test plugin use the exact same host path.
-- [ ] 0.21 Add a lightweight baseline check for startup time, idle memory, and direct runtime dependency count.
+- [ ] 0.20 Prove one built-in plugin and one external/local test plugin use the exact same host path, then add that plugin smoke test to CI.
+- [ ] 0.21 Add a lightweight baseline check for startup time, idle memory, and direct runtime dependency count, and have CI record/check the baseline once implemented.
 - [x] 0.22 Decide runtime ownership: a long-lived lightweight Node daemon owns SQLite/plugins/runs/events; the web UI is a client. See `RUNTIME.md`.
 
 **Checkpoint:** npm 12.0.2 + clean `npm ci` → typecheck → lint → tests → startup smoke → build → plugin smoke all pass, and record the lightweight baseline.
@@ -38,9 +38,9 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md`, `PLUGINS.md`, 
 - [ ] 1.0 Create `apps/runtime`: a long-lived Node process using built-in `node:http`/SSE where practical; move durable API/runtime ownership out of Next.js.
 - [ ] 1.1 Add SQLite using pinned Node 24 `node:sqlite`; no ORM initially.
 - [ ] 1.2 Create schema for projects.
-- [ ] 1.3 Create schema for conversations/messages using structured message parts.
+- [ ] 1.3 Create schema for conversations/messages using structured message parts and nullable `parent_message_id` for edit/retry branching.
 - [ ] 1.4 Create schema for goals/todos.
-- [ ] 1.5 Create schema for runs/tool calls/events/approvals, including idempotency/attempt metadata and event schema versions.
+- [ ] 1.5 Create schema for runs/tool calls/events/approvals, including nullable `parent_run_id`, idempotency/attempt metadata, and event schema versions.
 - [ ] 1.6 Add a tiny ordered SQL migration runner + `schema_migrations` table.
 - [ ] 1.7 Add project CRUD API.
 - [ ] 1.8 Add goal CRUD API.
@@ -133,7 +133,7 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md`, `PLUGINS.md`, 
 - [ ] 5.13 Add idempotency protection for resumed write calls.
 - [ ] 5.14 Bind local server to loopback by default and add origin/CSRF protection where applicable.
 - [ ] 5.15 Add redaction registry + extended secret deny list.
-- [ ] 5.16 Return structured denial results to the model.
+- [ ] 5.16 Return machine-readable denial results to the model with a stable code, safe reason, and remediation metadata.
 - [ ] 5.17 Record file changes per write tool call.
 
 **Checkpoint:** write action pauses → user approves → action executes exactly once → run resumes.
