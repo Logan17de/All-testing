@@ -160,13 +160,16 @@ describe("Graph JSON v1 constrained port compatibility", () => {
   it("classifies unsupported reasoning instead of silently accepting unknown compatibility", () => {
     const unsupported: readonly (readonly [JsonSchema, JsonSchema])[] = [
       [{ enum: ["a"] }, { type: "string" }],
-      [{ type: "number", minimum: 10 }, { type: "number", minimum: 0 }],
-      [{ allOf: [{ type: "integer" }, { minimum: 0 }] }, { type: "number" }],
       [
-        { $ref: "#/$defs/value", $defs: { value: { type: "string" } } },
-        { type: "string" },
+        { type: "number", minimum: 10 },
+        { type: "number", minimum: 0 },
       ],
-      [{ type: "string", minLength: 2 }, { type: "string", minLength: 1 }],
+      [{ allOf: [{ type: "integer" }, { minimum: 0 }] }, { type: "number" }],
+      [{ $ref: "#/$defs/value", $defs: { value: { type: "string" } } }, { type: "string" }],
+      [
+        { type: "string", minLength: 2 },
+        { type: "string", minLength: 1 },
+      ],
     ];
 
     for (const [source, target] of unsupported) {
