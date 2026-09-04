@@ -1,0 +1,75 @@
+name: Harness amend accepted TODO decisions
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-amend-todo.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  amend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - name: Amend TODO.md
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("harness/TODO.md")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = [
+              (
+                  '- [x] 0.10 Commit `package-lock.json`; pin Node 24.20.0 LTS and npm 12.0.2.',
+                  '- [x] 0.10 Commit `package-lock.json`; pin Node 24.20.0 LTS and npm 12.0.2; enforce both through `.npmrc` engine strictness.',
+              ),
+              (
+                  '- [x] 0.11 Add CI for clean install, typecheck, lint, tests, startup smoke, and build.',
+                  '- [x] 0.11 Add Linux + Windows CI for clean install, typecheck, lint, format check, tests, startup smoke, and build.',
+              ),
+              (
+                  '- [ ] 0.20 Prove one built-in plugin and one external/local test plugin use the exact same host path.',
+                  '- [ ] 0.20 Prove one built-in plugin and one external/local test plugin use the exact same host path, then add that plugin smoke test to CI.',
+              ),
+              (
+                  '- [ ] 0.21 Add a lightweight baseline check for startup time, idle memory, and direct runtime dependency count.',
+                  '- [ ] 0.21 Add a lightweight baseline check for startup time, idle memory, and direct runtime dependency count, and have CI record/check the baseline once implemented.',
+              ),
+              (
+                  '- [ ] 1.3 Create schema for conversations/messages using structured message parts.',
+                  '- [ ] 1.3 Create schema for conversations/messages using structured message parts and nullable `parent_message_id` for edit/retry branching.',
+              ),
+              (
+                  '- [ ] 1.5 Create schema for runs/tool calls/events/approvals, including idempotency/attempt metadata and event schema versions.',
+                  '- [ ] 1.5 Create schema for runs/tool calls/events/approvals, including nullable `parent_run_id`, idempotency/attempt metadata, and event schema versions.',
+              ),
+              (
+                  '- [ ] 5.16 Return structured denial results to the model.',
+                  '- [ ] 5.16 Return machine-readable denial results to the model with a stable code, safe reason, and remediation metadata.',
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"Expected TODO.md line not found: {old}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8")
+
+      - name: Commit TODO.md
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md
+          git commit -m "docs(harness): absorb remaining verified gap decisions"
+          git push origin HEAD:zet-harness-v1
