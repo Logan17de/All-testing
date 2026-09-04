@@ -53,6 +53,9 @@ function addInputSource(
  * - non-edge binding target/reference existence; and
  * - required/single-vs-multiple input cardinality across bindings and data edges.
  *
+ * This pass is read-only: it rejects invalid source semantics but never normalizes
+ * or rewrites the graph.
+ *
  * IDs are intentionally not globally unique across different namespaces. For
  * example, a graph input and a node may both be named `prompt` without conflict.
  *
