@@ -1,0 +1,101 @@
+name: Harness complete 2.19 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-19.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Freeze 2.19 and advance 2.20
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              "harness/TODO.md": [
+                  (
+                      "- [ ] 2.19 Canonicalize source semantics deterministically.",
+                      "- [x] 2.19 Canonicalize source semantics deterministically.",
+                  ),
+              ],
+              "harness/README.md": [
+                  (
+                      "2.19 canonical source semantics       ▶ CURRENT\n2.20+ compiler/IR                     ⏳",
+                      "2.19 canonical source semantics       ✅\n2.20 Execution IR v1                  ▶ CURRENT\n2.21+ compiler/hashes                 ⏳",
+                  ),
+                  (
+                      "Inputs that differ only in editor state therefore produce identical 2.18 compiler source. Document/semantic hash domains, semantic projection, and canonical ordering remain later items beginning with 2.19.",
+                      "Inputs that differ only in editor state therefore produce identical 2.18 compiler source. 2.19 then projects exact `GraphSemanticsV1` and makes that executable source deterministic: `graphId`, `revisionId`, human metadata, and editor state are outside the semantic domain; identity-addressed graph collections are sorted by stable id; capability buckets are sorted lexically; arbitrary JSON arrays plus node binding sequence remain order-sensitive; and object keys use the Harness v1 canonical JSON serializer with lexical JavaScript string ordering. Resolved node/plugin pins are sorted separately for later registry identity and are not folded into `canonicalSemanticsJson`. 2.19 computes no hashes and lowers no IR; Execution IR starts at 2.20 and hash/compiler/registry identity remains 2.21.",
+                  ),
+              ],
+              "harness/PLAN.md": [
+                  (
+                      "           └─ 2.19 canonical source semantics                   ▶ CURRENT",
+                      "           ├─ 2.19 canonical source semantics                   ✅\n           └─ 2.20 Execution IR v1                              ▶ CURRENT",
+                  ),
+                  (
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.19 current** |",
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.20 current** |",
+                  ),
+                  (
+                      "Hash domains, semantic projection, canonical ordering, digests, registry identity, and IR lowering remain later compiler items starting with 2.19.",
+                      "2.19 projects the exact executable `GraphSemanticsV1` domain and canonicalizes it deterministically. Identity-addressed graph collections are sorted by stable id and capability buckets lexically; arbitrary JSON arrays and node binding order remain significant. Canonical JSON sorts object keys using lexical JavaScript string comparison while preserving array order and ECMAScript JSON primitive encoding. Graph/revision/human/editor identity and registry provenance remain outside the canonical semantic JSON. Resolved pins are sorted separately for later registry/compiler identity. No digest is computed in 2.19; Execution IR begins in 2.20 and document/semantic/registry/IR hashes remain 2.21.",
+                  ),
+                  (
+                      "> **Phase 2 / Item 2.19 — Canonicalize source semantics deterministically.**",
+                      "> **Phase 2 / Item 2.20 — Define compact immutable Execution IR v1 with indexed ops and resolved references.**",
+                  ),
+              ],
+              "harness/GRAPH.md": [
+                  (
+                      "2.18 does not canonicalize or reorder collections, project `GraphSemanticsV1`, compute document/semantic/registry/IR hashes, or lower Execution IR. Source order is preserved for 2.19, which owns deterministic canonical source semantics. The separate document-hash domain remains free to cover the complete normalized editable document, while executable semantic identity will exclude editor state by construction.\n\n## Graph JSON v1",
+                      "2.18 does not canonicalize or reorder collections, project `GraphSemanticsV1`, compute document/semantic/registry/IR hashes, or lower Execution IR. Source order is preserved for 2.19, which owns deterministic canonical source semantics. The separate document-hash domain remains free to cover the complete normalized editable document, while executable semantic identity will exclude editor state by construction.\n\n### Graph JSON v1 canonical source semantics\n\n2.19 introduces `canonicalizeGraphJsonV1Semantics(source)` over 2.18 compiler source. It projects exactly the frozen `GraphSemanticsV1` executable domain, so `graphId`, `revisionId`, human-facing metadata, and editor metadata are absent. Resolved node/plugin provenance remains beside the semantic projection for later registry/compiler identity and is not included in `canonicalSemanticsJson`. No hash is computed here.\n\nCanonical ordering is intentionally semantic, not a blanket rule that every array is a set. Graph inputs, outputs, nodes, edges, and entrypoints are identity-addressed collections with validated stable ids, so 2.19 sorts each by `id`. Graph capability `required`, `optional`, and `deny` buckets are sets and are sorted lexically. Node pins are sorted by `nodeId`; plugin pins by plugin id then version. In contrast, arbitrary JSON arrays inside schemas, config, defaults, and literal values remain in source order, and node `bindings` remain ordered because v1 has not declared multi-source aggregation commutative.\n\n`stringifyCanonicalJsonV1` defines the Harness-owned deterministic JSON byte precursor for later hashing. JSON object keys are ordered by lexical JavaScript UTF-16 string comparison, arrays retain their established order, and primitive encoding delegates to ECMAScript `JSON.stringify`. This contract deliberately does not claim an external canonical-JSON standard profile. Non-finite numbers are rejected defensively even though valid Graph JSON has already excluded them. Equivalent executable semantics therefore produce identical `canonicalSemanticsJson` despite source object-key insertion order, identity-collection ordering, or graph/revision/human metadata differences.\n\n2.19 remains pre-IR and pre-hash: 2.20 owns compact immutable Execution IR v1, while 2.21 owns document hash, semantic hash, registry/compiler identity, and IR hash.\n\n## Graph JSON v1",
+                  ),
+              ],
+          }
+
+          for filename, edits in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"missing expected text in {filename}: {old[:180]}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+      - name: Format tracker docs
+        working-directory: harness
+        run: npx prettier --write TODO.md README.md PLAN.md GRAPH.md
+
+      - name: Commit tracker freeze and remove helper
+        run: |
+          rm .github/workflows/harness-complete-2-19.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/GRAPH.md .github/workflows/harness-complete-2-19.yml
+          git commit -m "docs(harness): freeze 2.19 and advance 2.20"
+          git push origin HEAD:zet-harness-v1
