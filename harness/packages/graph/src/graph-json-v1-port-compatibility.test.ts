@@ -9,6 +9,8 @@ import type {
 
 import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "./graph-json-v1.js";
 import {
+  checkGraphJsonV1PortCompatibility,
+  classifyJsonSchemaPortCompatibility,
   isJsonSchemaPortCompatible,
   validateGraphJsonV1PortCompatibility,
 } from "./graph-json-v1-port-compatibility.js";
@@ -155,6 +157,33 @@ describe("Graph JSON v1 constrained port compatibility", () => {
     ).toBe(false);
   });
 
+  it("classifies unsupported reasoning instead of silently accepting unknown compatibility", () => {
+    const unsupported: readonly (readonly [JsonSchema, JsonSchema])[] = [
+      [{ enum: ["a"] }, { type: "string" }],
+      [{ type: "number", minimum: 10 }, { type: "number", minimum: 0 }],
+      [{ allOf: [{ type: "integer" }, { minimum: 0 }] }, { type: "number" }],
+      [
+        { $ref: "#/$defs/value", $defs: { value: { type: "string" } } },
+        { type: "string" },
+      ],
+      [{ type: "string", minLength: 2 }, { type: "string", minLength: 1 }],
+    ];
+
+    for (const [source, target] of unsupported) {
+      expect(classifyJsonSchemaPortCompatibility(source, target)).toEqual({
+        compatible: false,
+        reason: "unsupported-inference",
+      });
+    }
+
+    expect(
+      classifyJsonSchemaPortCompatibility(
+        { type: "string", minLength: 2 },
+        { minLength: 2, type: "string" },
+      ),
+    ).toEqual({ compatible: true, reason: "exact" });
+  });
+
   it("checks data edges without absorbing compatibility into the 2.6-2.7 semantic pass", () => {
     const compatible = dataGraph("source.string", "sink.string");
     const widening = dataGraph("source.integer", "sink.number");
@@ -176,6 +205,34 @@ describe("Graph JSON v1 constrained port compatibility", () => {
         resolver,
       ),
     ).toBe(false);
+  });
+
+  it("returns clear diagnostics for known incompatibility versus unsupported inference", () => {
+    const incompatible = checkGraphJsonV1PortCompatibility(
+      dataGraph("source.string", "sink.number"),
+      resolver,
+    );
+    const unsupportedEnum = checkGraphJsonV1PortCompatibility(
+      dataGraph("source.enum", "sink.string"),
+      resolver,
+    );
+    const unsupportedConstraint = checkGraphJsonV1PortCompatibility(
+      dataGraph("source.string", "sink.constrained-string"),
+      resolver,
+    );
+
+    expect(incompatible).toMatchObject({
+      valid: false,
+      diagnostics: [{ code: "GRAPH_PORT_TYPE_INCOMPATIBLE", edgeId: "value-flow" }],
+    });
+    expect(unsupportedEnum).toMatchObject({
+      valid: false,
+      diagnostics: [{ code: "GRAPH_PORT_COMPATIBILITY_UNSUPPORTED", edgeId: "value-flow" }],
+    });
+    expect(unsupportedConstraint).toMatchObject({
+      valid: false,
+      diagnostics: [{ code: "GRAPH_PORT_COMPATIBILITY_UNSUPPORTED", edgeId: "value-flow" }],
+    });
   });
 
   it("checks graph-input bindings using the same compatibility rules", () => {
