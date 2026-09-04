@@ -2,7 +2,7 @@
 
 We implement this list in order. Do not jump ahead unless an earlier item is blocked.
 
-Current architecture constraints are defined by `LIGHTWEIGHT.md` and `PLUGINS.md`.
+Current architecture constraints are defined by `LIGHTWEIGHT.md`, `PLUGINS.md`, `RUNTIME.md`, `GRAPH.md`, and `VERIFIED-REVIEW.md`.
 
 ## Phase 0 — Project skeleton
 
@@ -15,30 +15,32 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md` and `PLUGINS.md
 - [x] 0.7 Add `/api/health`.
 - [x] 0.8 Add basic startup test.
 - [x] 0.9 Fix the root typecheck so each workspace owns its own TypeScript configuration.
-- [x] 0.10 Commit `package-lock.json` and pin Node 24 LTS.
-- [ ] 0.11 Add CI for install, typecheck, lint, and tests.
+- [x] 0.10 Commit `package-lock.json`; pin Node 24.20.0 LTS and npm 12.0.2.
+- [x] 0.11 Add CI for clean install, typecheck, lint, tests, startup smoke, and build.
 - [ ] 0.12 Add `data/.gitkeep` with the matching `.gitignore` negation, plus `tests/`.
 - [ ] 0.13 Add Next/React lint rules and move TypeScript linting to type-checked rules.
 - [ ] 0.14 Add a project `LICENSE`.
 - [ ] 0.15 Wire one internal package into `apps/web` and add `transpilePackages` to prove the workspace graph.
-- [ ] 0.16 Remove or relocate the unrelated physical-safety `deep-research-report.md`.
+- [x] 0.16 Remove the unrelated physical-safety `deep-research-report.md`.
 - [ ] 0.17 Extend `/api/health` with runtime/database checks once those components exist. Deferred; not a Phase 0 blocker.
 - [ ] 0.18 Create tiny public `@zet-harness/plugin-api` package with no/near-zero runtime dependencies.
 - [ ] 0.19 Implement plugin host lifecycle in `core`: load → activate → tracked registrations → dispose.
 - [ ] 0.20 Prove one built-in plugin and one external/local test plugin use the exact same host path.
 - [ ] 0.21 Add a lightweight baseline check for startup time, idle memory, and direct runtime dependency count.
+- [x] 0.22 Decide runtime ownership: a long-lived lightweight Node daemon owns SQLite/plugins/runs/events; the web UI is a client. See `RUNTIME.md`.
 
-**Checkpoint:** clean install → typecheck → lint → tests → startup smoke test → plugin smoke test all pass, and record the lightweight baseline.
+**Checkpoint:** npm 12.0.2 + clean `npm ci` → typecheck → lint → tests → startup smoke → build → plugin smoke all pass, and record the lightweight baseline.
 
 ---
 
-## Phase 1 — SQLite and persistent task state
+## Phase 1 — Runtime daemon, SQLite, and persistent task state
 
+- [ ] 1.0 Create `apps/runtime`: a long-lived Node process using built-in `node:http`/SSE where practical; move durable API/runtime ownership out of Next.js.
 - [ ] 1.1 Add SQLite using pinned Node 24 `node:sqlite`; no ORM initially.
 - [ ] 1.2 Create schema for projects.
 - [ ] 1.3 Create schema for conversations/messages using structured message parts.
 - [ ] 1.4 Create schema for goals/todos.
-- [ ] 1.5 Create schema for runs/tool calls/events/approvals, including idempotency/attempt metadata.
+- [ ] 1.5 Create schema for runs/tool calls/events/approvals, including idempotency/attempt metadata and event schema versions.
 - [ ] 1.6 Add a tiny ordered SQL migration runner + `schema_migrations` table.
 - [ ] 1.7 Add project CRUD API.
 - [ ] 1.8 Add goal CRUD API.
@@ -48,8 +50,10 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md` and `PLUGINS.md
 - [ ] 1.12 Add persistence restart test.
 - [ ] 1.13 Enable WAL mode and add a simple file-level backup routine.
 - [ ] 1.14 Add a per-project run lock so two autonomous runs cannot mutate the same project concurrently.
+- [ ] 1.15 Standardize sortable IDs and UTC epoch-millisecond timestamps before real data exists.
+- [ ] 1.16 Add file-change records for write operations (path + before/after hashes).
 
-**Checkpoint:** create goal → add todos → restart → state is unchanged; backup/restore a test DB successfully.
+**Checkpoint:** runtime daemon starts headlessly; create goal → add todos → restart → state is unchanged; backup/restore a test DB successfully.
 
 ---
 
@@ -66,7 +70,7 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md` and `PLUGINS.md
 - [ ] 2.9 Add abort/cancel support.
 - [ ] 2.10 Add provider error normalization and retry policy.
 - [ ] 2.11 Add scripted mock-provider plugin for deterministic tests.
-- [ ] 2.12 Capture usage/cost metadata when providers expose it.
+- [ ] 2.12 Capture token/usage/cost metadata when providers expose it; capture now, reporting UI can wait.
 - [ ] 2.13 Add fallback support for models/providers without native tool calling only when needed.
 
 **Checkpoint:** swap between the scripted provider and one OpenAI-compatible provider through plugin configuration without changing core code.
@@ -75,7 +79,7 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md` and `PLUGINS.md
 
 ## Phase 3 — Run engine
 
-- [ ] 3.0 Decide/document exactly where the agent loop runs; default target is the same Node process unless profiling proves otherwise.
+- [x] 3.0 Decide/document where the agent loop runs: the long-lived runtime daemon. See `RUNTIME.md`.
 - [ ] 3.1 Add run creation.
 - [ ] 3.2 Add append-only run events.
 - [ ] 3.3 Add run status machine.
@@ -105,7 +109,7 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md` and `PLUGINS.md
 - [ ] 4.10 Feed tool results back into the model loop.
 - [ ] 4.11 Add tool-call tests.
 - [ ] 4.12 Implement Windows path containment rules: junctions, case folding, short names, UNC/drive-relative paths.
-- [ ] 4.13 Implement process-tree cancellation.
+- [ ] 4.13 Implement process-tree cancellation for general tool processes.
 - [ ] 4.14 Detect/report Windows long-path limitations at startup.
 
 **Checkpoint:** native and external plugin tools both run through the same registry, policy, and trace path.
@@ -116,7 +120,7 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md` and `PLUGINS.md
 
 - [ ] 5.1 Add permission policy engine.
 - [ ] 5.2 Classify model-requested tools as read/write/execute/destructive.
-- [ ] 5.3 Add approval records.
+- [ ] 5.3 Add first-class approval records.
 - [ ] 5.4 Add approval cards in UI.
 - [ ] 5.5 Pause run while awaiting approval.
 - [ ] 5.6 Add `fs.write`.
@@ -183,8 +187,29 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md` and `PLUGINS.md
 - [ ] 8.10 Map MCP tools to harness risk/permission classes.
 - [ ] 8.11 Add one MCP integration test.
 - [ ] 8.12 Document third-party plugin authoring.
+- [ ] 8.13 Allow plugins to register graph node types/executors through the public API without importing graph-editor code.
 
 **Checkpoint:** install/enable one external plugin and one MCP adapter without changing core code; disabled plugins add no active runtime work.
+
+---
+
+## Phase 8.5 — Optional visual graph authoring
+
+Implementation contract is defined in `GRAPH.md`.
+
+- [ ] 8.5.1 Define a small versioned canonical JSON graph schema owned by Zet Harness.
+- [ ] 8.5.2 Separate editor draft state, immutable semantic graph revisions, and compiled execution plans.
+- [ ] 8.5.3 Define typed semantic ports independently from editor handles.
+- [ ] 8.5.4 Separate data edges from control edges.
+- [ ] 8.5.5 Add initial node language: Input, Transform, Model Call, Conditional, Loop, Join, Tool Call, Subgraph, Output.
+- [ ] 8.5.6 Add graph validator + deterministic compiler.
+- [ ] 8.5.7 Add graph executor adapter over the existing run engine and plugin registries.
+- [ ] 8.5.8 Add compiler golden tests and invalid-graph/property tests.
+- [ ] 8.5.9 Add React Flow only to the web/editor surface and lazy-load the graph editor.
+- [ ] 8.5.10 Add graph run visualization using the same durable run events/traces.
+- [ ] 8.5.11 Add save → reload → compile → execute integration test.
+
+**Checkpoint:** create a small graph in the editor, reload it without semantic change, compile it deterministically, and execute it using plugin-provided model/tool nodes while the headless runtime remains free of React Flow dependencies.
 
 ---
 
@@ -233,6 +258,7 @@ Only after the core loop is stable:
 - Built-ins should use public plugin registration paths wherever practical.
 - Third-party plugins must depend on `@zet-harness/plugin-api`, not private `core` files.
 - Disabled plugins should do no active work.
+- The graph/editor is an optional authoring layer; it must not become the runtime contract.
 - Do not pretend in-process plugins are security-sandboxed; they are trusted code.
 - Do not store credentials or machine-specific secrets in Git.
 - Do not bypass the permission layer from a model-requested tool implementation.
@@ -244,4 +270,4 @@ Only after the core loop is stable:
 
 ## Next action
 
-**0.11 — Add CI for clean install, typecheck, lint, and tests.**
+**0.12 — Add tracked data/test directory skeleton and matching ignore rules.**
