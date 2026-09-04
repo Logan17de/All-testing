@@ -10,7 +10,7 @@ We implement this list in order. Do not jump ahead unless an earlier item is blo
 - [x] 0.4 Create `packages/core`, `packages/db`, `packages/models`, `packages/tools`, and `packages/shared`.
 - [x] 0.5 Add `.env.example` with placeholders only.
 - [x] 0.6 Add `.gitignore` rules for local DB, runtime state, logs, and secrets.
-- [ ] 0.7 Add `/api/health`.
+- [x] 0.7 Add `/api/health`.
 - [ ] 0.8 Add basic startup test.
 
 **Checkpoint:** `npm install && npm run dev` starts successfully.
@@ -203,4 +203,4 @@ Only after the core loop is stable:
 
 ## Next action
 
-**0.7 — Add `/api/health`.**
+**0.8 — Add basic startup test.**
