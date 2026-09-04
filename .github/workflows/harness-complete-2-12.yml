@@ -1,0 +1,101 @@
+name: Harness complete 2.12 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-12.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Freeze 2.12 and advance 2.13
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              "harness/TODO.md": [
+                  (
+                      "- [ ] 2.12 Require compiler-visible bounds for executable loops when loop execution lands.",
+                      "- [x] 2.12 Require compiler-visible bounds for executable loops when loop execution lands.",
+                  ),
+              ],
+              "harness/README.md": [
+                  (
+                      "2.12 compiler-visible loop bounds ▶ CURRENT\n2.13+ compiler/IR                ⏳",
+                      "2.12 compiler-visible loop bounds ✅\n2.13 capability/policy validation ▶ CURRENT\n2.14+ compiler/IR                ⏳",
+                  ),
+                  (
+                      "2.11 reserves explicit manifest-level structured-control contracts for router, all-active join, loop, human interrupt, and subgraph, and validates named control ports without adding runtime behavior or IR lowering. Loop contracts do not override 2.10 cycle rejection. Compiler-visible executable loop bounds are 2.12.",
+                      "2.11 reserves explicit manifest-level structured-control contracts for router, all-active join, loop, human interrupt, and subgraph, and validates named control ports without adding runtime behavior or IR lowering. Loop contracts do not override 2.10 cycle rejection. 2.12 requires every structured loop invocation to carry a compiler-visible `config.maxIterations` positive safe integer. The bound is per invocation, does not make cycles executable, and does not absorb graph resource-policy checks; those begin in 2.13.",
+                  ),
+              ],
+              "harness/PLAN.md": [
+                  (
+                      "           └─ 2.12 compiler-visible loop bounds       ▶ CURRENT",
+                      "           ├─ 2.12 compiler-visible loop bounds       ✅\n           └─ 2.13 capability/policy validation        ▶ CURRENT",
+                  ),
+                  (
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.12 current** |",
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.13 current** |",
+                  ),
+                  (
+                      "No arbitrary visual cycles initially. Every executable loop needs compiler-visible hard bounds.",
+                      "No arbitrary visual cycles initially. Every executable loop needs compiler-visible hard bounds. In Graph JSON v1, a node resolved to a structured loop contract must carry a per-invocation top-level `config.maxIterations` positive safe integer. This reserves a deterministic hard ceiling for later lowering/execution without weakening current SCC rejection; graph-wide resource-policy interaction remains a separate compile-time concern.",
+                  ),
+                  (
+                      "> **Phase 2 / Item 2.7 — Add port existence, cardinality, and binding validation.**",
+                      "> **Phase 2 / Item 2.13 — Add compile-time capability/policy validation.**",
+                  ),
+              ],
+              "harness/GRAPH.md": [
+                  (
+                      "This stage is reservation/validation only: it does not choose router branches, execute joins, run loops, suspend/resume humans, invoke subgraphs, or lower structured control into IR. A loop contract does not make a graph cycle legal; 2.10 continues to reject SCCs/self-loops. Compiler-visible bounds for executable loops are a separate 2.12 concern. Policies, secret-only enforcement, and generalized stable diagnostics also remain later passes.",
+                      "This stage is reservation/validation only: it does not choose router branches, execute joins, run loops, suspend/resume humans, invoke subgraphs, or lower structured control into IR. A loop contract does not make a graph cycle legal; 2.10 continues to reject SCCs/self-loops.\n\n### Graph JSON v1 compiler-visible loop bounds\n\n2.12 is a separate static stage. Every graph node whose resolved manifest declares `control.kind === \"loop\"` must carry a top-level `config.maxIterations` value. The value is per node invocation and must be a positive JavaScript safe integer. Missing bounds fail as `GRAPH_LOOP_BOUND_REQUIRED`; malformed bounds fail as `GRAPH_LOOP_BOUND_INVALID`. Unresolved node manifests fail the stage prerequisite explicitly.\n\nThe `maxIterations` key has Harness loop meaning only for nodes resolved to a structured loop contract; ordinary node configuration may use the same text without becoming a loop. The fixed top-level location keeps the future compiler deterministic and avoids JSONPath/dynamic-expression inference. 2.12 does not execute loops, interpret stop conditions, lower loop regions into IR, or compare the local bound with graph resource limits. A valid bound still does not legalize a cycle: 2.10 continues to reject every SCC/self-loop until executable loop lowering lands later. Capability/resource policy semantics begin in 2.13; secret-only enforcement and generalized stable diagnostics remain later passes.",
+                  ),
+              ],
+          }
+
+          for filename, edits in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"missing expected text in {filename}: {old[:100]}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+      - name: Format tracker docs
+        working-directory: harness
+        run: npx prettier --write TODO.md README.md PLAN.md GRAPH.md
+
+      - name: Commit tracker freeze and remove helper
+        run: |
+          rm .github/workflows/harness-complete-2-12.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/GRAPH.md .github/workflows/harness-complete-2-12.yml
+          git commit -m "docs(harness): freeze 2.12 and advance 2.13"
+          git push origin HEAD:zet-harness-v1
