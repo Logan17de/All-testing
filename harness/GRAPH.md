@@ -280,7 +280,15 @@ Effective compile-time authority is requested hard/optional capability intent in
 
 Determinism and repeat safety are intentionally independent. A deterministic external write with unknown idempotency is still unsafe to repeat. If an external write declares `idempotency: unknown`, automatic retry beyond one attempt is rejected and `recovery: rerun` is rejected. `reconcile` recovery is meaningful only for external writes. Nodes with `executionMode: none` must use `recovery: not-applicable` and cannot declare runtime retry defaults; executable nodes must declare a non-`not-applicable` recovery policy. Retry `maxAttempts` must be a positive safe integer and optional `backoffMs` a non-negative safe integer.
 
-This stage validates manifest promises only. It does not execute retries, generate idempotency keys, reconcile external systems, decide durable resume state, or claim exactly-once behavior. Those runtime mechanics remain later phases. Secret-only binding enforcement remains 2.15; generalized stable diagnostics remain 2.16.
+This stage validates manifest promises only. It does not execute retries, generate idempotency keys, reconcile external systems, decide durable resume state, or claim exactly-once behavior. Those runtime mechanics remain later phases.
+
+### Graph JSON v1 secret-only binding validation
+
+2.15 is a separate compile-time stage over resolved input-port contracts. A node input marked `secret: true` may receive only a `kind: "secret"` binding carrying an opaque `secretRef`. Literal bindings, public `graph-input` forwarding, and node data edges into that port are rejected as `GRAPH_SECRET_REFERENCE_REQUIRED`. Missing node manifests are reported as a stage prerequisite failure.
+
+The rule is contract-driven, not heuristic: the compiler does not scan strings or ordinary inputs to decide whether something looks secret, and an opaque secret reference may still be supplied to an ordinary non-secret input when a graph author chooses that source form. The stage never resolves a secret provider and never includes literal values or `secretRef` contents in its diagnostics. Required-input/cardinality and unknown-port validation remain owned by 2.7; secret-provider existence, authorization, retrieval, redaction, and runtime use remain later security/runtime concerns.
+
+2.15 is validation only. It does not normalize, redact, encrypt, materialize, or persist secret values. Generalized stable diagnostics with common node/edge/path locations remain 2.16.
 
 Ajv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
 

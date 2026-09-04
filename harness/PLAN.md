@@ -60,7 +60,8 @@ Phase 2  Graph JSON + compiler + IR        🚧 WE ARE HERE
            ├─ 2.12 compiler-visible loop bounds       ✅
            ├─ 2.13 capability/policy validation        ✅
            ├─ 2.14 side-effect/retry/recovery validation ✅
-           └─ 2.15 secret-only enforcement              ▶ CURRENT
+           ├─ 2.15 secret-only enforcement              ✅
+           └─ 2.16 structured diagnostics                  ▶ CURRENT
 Phase 3  In-memory DAG scheduler           ⏳
 Phase 4  Runtime daemon + SQLite           ⏳
 Phase 5  Effects + permissions + humans    ⏳
@@ -78,7 +79,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 |---|---|---|
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
-| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.15 current** |
+| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.16 current** |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ⏳ Planned |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
@@ -320,7 +321,7 @@ PENDING → READY → RUNNING
 
 Use native Promises, bounded semaphores, and `AbortController`; no queue service by default.
 
-Side effects are explicit. The contract distinguishes determinism, effect class, idempotency, retry defaults, and recovery policy. Compile-time validation keeps determinism separate from repeat safety: a deterministic external write is not automatically safe to retry, while a nondeterministic external read may still be side-effect-idempotent. Unknown-idempotency external writes cannot declare automatic retry beyond one attempt or automatic rerun recovery; idempotent/idempotency-key writes may declare controlled retries. Reconcile recovery is reserved for external writes, and compile-time/control nodes without executors cannot carry runtime retry/recovery defaults. Never claim exactly-once execution for arbitrary third-party effects.
+Side effects are explicit. The contract distinguishes determinism, effect class, idempotency, retry defaults, and recovery policy. Compile-time validation keeps determinism separate from repeat safety: a deterministic external write is not automatically safe to retry, while a nondeterministic external read may still be side-effect-idempotent. Unknown-idempotency external writes cannot declare automatic retry beyond one attempt or automatic rerun recovery; idempotent/idempotency-key writes may declare controlled retries. Reconcile recovery is reserved for external writes, and compile-time/control nodes without executors cannot carry runtime retry/recovery defaults. Never claim exactly-once execution for arbitrary third-party effects. Secret-only inputs are also compile-time constrained: only opaque secret-reference bindings may target `secret: true`; literals, public graph inputs, and node data edges are rejected without inspecting or echoing secret material. Secret-provider resolution and authorization remain runtime concerns.
 
 Keep three concepts separate:
 
@@ -385,4 +386,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 2 / Item 2.15 — Reject literal secrets where a secret reference is required.**
+> **Phase 2 / Item 2.16 — Return structured diagnostics with codes plus node/edge/path references.**
