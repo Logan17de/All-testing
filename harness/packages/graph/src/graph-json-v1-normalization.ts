@@ -77,7 +77,8 @@ function normalizePolicies(policies: GraphPoliciesV1 | undefined): GraphPolicies
  * Normalize only Harness-owned Graph JSON v1 defaults and record exact registry pins.
  *
  * This function assumes shape/semantic/compiler-facing validation has already
- * succeeded. It does not repeat those rules, strip editor metadata, reorder source
+ * succeeded. It is a pure source-normalization step and does not mutate the input.
+ * It does not repeat validation rules, strip editor metadata, reorder source
  * arrays/objects, canonicalize JSON, hash anything, or lower IR.
  *
  * Closed v1 default materialization:
