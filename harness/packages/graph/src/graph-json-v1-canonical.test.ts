@@ -249,9 +249,7 @@ describe("Graph JSON v1 canonical source semantics", () => {
   it("serializes object keys lexically even for integer-like property names", () => {
     const value: JsonObject = { "2": "two", "10": "ten", z: true, a: false };
 
-    expect(stringifyCanonicalJsonV1(value)).toBe(
-      '{"10":"ten","2":"two","a":false,"z":true}',
-    );
+    expect(stringifyCanonicalJsonV1(value)).toBe('{"10":"ten","2":"two","a":false,"z":true}');
   });
 
   it("rejects non-JSON finite-number violations defensively", () => {
