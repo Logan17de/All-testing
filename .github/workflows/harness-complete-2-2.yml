@@ -1,0 +1,67 @@
+name: Harness complete 2.2 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  advance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+      - name: Advance 2.2 to 2.3
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              Path("harness/TODO.md"): [
+                  (
+                      '- [ ] 2.2 Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.',
+                      '- [x] 2.2 Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.',
+                  ),
+                  (
+                      '**2.2 — Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.**',
+                      '**2.3 — Choose JSON Schema Draft 2020-12 as the public shape-validation format.**',
+                  ),
+              ],
+              Path("harness/PLAN.md"): [
+                  (
+                      '           └─ 2.2 Graph JSON v1                  ▶ CURRENT',
+                      '           ├─ 2.2 Graph JSON v1                  ✅\n           └─ 2.3 JSON Schema Draft 2020-12         ▶ CURRENT',
+                  ),
+                  (
+                      '| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.2 current** |',
+                      '| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.3 current** |',
+                  ),
+                  (
+                      '> **Phase 2 / Item 2.2 — Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.**',
+                      '> **Phase 2 / Item 2.3 — Choose JSON Schema Draft 2020-12 as the public shape-validation format.**',
+                  ),
+              ],
+          }
+
+          for path, pairs in replacements.items():
+              text = path.read_text(encoding="utf-8")
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f"Expected text not found in {path}: {old}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding="utf-8", newline="\n")
+      - name: Commit tracker changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/PLAN.md
+          git commit -m "docs(harness): complete Graph JSON v1 milestone"
+          git pull --rebase origin zet-harness-v1
+          git push origin HEAD:zet-harness-v1
