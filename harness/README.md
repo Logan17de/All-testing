@@ -121,6 +121,8 @@ All public v1 `JsonSchema` surfaces use **JSON Schema Draft 2020-12**. JSON Sche
 
 Ajv is confined to `@zet-harness/graph` as an internal Draft 2020-12 shape/value engine. Ajv types and errors do not cross public contracts, and the scheduler/runtime do not depend on it.
 
+`GRAPH_JSON_V1_SCHEMA` plus `validateGraphJsonV1Shape(value)` form the 2.5 outer gate: they accept `unknown` and establish only Graph JSON structure/local constraints. Semantic meaning and stable Harness diagnostics remain separate later passes.
+
 Validation ownership is permanently separated:
 
 ```text
