@@ -46,7 +46,7 @@ Goal: freeze the smallest stable extension boundary before graph/runtime code de
 - [x] 1.4 Implement the plugin host in `packages/core`.
 - [x] 1.5 Add a generic typed registry primitive used by plugin-provided capabilities.
 - [x] 1.6 Freeze the universal `NodeDefinition`/`NodeManifest` contract.
-- [x] 1.7 Include node input/config/output schemas in the manifest.
+- [x] 1.7 Include explicit node input/output port schemas plus config schema in the manifest.
 - [x] 1.8 Include node behavior metadata: primitive family, determinism, effect/idempotency, recovery, timeout/retry defaults, execution mode, required capabilities.
 - [x] 1.9 Ensure manifests can be inspected without executing plugin node code.
 - [x] 1.10 Prove one built-in plugin and one external/local test plugin use the exact same host/registry path.
@@ -62,7 +62,7 @@ Goal: freeze the smallest stable extension boundary before graph/runtime code de
 Goal: freeze what workflows mean before adding durable execution.
 
 - [x] 2.1 Create a lightweight `packages/graph` workspace for Graph source, compiler, and IR modules.
-- [x] 2.2 Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.
+- [ ] 2.2 Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.
 - [ ] 2.3 Choose JSON Schema Draft 2020-12 as the public shape-validation format.
 - [ ] 2.4 Add Ajv only if its compiled validation materially simplifies the boundary; keep it out of runtime scheduling logic.
 - [ ] 2.5 Add shape/schema validation.
@@ -81,7 +81,7 @@ Goal: freeze what workflows mean before adding durable execution.
 - [ ] 2.18 Strip UI-only metadata during compilation.
 - [ ] 2.19 Canonicalize source semantics deterministically.
 - [ ] 2.20 Define compact immutable Execution IR v1 with indexed ops and resolved references.
-- [ ] 2.21 Record graph/source hash, IR hash, compiler version, registry hash, and pinned node versions.
+- [ ] 2.21 Record document hash, semantic hash, IR hash, compiler version, registry hash, and pinned node versions.
 - [ ] 2.22 Lower basic DAG dependencies, routers, and join descriptors into the IR.
 - [ ] 2.23 Add stable canonical hash tests.
 - [ ] 2.24 Add invalid-graph golden diagnostic tests.
