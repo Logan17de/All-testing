@@ -1,0 +1,79 @@
+name: Harness complete 2.10 tracker
+
+on:
+  push:
+    branches: [zet-harness-v1]
+    paths:
+      - ".github/workflows/harness-complete-2-10.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  update-trackers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+      - name: Freeze 2.10 and advance 2.11
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"expected text not found in {path}: {old!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace(
+              "harness/TODO.md",
+              "- [ ] 2.9 Add reachability/liveness validation.",
+              "- [x] 2.9 Add reachability/liveness validation.",
+          )
+          replace(
+              "harness/TODO.md",
+              "- [ ] 2.10 Reject arbitrary cycles/SCCs in the initial executable graph.",
+              "- [x] 2.10 Reject arbitrary cycles/SCCs in the initial executable graph.",
+          )
+
+          replace(
+              "harness/README.md",
+              "2.9 reachability/liveness        ▶ CURRENT\n2.10+ cycles/compiler/IR         ⏳",
+              "2.9 reachability/liveness        ✅\n2.10 cycle/SCC rejection         ✅\n2.11 structured control contracts ▶ CURRENT\n2.12+ compiler/IR                ⏳",
+          )
+          replace(
+              "harness/README.md",
+              "Unsupported inference is rejected with an explicit compatibility diagnostic rather than guessed. Topology/liveness remains 2.9.",
+              "Unsupported inference is rejected with an explicit compatibility diagnostic rather than guessed. 2.9 separately owns potential reachability/liveness, including impossible live sources. 2.10 separately rejects every executable SCC/self-loop across data and control edges. Structured control meaning remains 2.11+.",
+          )
+
+          replace(
+              "harness/PLAN.md",
+              "           ├─ 2.8 constrained port compatibility      ✅\n           └─ 2.9 reachability/liveness               ▶ CURRENT",
+              "           ├─ 2.8 constrained port compatibility      ✅\n           ├─ 2.9 reachability/liveness               ✅\n           ├─ 2.10 arbitrary cycle/SCC rejection      ✅\n           └─ 2.11 structured control contracts       ▶ CURRENT",
+          )
+          replace(
+              "harness/PLAN.md",
+              "🚧 In progress — **2.9 current**",
+              "🚧 In progress — **2.11 current**",
+          )
+
+          replace(
+              "harness/GRAPH.md",
+              "An impossible (`false`) source is mathematically compatible with any target, but that says nothing about whether the producer can ever yield a live value. Reachability/liveness owns that question in 2.9; compatibility must not hide or absorb it. Structured control-port meaning, cycles, policies, secret-only enforcement, and generalized stable diagnostics remain later passes.",
+              "An impossible (`false`) source is mathematically compatible with any target, but that says nothing about whether the producer can ever yield a live value. Reachability/liveness owns that question in 2.9; compatibility must not hide or absorb it.\n\n### Graph JSON v1 reachability/liveness\n\n2.9 is a separate potential-reachability/liveness stage. Starting from declared entrypoints, both data and control edges contribute directed potential reachability. It rejects unreachable nodes/outputs and live value flows backed by literal `false` source schemas. It deliberately does not interpret control-port names, branch satisfiability, or structured loop semantics.\n\n### Graph JSON v1 acyclicity\n\n2.10 is a separate acyclicity stage over the executable dependency graph. Both data and control edges participate. Every strongly connected component with more than one node is rejected, as is any one-node self-loop. No control-port name, node family, or loop-looking marker grants an exception in the initial executable graph. SCC diagnostics are deterministic in graph source order, and the implementation uses iterative traversal rather than recursive DFS. Structured control contracts remain 2.11+, while bounded executable loop semantics land later. Policies, secret-only enforcement, and generalized stable diagnostics also remain later passes.",
+          )
+          PY
+      - name: Commit tracker transition and remove helper
+        shell: bash
+        run: |
+          git rm .github/workflows/harness-complete-2-10.yml
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/GRAPH.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs(harness): freeze 2.10 and advance 2.11"
+          git push origin HEAD:zet-harness-v1
