@@ -3,6 +3,7 @@ import type {
   JsonObject,
   JsonSchema,
   JsonValue,
+  NodePortName,
   NodeType,
   Version,
 } from "@zet-harness/plugin-api";
@@ -15,11 +16,11 @@ export type GraphJsonVersion = typeof GRAPH_JSON_VERSION;
 export type GraphId = string;
 export type GraphRevisionId = string;
 export type GraphNodeId = string;
-export type GraphPortId = string;
+export type GraphPortId = NodePortName;
 export type GraphEdgeId = string;
 export type GraphEntrypointId = string;
 
-/** Human-facing metadata. It does not define scheduler control flow. */
+/** Human-facing metadata. It does not define executable semantics. */
 export interface GraphMetadataV1 {
   readonly title?: string;
   readonly description?: string;
@@ -80,7 +81,9 @@ export interface GraphSecretBindingV1 {
  * document never has two competing ways to express the same dependency.
  */
 export type GraphInputBindingV1 =
-  GraphLiteralBindingV1 | GraphInputPortBindingV1 | GraphSecretBindingV1;
+  | GraphLiteralBindingV1
+  | GraphInputPortBindingV1
+  | GraphSecretBindingV1;
 
 /** One pinned node invocation in the source graph. */
 export interface GraphNodeV1 {
@@ -91,13 +94,19 @@ export interface GraphNodeV1 {
   readonly bindings?: readonly GraphInputBindingV1[];
 }
 
-/** Data endpoint. Ports refer to semantic node input/output ports, never UI handles. */
+/** Data endpoint. Ports refer to semantic node ports, never UI handles. */
 export interface GraphDataEndpointV1 {
   readonly nodeId: GraphNodeId;
   readonly port: GraphPortId;
 }
 
-/** Moves a value from one node output port to one node input port. */
+/**
+ * Moves a value from one node output port to one node input port.
+ *
+ * A data edge is also an execution dependency: the target cannot consume this
+ * input until the source execution has produced the referenced output. Ordinary
+ * value flow therefore never requires a duplicate control edge.
+ */
 export interface GraphDataEdgeV1 {
   readonly id: GraphEdgeId;
   readonly kind: "data";
@@ -106,7 +115,7 @@ export interface GraphDataEdgeV1 {
 }
 
 /**
- * Control endpoint used only for scheduling dependencies/routes.
+ * Control endpoint used only for ordering/activation dependencies and routes.
  *
  * `port` is an optional named control exit/entry such as a future router branch
  * or join lane. Structured control-node semantics are frozen in later items.
@@ -116,7 +125,7 @@ export interface GraphControlEndpointV1 {
   readonly port?: string;
 }
 
-/** Determines scheduling/control flow and carries no data value. */
+/** Adds ordering/activation semantics without carrying a data value. */
 export interface GraphControlEdgeV1 {
   readonly id: GraphEdgeId;
   readonly kind: "control";
@@ -133,18 +142,25 @@ export interface GraphEntrypointV1 {
   readonly port?: string;
 }
 
-/** Graph-local capability policy. The host/runtime may always impose stricter policy. */
-export interface GraphCapabilityPolicyV1 {
-  readonly allow?: readonly CapabilityId[];
+/**
+ * Graph-declared capability intent. This never grants authority.
+ *
+ * `required` and `optional` are requests that must be intersected with external
+ * user/project/runtime grants. `deny` is a self-restriction that can only reduce
+ * effective authority. A graph cannot increase its own permissions.
+ */
+export interface GraphCapabilityIntentV1 {
+  readonly required?: readonly CapabilityId[];
+  readonly optional?: readonly CapabilityId[];
   readonly deny?: readonly CapabilityId[];
 }
 
-/** Hard execution limits carried with the source graph. */
+/** Hard execution limits and self-restrictions carried with source semantics. */
 export interface GraphPoliciesV1 {
   readonly maxNodeExecutions?: number;
   readonly maxParallelism?: number;
   readonly maxWallTimeMs?: number;
-  readonly capabilities?: GraphCapabilityPolicyV1;
+  readonly capabilities?: GraphCapabilityIntentV1;
 }
 
 /** Small execution-source options that are not hard safety limits. */
@@ -187,16 +203,14 @@ export interface GraphEditorMetadataV1 {
 }
 
 /**
- * Canonical portable source document for Zet Harness Graph JSON v1.
+ * Exact executable source domain used by the future semantic hash.
  *
- * This is source code, not runtime state. Validation, normalization, hashing,
- * compilation, and execution semantics are implemented by later Phase 2 items.
+ * `graphId`, `revisionId`, human metadata, and editor metadata are deliberately
+ * absent. Moving a box, changing a title, or saving a new revision must not
+ * change executable identity when these fields remain the same.
  */
-export interface GraphJsonV1 {
+export interface GraphSemanticsV1 {
   readonly schemaVersion: GraphJsonVersion;
-  readonly graphId: GraphId;
-  readonly revisionId: GraphRevisionId;
-  readonly metadata?: GraphMetadataV1;
   readonly inputs: readonly GraphInputPortV1[];
   readonly outputs: readonly GraphOutputPortV1[];
   readonly nodes: readonly GraphNodeV1[];
@@ -204,5 +218,19 @@ export interface GraphJsonV1 {
   readonly entrypoints: readonly GraphEntrypointV1[];
   readonly policies?: GraphPoliciesV1;
   readonly options?: GraphOptionsV1;
+}
+
+/**
+ * Canonical portable source document for Zet Harness Graph JSON v1.
+ *
+ * This is source code, not runtime state. The future document hash covers the
+ * whole normalized document, while the semantic hash covers only the normalized
+ * `GraphSemanticsV1` projection. Compilation is identified by semantic hash +
+ * registry hash + compiler version; canonical IR receives its own content hash.
+ */
+export interface GraphJsonV1 extends GraphSemanticsV1 {
+  readonly graphId: GraphId;
+  readonly revisionId: GraphRevisionId;
+  readonly metadata?: GraphMetadataV1;
   readonly editor?: GraphEditorMetadataV1;
 }
