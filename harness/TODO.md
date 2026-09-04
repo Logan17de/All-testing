@@ -5,7 +5,7 @@ We implement this list in order. Do not jump ahead unless an earlier item is blo
 ## Phase 0 — Project skeleton
 
 - [x] 0.1 Create `harness/package.json` and workspace layout.
-- [ ] 0.2 Add TypeScript, linting, formatting, and test configuration.
+- [x] 0.2 Add TypeScript, linting, formatting, and test configuration.
 - [ ] 0.3 Create `apps/web` Next.js app.
 - [ ] 0.4 Create `packages/core`, `packages/db`, `packages/models`, `packages/tools`, and `packages/shared`.
 - [ ] 0.5 Add `.env.example` with placeholders only.
@@ -203,4 +203,4 @@ Only after the core loop is stable:
 
 ## Next action
 
-**0.2 — Add TypeScript, linting, formatting, and test configuration.**
+**0.3 — Create `apps/web` Next.js app.**
