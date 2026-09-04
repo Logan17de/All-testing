@@ -41,7 +41,7 @@ Moved from the old Phase 0 ordering:
 Goal: freeze the smallest stable extension boundary before graph/runtime code depends on it.
 
 - [x] 1.1 Create `packages/plugin-api` with zero/near-zero runtime dependencies.
-- [ ] 1.2 Define public `Json`, schema reference, diagnostic, capability, and version primitives.
+- [x] 1.2 Define public `Json`, schema reference, diagnostic, capability, and version primitives.
 - [ ] 1.3 Define `HarnessPlugin` lifecycle: load/activate → tracked registrations → dispose.
 - [ ] 1.4 Implement the plugin host in `packages/core`.
 - [ ] 1.5 Add a generic typed registry primitive used by plugin-provided capabilities.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**1.2 — Define public `Json`, schema reference, diagnostic, capability, and version primitives.**
+**1.3 — Define `HarnessPlugin` lifecycle: load/activate → tracked registrations → dispose.**
