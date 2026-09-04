@@ -50,7 +50,8 @@ Phase 2  Graph JSON + compiler + IR        🚧 WE ARE HERE
            ├─ 2.2 Graph JSON v1                  ✅
            ├─ 2.3 JSON Schema Draft 2020-12         ✅
            ├─ 2.4 Ajv boundary decision              ✅
-           └─ 2.5 shape/schema validation             ▶ CURRENT
+           ├─ 2.5 shape/schema validation             ✅
+           └─ 2.6 semantic IDs + node resolution       ▶ CURRENT
 Phase 3  In-memory DAG scheduler           ⏳
 Phase 4  Runtime daemon + SQLite           ⏳
 Phase 5  Effects + permissions + humans    ⏳
@@ -68,7 +69,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 |---|---|---|
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
-| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.5 current** |
+| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.6 current** |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ⏳ Planned |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
@@ -375,4 +376,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 2 / Item 2.5 — Add Graph JSON v1 shape/schema validation through the isolated Draft 2020-12 boundary.**
+> **Phase 2 / Item 2.6 — Add semantic validation for unique IDs and exact node type/version resolution.**

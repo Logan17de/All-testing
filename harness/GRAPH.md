@@ -224,6 +224,12 @@ scheduler/runtime/port compatibility
 
 The internal engine is created with strict schema checking, all-errors collection, and format assertions disabled. Draft 2020-12 treats formats as annotations unless an assertion vocabulary is deliberately enabled, so v1 does not add `ajv-formats` without a concrete product need.
 
+### Graph JSON v1 shape validator
+
+`@zet-harness/graph` exports the Draft 2020-12 `GRAPH_JSON_V1_SCHEMA` plus `validateGraphJsonV1Shape(value)`. The validator accepts `unknown` and narrows it to `GraphJsonV1` only when the portable document structure and local value constraints are valid.
+
+This pass intentionally does **not** reject duplicate IDs, unresolved node references, nonexistent ports, incompatible connections, cycles, or policy semantics. Those belong to later semantic passes. Ajv error objects also remain private implementation details here; stable Harness diagnostics are introduced separately in item 2.16.
+
 Ajv error objects are not part of any public contract. Shape validation will translate them into Harness-owned diagnostics when item 2.5 lands. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
 
 ## Graph JSON v1
