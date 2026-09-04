@@ -5,8 +5,6 @@ on:
     branches:
       - zet-harness-v1
     paths:
-      - "harness/package.json"
-      - "harness/.npmrc"
       - ".github/workflows/harness-refresh-lock.yml"
 
 permissions:
@@ -33,6 +31,12 @@ jobs:
 
       - name: Pin npm
         run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Sync latest branch
+        working-directory: .
+        run: |
+          git fetch origin zet-harness-v1
+          git reset --hard origin/zet-harness-v1
 
       - name: Refresh lockfile
         env:
