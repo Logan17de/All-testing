@@ -1,0 +1,101 @@
+name: Harness complete 2.15 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-15.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Freeze 2.15 and advance 2.16
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              "harness/TODO.md": [
+                  (
+                      "- [ ] 2.15 Reject literal secrets where a secret reference is required.",
+                      "- [x] 2.15 Reject literal secrets where a secret reference is required.",
+                  ),
+              ],
+              "harness/README.md": [
+                  (
+                      "2.15 secret-only enforcement       ▶ CURRENT\n2.16+ validation/compiler/IR       ⏳",
+                      "2.15 secret-only enforcement       ✅\n2.16 structured diagnostics         ▶ CURRENT\n2.17+ compiler/IR                    ⏳",
+                  ),
+                  (
+                      "2.14 separately validates node side-effect/idempotency/retry/recovery consistency: determinism never grants retry safety, external reads must be side-effect-idempotent, external writes must explicitly declare idempotency, unknown-idempotency writes cannot auto-retry or recover by rerun, reconcile is reserved for external writes, compile-only nodes cannot carry runtime retry/recovery policy, and retry numeric bounds are validated without normalization. The Harness still never claims exactly-once execution for arbitrary external effects.",
+                      "2.14 separately validates node side-effect/idempotency/retry/recovery consistency: determinism never grants retry safety, external reads must be side-effect-idempotent, external writes must explicitly declare idempotency, unknown-idempotency writes cannot auto-retry or recover by rerun, reconcile is reserved for external writes, compile-only nodes cannot carry runtime retry/recovery policy, and retry numeric bounds are validated without normalization. The Harness still never claims exactly-once execution for arbitrary external effects. 2.15 separately enforces secret-only input sources: an input declared `secret: true` may receive only an opaque `secret` binding; literal values, public graph inputs, and node data edges are rejected. The pass never scans ordinary values to guess secrets, never resolves secret references, and never echoes literal values or secret refs in diagnostics. Required/cardinality rules remain 2.7, while provider existence/authorization/resolution remain runtime concerns.",
+                  ),
+              ],
+              "harness/PLAN.md": [
+                  (
+                      "           └─ 2.15 secret-only enforcement              ▶ CURRENT",
+                      "           ├─ 2.15 secret-only enforcement              ✅\n           └─ 2.16 structured diagnostics                  ▶ CURRENT",
+                  ),
+                  (
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.15 current** |",
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.16 current** |",
+                  ),
+                  (
+                      "Side effects are explicit. The contract distinguishes determinism, effect class, idempotency, retry defaults, and recovery policy. Compile-time validation keeps determinism separate from repeat safety: a deterministic external write is not automatically safe to retry, while a nondeterministic external read may still be side-effect-idempotent. Unknown-idempotency external writes cannot declare automatic retry beyond one attempt or automatic rerun recovery; idempotent/idempotency-key writes may declare controlled retries. Reconcile recovery is reserved for external writes, and compile-time/control nodes without executors cannot carry runtime retry/recovery defaults. Never claim exactly-once execution for arbitrary third-party effects.",
+                      "Side effects are explicit. The contract distinguishes determinism, effect class, idempotency, retry defaults, and recovery policy. Compile-time validation keeps determinism separate from repeat safety: a deterministic external write is not automatically safe to retry, while a nondeterministic external read may still be side-effect-idempotent. Unknown-idempotency external writes cannot declare automatic retry beyond one attempt or automatic rerun recovery; idempotent/idempotency-key writes may declare controlled retries. Reconcile recovery is reserved for external writes, and compile-time/control nodes without executors cannot carry runtime retry/recovery defaults. Never claim exactly-once execution for arbitrary third-party effects. Secret-only inputs are also compile-time constrained: only opaque secret-reference bindings may target `secret: true`; literals, public graph inputs, and node data edges are rejected without inspecting or echoing secret material. Secret-provider resolution and authorization remain runtime concerns.",
+                  ),
+                  (
+                      "> **Phase 2 / Item 2.15 — Reject literal secrets where a secret reference is required.**",
+                      "> **Phase 2 / Item 2.16 — Return structured diagnostics with codes plus node/edge/path references.**",
+                  ),
+              ],
+              "harness/GRAPH.md": [
+                  (
+                      "This stage validates manifest promises only. It does not execute retries, generate idempotency keys, reconcile external systems, decide durable resume state, or claim exactly-once behavior. Those runtime mechanics remain later phases. Secret-only binding enforcement remains 2.15; generalized stable diagnostics remain 2.16.\n\nAjv error objects are not part of any public contract.",
+                      "This stage validates manifest promises only. It does not execute retries, generate idempotency keys, reconcile external systems, decide durable resume state, or claim exactly-once behavior. Those runtime mechanics remain later phases.\n\n### Graph JSON v1 secret-only binding validation\n\n2.15 is a separate compile-time stage over resolved input-port contracts. A node input marked `secret: true` may receive only a `kind: \"secret\"` binding carrying an opaque `secretRef`. Literal bindings, public `graph-input` forwarding, and node data edges into that port are rejected as `GRAPH_SECRET_REFERENCE_REQUIRED`. Missing node manifests are reported as a stage prerequisite failure.\n\nThe rule is contract-driven, not heuristic: the compiler does not scan strings or ordinary inputs to decide whether something looks secret, and an opaque secret reference may still be supplied to an ordinary non-secret input when a graph author chooses that source form. The stage never resolves a secret provider and never includes literal values or `secretRef` contents in its diagnostics. Required-input/cardinality and unknown-port validation remain owned by 2.7; secret-provider existence, authorization, retrieval, redaction, and runtime use remain later security/runtime concerns.\n\n2.15 is validation only. It does not normalize, redact, encrypt, materialize, or persist secret values. Generalized stable diagnostics with common node/edge/path locations remain 2.16.\n\nAjv error objects are not part of any public contract.",
+                  ),
+              ],
+          }
+
+          for filename, edits in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"missing expected text in {filename}: {old[:160]}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+      - name: Format tracker docs
+        working-directory: harness
+        run: npx prettier --write TODO.md README.md PLAN.md GRAPH.md
+
+      - name: Commit tracker freeze and remove helper
+        run: |
+          rm .github/workflows/harness-complete-2-15.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/GRAPH.md .github/workflows/harness-complete-2-15.yml
+          git commit -m "docs(harness): freeze 2.15 and advance 2.16"
+          git push origin HEAD:zet-harness-v1
