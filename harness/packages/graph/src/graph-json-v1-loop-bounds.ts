@@ -34,7 +34,7 @@ function hasOwnConfigKey(config: Readonly<Record<string, unknown>>, key: string)
   return Object.prototype.hasOwnProperty.call(config, key);
 }
 
-function isValidMaxIterations(value: JsonValue): value is number {
+function isValidMaxIterations(value: JsonValue | undefined): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
 }
 
@@ -93,7 +93,7 @@ export function checkGraphJsonV1LoopBounds(
         message: `Loop node '${node.id}' config.${key} must be a positive safe integer.`,
         nodeId: node.id,
         configKey: key,
-        value,
+        ...(value === undefined ? {} : { value }),
       });
     }
   }
