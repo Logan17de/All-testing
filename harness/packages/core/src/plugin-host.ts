@@ -57,6 +57,8 @@ function validateManifest(manifest: PluginManifest): void {
 /**
  * Minimal in-process plugin lifecycle host.
  *
+ * Activation is transactional: a plugin is published to the active set only
+ * after `activate` succeeds; partial activation is rolled back immediately.
  * Registries/services are intentionally not part of this class yet. The host
  * only owns lifecycle semantics: validation, activation scopes, rollback,
  * unload, and deterministic reverse-order cleanup.
