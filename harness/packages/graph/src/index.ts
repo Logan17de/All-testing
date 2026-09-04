@@ -12,5 +12,5 @@ export * from "./graph-json-v1-acyclicity.js";
 export * from "./graph-json-v1-structured-control.js";
 // 2.12 requires a finite compiler-visible per-instance loop bound; loop execution/lowering still lands later.
 export * from "./graph-json-v1-loop-bounds.js";
-// 2.13 intersects graph/node capability demand with external authority; graphs never grant themselves authority.
+// 2.13 intersects graph/node capability demand with external grants and applies graph self-deny; Graph JSON never grants authority.
 export * from "./graph-json-v1-capability-policy.js";
