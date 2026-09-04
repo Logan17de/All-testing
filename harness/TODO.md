@@ -18,7 +18,7 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md`, `PLUGINS.md`, 
 - [x] 0.10 Commit `package-lock.json`; pin Node 24.20.0 LTS and npm 12.0.2; enforce both through `.npmrc` engine strictness.
 - [x] 0.11 Add Linux + Windows CI for clean install, typecheck, lint, format check, tests, startup smoke, and build.
 - [x] 0.12 Add `data/.gitkeep` with the matching `.gitignore` negation, plus `tests/`.
-- [ ] 0.13 Add Next/React Core Web Vitals lint rules and move TypeScript linting to type-checked rules.
+- [x] 0.13 Add Next/React Core Web Vitals lint rules and move TypeScript linting to type-checked rules.
 - [ ] 0.14 Add a project `LICENSE`.
 - [ ] 0.15 Wire one internal package into `apps/web` and add `transpilePackages` to prove the workspace graph.
 - [x] 0.16 Remove the unrelated physical-safety `deep-research-report.md`.
