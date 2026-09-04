@@ -1,0 +1,77 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+  background: #0a0a0a;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #0a0a0a;
+  color: #f5f5f5;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 48px 24px;
+}
+
+.hero {
+  width: min(720px, 100%);
+}
+
+.eyebrow {
+  margin: 0 0 16px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #a3a3a3;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2.5rem, 8vw, 5.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+.lede {
+  max-width: 620px;
+  margin: 24px 0 0;
+  font-size: 1.1rem;
+  line-height: 1.7;
+  color: #bdbdbd;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 32px;
+  padding: 10px 14px;
+  border: 1px solid #2d2d2d;
+  border-radius: 999px;
+  color: #d4d4d4;
+  font-size: 0.9rem;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #62d48e;
+  box-shadow: 0 0 14px rgba(98, 212, 142, 0.55);
+}
