@@ -15,7 +15,7 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md` and `PLUGINS.md
 - [x] 0.7 Add `/api/health`.
 - [x] 0.8 Add basic startup test.
 - [x] 0.9 Fix the root typecheck so each workspace owns its own TypeScript configuration.
-- [ ] 0.10 Commit `package-lock.json` and pin Node 24 LTS.
+- [x] 0.10 Commit `package-lock.json` and pin Node 24 LTS.
 - [ ] 0.11 Add CI for install, typecheck, lint, and tests.
 - [ ] 0.12 Add `data/.gitkeep` with the matching `.gitignore` negation, plus `tests/`.
 - [ ] 0.13 Add Next/React lint rules and move TypeScript linting to type-checked rules.
@@ -244,4 +244,4 @@ Only after the core loop is stable:
 
 ## Next action
 
-**0.10 — Pin Node 24 LTS and commit a reproducible lockfile.**
+**0.11 — Add CI for clean install, typecheck, lint, and tests.**
