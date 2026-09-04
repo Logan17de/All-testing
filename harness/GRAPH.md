@@ -250,7 +250,15 @@ An impossible (`false`) source is mathematically compatible with any target, but
 
 ### Graph JSON v1 acyclicity
 
-2.10 is a separate acyclicity stage over the executable dependency graph. Both data and control edges participate. Every strongly connected component with more than one node is rejected, as is any one-node self-loop. No control-port name, node family, or loop-looking marker grants an exception in the initial executable graph. SCC diagnostics are deterministic in graph source order, and the implementation uses iterative traversal rather than recursive DFS. Structured control contracts remain 2.11+, while bounded executable loop semantics land later. Policies, secret-only enforcement, and generalized stable diagnostics also remain later passes.
+2.10 is a separate acyclicity stage over the executable dependency graph. Both data and control edges participate. Every strongly connected component with more than one node is rejected, as is any one-node self-loop. No control-port name, node family, or loop-looking marker grants an exception in the initial executable graph. SCC diagnostics are deterministic in graph source order, and the implementation uses iterative traversal rather than recursive DFS.
+
+### Graph JSON v1 structured control contracts
+
+2.11 reserves structured control semantics statically on `NodeManifest.control`, not in arbitrary node config. The closed v1 contract kinds are `router`, `join`, `loop`, `human-interrupt`, and `subgraph`. Router contracts declare one entry plus named branch outputs. Join contracts declare named incoming lanes, one output, and only `all-active` mode; `any` and quorum semantics are not part of 2.11. Loop contracts reserve `entry`, `continue`, `body`, and `exit` ports only. Human-interrupt contracts reserve one entry and named resume outcomes. Subgraph contracts reserve one entry and named exits.
+
+`checkGraphJsonV1StructuredControl(graph, resolver)` validates those static declarations and their use by control edges/entrypoints. Structured endpoints require explicit declared control ports. Ordinary nodes may still use unported control edges for generic ordering/activation, but arbitrary named control ports on ordinary nodes are rejected. Structured control nodes use primitive family `control`, except human interrupts which use `interrupt`.
+
+This stage is reservation/validation only: it does not choose router branches, execute joins, run loops, suspend/resume humans, invoke subgraphs, or lower structured control into IR. A loop contract does not make a graph cycle legal; 2.10 continues to reject SCCs/self-loops. Compiler-visible bounds for executable loops are a separate 2.12 concern. Policies, secret-only enforcement, and generalized stable diagnostics also remain later passes.
 
 Ajv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
 
