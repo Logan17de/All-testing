@@ -33,6 +33,8 @@ v1 is deliberately single-user and local-first.
 
 ## 3. High-level architecture
 
+The durable agent loop does **not** live inside Next.js. A small long-lived Node runtime daemon owns SQLite, the plugin host, scheduling, approvals, events, and resumable runs. The web app is a client over HTTP + SSE. This keeps long-running execution independent from request lifetimes and development HMR while avoiding Redis, queues, or a worker framework.
+
 ```text
 ┌──────────────────────────────┐
 │          Web UI              │
@@ -41,35 +43,19 @@ v1 is deliberately single-user and local-first.
                │ HTTP + SSE
                ▼
 ┌──────────────────────────────┐
-│       Harness Server         │
-│                              │
-│  API Router                  │
-│  Agent Runtime               │
-│  Context Builder             │
-│  Model Router                │
-│  Tool Registry               │
-│  Permission Engine           │
-│  Goal/Todo Engine            │
-│  Memory Engine               │
-│  Event Bus                   │
-│  Run/Trace Recorder          │
+│  Lightweight Node Runtime    │
+│  API + Plugin Host           │
+│  Agent Scheduler             │
+│  Context / Goal / Todo       │
+│  Permissions / Approvals     │
+│  Events / Run Recorder       │
 └───────┬─────────┬────────────┘
-        │         │
-        │         └──────────────► SQLite
-        │
-        ├────────────────────────► Model Providers
-        │                           OpenAI-compatible
-        │                           Anthropic later
-        │                           Qwen/local endpoints
-        │
-        └────────────────────────► Tools
-                                    filesystem
-                                    shell
-                                    git
-                                    HTTP
-                                    Python
-                                    MCP later
+        │         └──────────────► node:sqlite
+        ├────────────────────────► Model plugins
+        └────────────────────────► Tool / capability plugins
 ```
+
+The default target is one runtime process plus the web development process. A packaged release may serve the built UI from the runtime so end users still launch one application.
 
 ---
 
@@ -133,8 +119,10 @@ updated_at
 ```text
 id
 conversation_id
+parent_message_id     -- nullable; edit/retry branching
 role
-content
+content_json          -- structured parts: text/tool_use/tool_result/reasoning
+tool_call_id          -- nullable; links tool result messages
 model
 created_at
 ```
@@ -186,6 +174,7 @@ One resumable execution loop.
 
 ```text
 id
+parent_run_id         -- nullable; keeps future sub-runs possible without enabling multi-agent now
 project_id
 conversation_id
 goal_id
@@ -213,9 +202,27 @@ tool_name
 arguments_json
 result_json
 status
-approval_state
+idempotency_key
+attempt
 started_at
 finished_at
+```
+
+### Approval
+
+Approvals are first-class records rather than a flag embedded in a tool call.
+
+```text
+id
+run_id
+tool_call_id
+project_id
+requested_at
+decision              -- pending | approved | denied
+decided_at
+scope                 -- once | run | project
+expires_at
+reason
 ```
 
 ### Memory
@@ -245,6 +252,7 @@ Append-only runtime event stream.
 id
 run_id
 type
+schema_version
 payload_json
 created_at
 ```
@@ -431,7 +439,7 @@ Initial policy:
 
 We can later add per-project remembered approvals.
 
-Secrets must never be written into traces by default.
+Secrets must never be written into traces by default. Permission denials must return a structured machine-readable result (`code`, `reason`, and safe remediation metadata) so models can choose a different action instead of retrying blindly.
 
 ---
 
@@ -453,6 +461,8 @@ Shell commands should execute with the project root as `cwd` and a controlled en
 ---
 
 ## 12. API surface
+
+The long-lived runtime daemon owns the durable local API. Next.js must not own agent-run state; the web UI calls the runtime over loopback HTTP and subscribes through SSE.
 
 Initial local API:
 
@@ -545,9 +555,9 @@ Reasons:
 - easy inspection
 - migration path to Postgres later
 
-Use Drizzle migrations and never mutate production schema manually.
+Use Node 24's built-in `node:sqlite` first, with a tiny ordered SQL migration runner and a `schema_migrations` table. Do not add an ORM until real schema complexity justifies it. Enable WAL mode and use the built-in SQLite backup capability early.
 
-If we later need remote sync, multi-device access, or hosted workers, move the same domain model to Postgres/Supabase.
+If we later need remote sync, multi-device access, or hosted workers, keep the domain contracts stable and move the persistence adapter to Postgres/Supabase.
 
 ---
 
