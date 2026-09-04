@@ -112,7 +112,12 @@ export class PluginHost {
       nodes: {
         register: (definition): void => {
           assertActivationOpen("register a node");
-          disposers.push(this.nodes.register(definition));
+          disposers.push(
+            this.nodes.register(definition, {
+              id: plugin.manifest.id,
+              version: plugin.manifest.version,
+            }),
+          );
         },
       },
       onDispose(disposer): void {
