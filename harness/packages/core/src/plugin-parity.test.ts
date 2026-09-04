@@ -118,11 +118,20 @@ describe("built-in and external/local plugin parity", () => {
     expect(host.nodes.requireManifest("builtin.test.echo", "1").inputs.value).toEqual({
       schema: true,
     });
+    expect(host.nodes.getResolution("builtin.test.echo", "1")?.plugin).toEqual({
+      id: "builtin.test-parity",
+      version: "1",
+    });
+    expect(host.nodes.getResolution("local.external.echo", "1")?.plugin).toEqual({
+      id: "local.external-parity",
+      version: "1",
+    });
 
     await host.unload("builtin.test-parity");
 
     expect(host.nodes.has("builtin.test.echo", "1")).toBe(false);
     expect(host.nodes.has("local.external.echo", "1")).toBe(true);
+    expect(host.nodes.getResolution("builtin.test.echo", "1")).toBeUndefined();
 
     await host.dispose();
 
