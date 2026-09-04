@@ -118,6 +118,8 @@ control edges = activation/ordering only
 
 All public v1 `JsonSchema` surfaces use **JSON Schema Draft 2020-12**. JSON Schema is for shape/value validation; port compatibility remains a deliberately small deterministic Harness compiler rule rather than arbitrary schema implication.
 
+Ajv is confined to `@zet-harness/graph` as an internal Draft 2020-12 shape/value engine. Ajv types and errors do not cross public contracts, and the scheduler/runtime do not depend on it.
+
 Validation ownership is permanently separated:
 
 ```text
