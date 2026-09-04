@@ -1,0 +1,78 @@
+name: Harness complete 2.11 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-11.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  update-trackers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - name: Freeze 2.11 and advance 2.12
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              Path("harness/TODO.md"): [
+                  (
+                      "- [ ] 2.11 Reserve explicit structured control contracts for router, join, loop, human interrupt, and subgraph.",
+                      "- [x] 2.11 Reserve explicit structured control contracts for router, join, loop, human interrupt, and subgraph.",
+                  ),
+              ],
+              Path("harness/README.md"): [
+                  (
+                      "2.11 structured control contracts ▶ CURRENT\n2.12+ compiler/IR                ⏳",
+                      "2.11 structured control contracts ✅\n2.12 compiler-visible loop bounds ▶ CURRENT\n2.13+ compiler/IR                ⏳",
+                  ),
+                  (
+                      "2.10 separately rejects every executable SCC/self-loop across data and control edges. Structured control meaning remains 2.11+.",
+                      "2.10 separately rejects every executable SCC/self-loop across data and control edges. 2.11 reserves explicit manifest-level structured-control contracts for router, all-active join, loop, human interrupt, and subgraph, and validates named control ports without adding runtime behavior or IR lowering. Loop contracts do not override 2.10 cycle rejection. Compiler-visible executable loop bounds are 2.12.",
+                  ),
+              ],
+              Path("harness/PLAN.md"): [
+                  (
+                      "           ├─ 2.10 arbitrary cycle/SCC rejection      ✅\n           └─ 2.11 structured control contracts       ▶ CURRENT",
+                      "           ├─ 2.10 arbitrary cycle/SCC rejection      ✅\n           ├─ 2.11 structured control contracts       ✅\n           └─ 2.12 compiler-visible loop bounds       ▶ CURRENT",
+                  ),
+                  (
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.11 current** |",
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.12 current** |",
+                  ),
+              ],
+              Path("harness/GRAPH.md"): [
+                  (
+                      "2.10 is a separate acyclicity stage over the executable dependency graph. Both data and control edges participate. Every strongly connected component with more than one node is rejected, as is any one-node self-loop. No control-port name, node family, or loop-looking marker grants an exception in the initial executable graph. SCC diagnostics are deterministic in graph source order, and the implementation uses iterative traversal rather than recursive DFS. Structured control contracts remain 2.11+, while bounded executable loop semantics land later. Policies, secret-only enforcement, and generalized stable diagnostics also remain later passes.\n\nAjv error objects are not part of any public contract.",
+                      "2.10 is a separate acyclicity stage over the executable dependency graph. Both data and control edges participate. Every strongly connected component with more than one node is rejected, as is any one-node self-loop. No control-port name, node family, or loop-looking marker grants an exception in the initial executable graph. SCC diagnostics are deterministic in graph source order, and the implementation uses iterative traversal rather than recursive DFS.\n\n### Graph JSON v1 structured control contracts\n\n2.11 reserves structured control semantics statically on `NodeManifest.control`, not in arbitrary node config. The closed v1 contract kinds are `router`, `join`, `loop`, `human-interrupt`, and `subgraph`. Router contracts declare one entry plus named branch outputs. Join contracts declare named incoming lanes, one output, and only `all-active` mode; `any` and quorum semantics are not part of 2.11. Loop contracts reserve `entry`, `continue`, `body`, and `exit` ports only. Human-interrupt contracts reserve one entry and named resume outcomes. Subgraph contracts reserve one entry and named exits.\n\n`checkGraphJsonV1StructuredControl(graph, resolver)` validates those static declarations and their use by control edges/entrypoints. Structured endpoints require explicit declared control ports. Ordinary nodes may still use unported control edges for generic ordering/activation, but arbitrary named control ports on ordinary nodes are rejected. Structured control nodes use primitive family `control`, except human interrupts which use `interrupt`.\n\nThis stage is reservation/validation only: it does not choose router branches, execute joins, run loops, suspend/resume humans, invoke subgraphs, or lower structured control into IR. A loop contract does not make a graph cycle legal; 2.10 continues to reject SCCs/self-loops. Compiler-visible bounds for executable loops are a separate 2.12 concern. Policies, secret-only enforcement, and generalized stable diagnostics also remain later passes.\n\nAjv error objects are not part of any public contract.",
+                  ),
+              ],
+          }
+
+          for path, edits in replacements.items():
+              text = path.read_text(encoding="utf-8")
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"expected tracker text not found in {path}: {old[:100]!r}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding="utf-8")
+
+      - name: Commit tracker transition and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/harness-complete-2-11.yml
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/GRAPH.md
+          git commit -m "docs(harness): freeze 2.11 and advance 2.12"
+          git pull --rebase origin zet-harness-v1
+          git push origin HEAD:zet-harness-v1
