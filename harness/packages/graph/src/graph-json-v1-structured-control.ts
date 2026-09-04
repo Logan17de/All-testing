@@ -61,7 +61,7 @@ function hasValidControlContractShape(contract: NodeStructuredControlContract): 
     return false;
   }
 
-  if (names.some((name) => typeof name !== "string" || name.trim().length === 0)) {
+  if (names.some((name) => name.trim().length === 0)) {
     return false;
   }
 
@@ -91,6 +91,10 @@ function addPortDiagnostic(
 ): void {
   const { manifest, nodeId, port, direction, edgeId, entrypointId } = options;
   const contract = manifest.control;
+  const location = {
+    ...(edgeId === undefined ? {} : { edgeId }),
+    ...(entrypointId === undefined ? {} : { entrypointId }),
+  };
 
   if (contract === undefined) {
     if (port !== undefined) {
@@ -98,8 +102,7 @@ function addPortDiagnostic(
         code: "GRAPH_CONTROL_PORT_UNEXPECTED",
         message: `Node '${nodeId}' has no structured control contract, so named ${direction} control port '${port}' is not meaningful.`,
         nodeId,
-        edgeId,
-        entrypointId,
+        ...location,
         port,
         direction,
       });
@@ -112,8 +115,7 @@ function addPortDiagnostic(
       code: "GRAPH_CONTROL_PORT_REQUIRED",
       message: `Structured ${contract.kind} node '${nodeId}' requires an explicit ${direction} control port.`,
       nodeId,
-      edgeId,
-      entrypointId,
+      ...location,
       direction,
     });
     return;
@@ -127,8 +129,7 @@ function addPortDiagnostic(
       code: "GRAPH_CONTROL_PORT_UNKNOWN",
       message: `Control port '${port}' is not a declared ${direction} port of structured ${contract.kind} node '${nodeId}'.`,
       nodeId,
-      edgeId,
-      entrypointId,
+      ...location,
       port,
       direction,
     });
