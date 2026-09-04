@@ -1,3 +1,9 @@
+# Research Reference — Not Architecture Authority
+
+> This is preserved source research, not an implementation specification. Accepted Zet Harness decisions live in `../LIGHTWEIGHT.md`, `../PLUGINS.md`, `../RUNTIME.md`, `../GRAPH.md`, `../PLAN.md`, and `../TODO.md`. In particular, the Rust runtime recommendation below was evaluated but is **not adopted** for the current lightweight build; the accepted runtime is the Node 24 daemon + built-in SQLite design in `RUNTIME.md`.
+
+---
+
 # Designing a Lightweight Visual Graph AI Harness
 
 ## Executive summary
