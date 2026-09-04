@@ -3,26 +3,28 @@ import { describe, expect, it } from "vitest";
 import type { NodeDefinition } from "./index.js";
 
 describe("universal node contract", () => {
-  it("supports an executable JSON-safe node definition with static schemas and behavior", async () => {
+  it("supports executable JSON-safe nodes with explicit input/output ports", async () => {
     const definition: NodeDefinition = {
       manifest: {
         type: "test.echo",
         version: "1",
         title: "Echo",
         description: "Returns its input value.",
-        inputSchema: {
-          type: "object",
-          properties: { value: true },
-          required: ["value"],
+        inputs: {
+          value: {
+            schema: true,
+            required: true,
+          },
+        },
+        outputs: {
+          value: {
+            schema: true,
+            required: true,
+          },
         },
         configSchema: {
           type: "object",
           additionalProperties: false,
-        },
-        outputSchema: {
-          type: "object",
-          properties: { value: true },
-          required: ["value"],
         },
         behavior: {
           primitiveFamily: "pure",
@@ -49,11 +51,8 @@ describe("universal node contract", () => {
     );
 
     expect(definition.manifest.type).toBe("test.echo");
-    expect(definition.manifest.inputSchema).toEqual({
-      type: "object",
-      properties: { value: true },
-      required: ["value"],
-    });
+    expect(definition.manifest.inputs.value).toEqual({ schema: true, required: true });
+    expect(definition.manifest.outputs.value).toEqual({ schema: true, required: true });
     expect(definition.manifest.behavior).toMatchObject({
       primitiveFamily: "pure",
       determinism: "deterministic",
@@ -63,15 +62,15 @@ describe("universal node contract", () => {
     expect(result).toEqual({ outputs: { value: "hello" } });
   });
 
-  it("represents compile-time/control definitions without a fake runtime executor", () => {
+  it("represents compile-time/control definitions without fake runtime ports or executors", () => {
     const definition: NodeDefinition = {
       manifest: {
         type: "test.subgraph",
         version: "1",
         title: "Subgraph",
-        inputSchema: true,
+        inputs: {},
+        outputs: {},
         configSchema: true,
-        outputSchema: true,
         behavior: {
           primitiveFamily: "control",
           determinism: "deterministic",
@@ -84,20 +83,31 @@ describe("universal node contract", () => {
       },
     };
 
+    expect(definition.manifest.inputs).toEqual({});
+    expect(definition.manifest.outputs).toEqual({});
     expect(definition.manifest.configSchema).toBe(true);
     expect(definition.manifest.behavior.executionMode).toBe("none");
     expect(definition.execute).toBeUndefined();
   });
 
-  it("describes recoverable capability-gated external writes statically", () => {
+  it("marks secret-only inputs and recoverable external writes statically", () => {
     const definition: NodeDefinition = {
       manifest: {
         type: "test.publish",
         version: "1",
         title: "Publish",
-        inputSchema: true,
+        inputs: {
+          payload: { schema: true, required: true },
+          apiKey: {
+            schema: { type: "string" },
+            required: true,
+            secret: true,
+          },
+        },
+        outputs: {
+          publicationId: { schema: { type: "string" } },
+        },
         configSchema: true,
-        outputSchema: true,
         behavior: {
           primitiveFamily: "effect",
           determinism: "nondeterministic",
@@ -112,6 +122,11 @@ describe("universal node contract", () => {
       },
     };
 
+    expect(definition.manifest.inputs.apiKey).toEqual({
+      schema: { type: "string" },
+      required: true,
+      secret: true,
+    });
     expect(definition.manifest.behavior).toEqual({
       primitiveFamily: "effect",
       determinism: "nondeterministic",
