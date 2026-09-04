@@ -17,7 +17,7 @@ Current architecture constraints are defined by `LIGHTWEIGHT.md`, `PLUGINS.md`, 
 - [x] 0.9 Fix the root typecheck so each workspace owns its own TypeScript configuration.
 - [x] 0.10 Commit `package-lock.json`; pin Node 24.20.0 LTS and npm 12.0.2.
 - [x] 0.11 Add CI for clean install, typecheck, lint, tests, startup smoke, and build.
-- [ ] 0.12 Add `data/.gitkeep` with the matching `.gitignore` negation, plus `tests/`.
+- [x] 0.12 Add `data/.gitkeep` with the matching `.gitignore` negation, plus `tests/`.
 - [ ] 0.13 Add Next/React lint rules and move TypeScript linting to type-checked rules.
 - [ ] 0.14 Add a project `LICENSE`.
 - [ ] 0.15 Wire one internal package into `apps/web` and add `transpilePackages` to prove the workspace graph.
@@ -270,4 +270,4 @@ Only after the core loop is stable:
 
 ## Next action
 
-**0.12 — Add tracked data/test directory skeleton and matching ignore rules.**
+**0.13 — Add Next/React lint rules and type-checked TypeScript linting.**
