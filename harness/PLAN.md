@@ -37,7 +37,8 @@ Phase 1  Plugin API + universal node      🚧 WE ARE HERE
            ├─ 1.2 public primitives        ✅
            ├─ 1.3 plugin lifecycle         ✅
            ├─ 1.4 plugin host              ✅
-           └─ 1.5 typed registry            ▶ CURRENT
+           ├─ 1.5 typed registry            ✅
+           └─ 1.6 node contract             ▶ CURRENT
 Phase 2  Graph JSON + compiler + IR        ⏳
 Phase 3  In-memory DAG scheduler           ⏳
 Phase 4  Runtime daemon + SQLite           ⏳
@@ -55,7 +56,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 | Phase | What it means | Status |
 |---|---|---|
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
-| **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | 🚧 In progress — **1.5 current** |
+| **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | 🚧 In progress — **1.6 current** |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ⏳ Next architecture layer |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ⏳ Planned |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
@@ -350,4 +351,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 1 / Item 1.5 — Add a generic typed registry primitive used by plugin-provided capabilities.**
+> **Phase 1 / Item 1.6 — Freeze the universal `NodeDefinition`/`NodeManifest` contract.**
