@@ -59,3 +59,44 @@ export interface Diagnostic {
   readonly location?: DiagnosticLocation;
   readonly details?: JsonObject;
 }
+
+/** The public plugin API compatibility level understood by this harness version. */
+export const PLUGIN_API_VERSION = 1 as const;
+
+export type PluginApiVersion = typeof PLUGIN_API_VERSION;
+
+/** Cleanup callback owned and invoked by the plugin host. */
+export type PluginDisposer = () => void | Promise<void>;
+
+/** Static plugin metadata. The host can inspect this before activation. */
+export interface PluginManifest {
+  readonly id: string;
+  readonly name: string;
+  readonly version: Version;
+  readonly apiVersion: PluginApiVersion;
+  readonly capabilities?: readonly CapabilityRequirement[];
+}
+
+/**
+ * Host-owned activation scope for one plugin instance.
+ *
+ * Every registration/resource created during activation must contribute a
+ * disposer through `onDispose`. The host later unwinds those callbacks in
+ * reverse registration order, including partial activation failures.
+ */
+export interface PluginContext {
+  readonly config?: JsonValue;
+  onDispose(disposer: PluginDisposer): void;
+}
+
+/**
+ * Public plugin lifecycle contract.
+ *
+ * Loading/importing a module is the host's responsibility. Once loaded, the
+ * host validates the manifest, calls `activate`, tracks all disposers registered
+ * through the context, and later disposes the activation scope.
+ */
+export interface HarnessPlugin {
+  readonly manifest: PluginManifest;
+  activate(context: PluginContext): void | Promise<void>;
+}
