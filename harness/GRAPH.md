@@ -328,6 +328,18 @@ Canonical ordering is intentionally semantic, not a blanket rule that every arra
 
 2.19 remains pre-IR and pre-hash: 2.20 owns compact immutable Execution IR v1, while 2.21 owns document hash, semantic hash, registry/compiler identity, and IR hash.
 
+### Execution IR v1
+
+2.20 introduces the internal `ExecutionIrV1` contract, self-identified by `format: "harness.ir/v1"`. It is executable-plan state rather than a second Graph JSON document. The zero-based position inside `ops`, `graphInputs`, and `entrypoints` is the authoritative index; there is deliberately no redundant `index` field that could disagree with array position. `sourceNodeId` remains on each op only for tracing/inspection. Internal graph-input references use graph-input indexes, node-to-node value flow uses `{ kind: "op-output", op, port }`, graph outputs point to op indexes, control endpoints point to op indexes, entrypoints point to op indexes, and `defaultEntrypoint` is an entrypoint index.
+
+Each op retains the runtime material already proven safe by earlier compiler stages: pinned source `type@version`, executable config, ordered resolved value sources, precomputed predecessor indexes, scheduler/effect/retry/recovery/execution behavior, required capabilities, and an optional static structured-control descriptor. Graph-level runtime policy retains resource ceilings plus required/optional/deny capability intent. External capability grants/effective authority are never embedded because Graph JSON cannot self-grant and runtime policy may be stricter. JSON Schemas/manifests and graph/revision/human/editor metadata are not duplicated into the compact IR core; durable source and registry identity remain separate records/domains.
+
+`ExecutionIrControlDescriptorV1` reserves the already-frozen router, all-active join, loop, human-interrupt, and subgraph control shapes, while indexed `controlEdges` preserve activation/ordering endpoints. This reservation does not implement branch selection, join activation, loop execution, human suspension, or subgraph invocation. In particular it does not weaken 2.10 SCC rejection. 2.22 owns actual lowering of basic DAG dependencies plus router/join descriptors into these shapes.
+
+`createExecutionIrV1(candidate)` is an internal invariant boundary, not a new Graph validation pass. It checks that every op/graph-input/control/entrypoint numeric reference is in range, requires dependency lists to be strictly increasing and unique, rejects self-dependencies, then `structuredClone`s and deeply freezes the plan. The caller's candidate is not mutated or frozen. Invalid references at this point indicate a compiler bug because user-facing shape/semantic/policy validation has already succeeded.
+
+2.20 deliberately contains no document hash, semantic hash, registry hash, compiler version, IR hash, or provenance pins; 2.21 owns those identities. It also performs no Graph-to-IR compilation/lowering; 2.22 owns that transformation.
+
 ## Graph JSON v1
 
 `@zet-harness/graph` defines the portable source contract. The implementation lives in `packages/graph/src/graph-json-v1.ts` and is re-exported from the package entrypoint.

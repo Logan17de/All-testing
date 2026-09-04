@@ -80,7 +80,7 @@ Goal: freeze what workflows mean before adding durable execution.
 - [x] 2.17 Normalize defaults and pin resolved node/plugin versions.
 - [x] 2.18 Strip UI-only metadata during compilation.
 - [x] 2.19 Canonicalize source semantics deterministically.
-- [ ] 2.20 Define compact immutable Execution IR v1 with indexed ops and resolved references.
+- [x] 2.20 Define compact immutable Execution IR v1 with indexed ops and resolved references.
 - [ ] 2.21 Record document hash, semantic hash, IR hash, compiler version, registry hash, and pinned node versions.
 - [ ] 2.22 Lower basic DAG dependencies, routers, and join descriptors into the IR.
 - [ ] 2.23 Add stable canonical hash tests.
