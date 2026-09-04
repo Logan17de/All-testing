@@ -7,6 +7,8 @@ import {
   type PluginManifest,
 } from "@zet-harness/plugin-api";
 
+import { NodeCatalog } from "./node-catalog.js";
+
 interface ActivePlugin {
   readonly plugin: HarnessPlugin;
   readonly disposers: PluginDisposer[];
@@ -61,13 +63,18 @@ function validateManifest(manifest: PluginManifest): void {
  *
  * Activation is transactional: a plugin is published to the active set only
  * after `activate` succeeds; partial activation is rolled back immediately.
- * Registries/services are intentionally not part of this class yet. The host
- * only owns lifecycle semantics: validation, activation scopes, rollback,
- * unload, and deterministic reverse-order cleanup.
+ * Node registrations flow through the same host-owned `NodeCatalog` for every
+ * plugin origin and are automatically attached to the activation cleanup stack.
  */
 export class PluginHost {
   private readonly active = new Map<string, ActivePlugin>();
   private readonly activating = new Set<string>();
+
+  readonly nodes: NodeCatalog;
+
+  constructor(nodes = new NodeCatalog()) {
+    this.nodes = nodes;
+  }
 
   get size(): number {
     return this.active.size;
@@ -94,14 +101,22 @@ export class PluginHost {
     const disposers: PluginDisposer[] = [];
     let activationOpen = true;
 
+    const assertActivationOpen = (action: string): void => {
+      if (!activationOpen) {
+        throw new Error(`Plugin "${pluginId}" attempted to ${action} after activation completed.`);
+      }
+    };
+
     const context: PluginContext = {
       ...(config === undefined ? {} : { config }),
+      nodes: {
+        register: (definition): void => {
+          assertActivationOpen("register a node");
+          disposers.push(this.nodes.register(definition));
+        },
+      },
       onDispose(disposer): void {
-        if (!activationOpen) {
-          throw new Error(
-            `Plugin "${pluginId}" attempted to register cleanup after activation completed.`,
-          );
-        }
+        assertActivationOpen("register cleanup");
 
         if (typeof disposer !== "function") {
           throw new TypeError(`Plugin "${pluginId}" registered a non-function disposer.`);
