@@ -298,6 +298,8 @@ Shape validation now normalizes internal Draft 2020-12 engine failures into stab
 
 The unified facade short-circuits on shape failure, then on semantic failure, so later passes do not flood callers with derivative prerequisite errors. After those prerequisites succeed, 2.8-2.15 run in frozen order and are normalized into the common location model. Diagnostic ordering is deterministic, secret material is never added to normalized output, and this stage performs no source normalization or IR lowering. Those begin with 2.17.
 
+2.24 freezes this public diagnostic behavior with exact golden invalid-graph tests rather than introducing another diagnostic layer. `graph-json-v1-diagnostics.golden.test.ts` asserts the complete diagnostic objects for an unsupported shape property, a duplicate-node semantic failure, and a compiler-facing graph containing an SCC cycle plus unavailable graph-required capability and a literal source targeting a secret-only input. This locks shape/semantic short-circuit behavior, later-stage ordering (`acyclicity` before `capability-policy` before `secret-bindings` for that fixture), stable messages/codes, JSON Pointer locations, SCC related-node/edge sets, byte-for-byte repeatability, and secret non-leakage. 2.24 required no production validator changes; future changes to this frozen public diagnostic surface must be deliberate rather than silently rewriting expected output.
+
 Ajv error objects are not part of any public contract. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, runtime records, or the Harness diagnostic contract.
 
 ### Graph JSON v1 normalization and resolved version pins
