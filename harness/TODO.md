@@ -67,7 +67,7 @@ Goal: freeze what workflows mean before adding durable execution.
 - [x] 2.4 Add Ajv only if its compiled validation materially simplifies the boundary; keep it out of runtime scheduling logic.
 - [x] 2.5 Add shape/schema validation.
 - [x] 2.6 Add semantic validation for unique IDs and node type/version resolution.
-- [ ] 2.7 Add port existence, cardinality, and binding validation.
+- [x] 2.7 Add port existence, cardinality, and binding validation.
 - [ ] 2.8 Add deliberately constrained port type compatibility; do not attempt arbitrary JSON-Schema implication.
 - [ ] 2.9 Add reachability/liveness validation.
 - [ ] 2.10 Reject arbitrary cycles/SCCs in the initial executable graph.

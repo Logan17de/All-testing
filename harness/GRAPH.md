@@ -100,7 +100,7 @@ interface NodeManifest {
 }
 ```
 
-`multiple` is input connection/binding cardinality metadata. Its deterministic aggregation behavior is enforced when port/cardinality validation lands.
+`multiple` is input connection/binding cardinality metadata. The 2.7 semantic pass enforces it deterministically across both non-edge bindings and incoming data edges.
 
 A secret-only input such as:
 
@@ -230,11 +230,13 @@ The internal engine is created with strict schema checking, all-errors collectio
 
 This pass intentionally does **not** reject duplicate IDs, unresolved node references, nonexistent ports, incompatible connections, cycles, or policy semantics. Those belong to later semantic passes. Ajv error objects also remain private implementation details here; stable Harness diagnostics are introduced separately in item 2.16.
 
-### Graph JSON v1 semantic identity validator
+### Graph JSON v1 semantic validator
 
-`validateGraphJsonV1Semantics(graph, resolver)` owns the narrow 2.6 semantic layer: IDs must be unique inside each semantic namespace (`inputs`, `outputs`, `nodes`, `edges`, and `entrypoints`), and every node must resolve an exact pinned `type@version`. IDs are not globally unique across namespaces.
+`validateGraphJsonV1Semantics(graph, resolver)` owns the narrow 2.6–2.7 semantic layer. IDs must be unique inside each semantic namespace (`inputs`, `outputs`, `nodes`, `edges`, and `entrypoints`), every node must resolve an exact pinned `type@version`, graph outputs/data edges/bindings must reference existing declared ports or public graph inputs, entrypoint references must resolve, and `options.defaultEntrypoint` must name an existing entrypoint. IDs are not globally unique across namespaces.
 
-The resolver is a small structural `NodeManifestResolver` interface rather than a dependency on `packages/core`, so the graph/compiler package remains registry-implementation-neutral. Port existence/cardinality, graph references, compatibility, topology, cycles, policies, and stable diagnostics remain later passes.
+For each manifest input, 2.7 counts all non-edge bindings plus incoming data edges as input sources. `required: true` requires at least one source; ports without `multiple: true` reject more than one source. Multiple-input ports may accept more than one source. The validator is read-only and never normalizes or rewrites Graph JSON.
+
+The resolver remains a small structural `NodeManifestResolver` interface rather than a dependency on `packages/core`, so the graph/compiler package stays registry-implementation-neutral. Schema/type compatibility is deliberately reserved for 2.8; structured control-port meaning, topology/liveness, cycles, policies, secret-only enforcement, and stable diagnostics remain later passes.
 
 Ajv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
 
