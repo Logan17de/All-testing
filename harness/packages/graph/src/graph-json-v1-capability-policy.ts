@@ -33,7 +33,11 @@ export interface GraphCapabilityPolicyResult {
   readonly diagnostics: readonly GraphCapabilityPolicyDiagnostic[];
 }
 
-function pushUnique(target: CapabilityId[], seen: Set<CapabilityId>, capability: CapabilityId): void {
+function pushUnique(
+  target: CapabilityId[],
+  seen: Set<CapabilityId>,
+  capability: CapabilityId,
+): void {
   if (!seen.has(capability)) {
     seen.add(capability);
     target.push(capability);

@@ -227,7 +227,10 @@ describe("Graph JSON v1 capability/policy validation", () => {
 
   it("accepts loop bounds within maxNodeExecutions and ignores ordinary maxIterations config", () => {
     const value = graph(
-      [node("loop", "loop", { maxIterations: 5 }), node("plain", "ordinary", { maxIterations: 999 })],
+      [
+        node("loop", "loop", { maxIterations: 5 }),
+        node("plain", "ordinary", { maxIterations: 999 }),
+      ],
       { maxNodeExecutions: 5 },
     );
 
