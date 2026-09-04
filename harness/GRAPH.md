@@ -272,7 +272,15 @@ The `maxIterations` key has Harness loop meaning only for nodes resolved to a st
 
 Effective compile-time authority is requested hard/optional capability intent intersected with external grants, minus graph self-denials. A graph-required or node-required capability that is absent externally fails compilation; a self-denied hard requirement also fails. Unrequested external grants do not become graph effective capabilities merely because the compiler context has them. The host/runtime may always impose stricter policy later.
 
-2.13 also performs the first deliberately narrow resource-policy cross-check promised by 2.12: when `policies.maxNodeExecutions` exists, a valid structured-loop `config.maxIterations` greater than that ceiling is rejected because the graph already contradicts its own hard execution budget. No scheduler accounting, wall-time prediction, or parallelism simulation is attempted here. Side-effect/retry/recovery consistency remains 2.14; secret-only enforcement remains 2.15; generalized stable diagnostics remain 2.16.
+2.13 also performs the first deliberately narrow resource-policy cross-check promised by 2.12: when `policies.maxNodeExecutions` exists, a valid structured-loop `config.maxIterations` greater than that ceiling is rejected because the graph already contradicts its own hard execution budget. No scheduler accounting, wall-time prediction, or parallelism simulation is attempted here.
+
+### Graph JSON v1 side-effect/retry/recovery validation
+
+2.14 is a separate compile-time stage over resolved `NodeManifest.behavior`. Effect class and primitive family must agree: `effect: none` cannot masquerade as an effect-family operation, while `external-read`/`external-write` require the effect primitive family and a runtime execution mode. No-effect nodes use `idempotency: not-applicable`; external reads are treated as side-effect-idempotent even when their returned data is nondeterministic; external writes must explicitly declare `idempotent`, `idempotency-key`, or `unknown`.
+
+Determinism and repeat safety are intentionally independent. A deterministic external write with unknown idempotency is still unsafe to repeat. If an external write declares `idempotency: unknown`, automatic retry beyond one attempt is rejected and `recovery: rerun` is rejected. `reconcile` recovery is meaningful only for external writes. Nodes with `executionMode: none` must use `recovery: not-applicable` and cannot declare runtime retry defaults; executable nodes must declare a non-`not-applicable` recovery policy. Retry `maxAttempts` must be a positive safe integer and optional `backoffMs` a non-negative safe integer.
+
+This stage validates manifest promises only. It does not execute retries, generate idempotency keys, reconcile external systems, decide durable resume state, or claim exactly-once behavior. Those runtime mechanics remain later phases. Secret-only binding enforcement remains 2.15; generalized stable diagnostics remain 2.16.
 
 Ajv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
 
