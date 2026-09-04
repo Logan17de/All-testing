@@ -1,0 +1,82 @@
+name: Harness complete 2.7 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-7.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  update-trackers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - name: Freeze 2.7 and advance 2.8
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              Path("harness/TODO.md"): [
+                  (
+                      "- [ ] 2.7 Add port existence, cardinality, and binding validation.",
+                      "- [x] 2.7 Add port existence, cardinality, and binding validation.",
+                  ),
+              ],
+              Path("harness/README.md"): [
+                  (
+                      "2.7 ports/cardinality/bindings  ▶ CURRENT\n2.8+ compatibility/compiler/IR  ⏳",
+                      "2.7 ports/cardinality/bindings  ✅\n2.8 port compatibility           ▶ CURRENT\n2.9+ liveness/compiler/IR        ⏳",
+                  ),
+                  (
+                      "The 2.6 semantic pass uses a registry-neutral `NodeManifestResolver`: semantic IDs are unique only within their own namespaces, and every graph node must resolve an exact pinned `type@version`. `@zet-harness/graph` still does not depend on private core registry implementations. That gate is cross-platform verified and intentionally stops before port/reference semantics.",
+                      "The 2.6–2.7 semantic pass uses a registry-neutral `NodeManifestResolver`: semantic IDs are unique only within their own namespaces, every graph node resolves an exact pinned `type@version`, static node/port and graph-input references must exist, and required/single-vs-multiple input cardinality is enforced across bindings plus data edges. The pass is read-only and remains independent of private core registry implementations. It intentionally stops before schema compatibility, structured control-port meaning, topology/liveness, secret-only enforcement, policy semantics, and stable diagnostics.",
+                  ),
+              ],
+              Path("harness/PLAN.md"): [
+                  (
+                      "           ├─ 2.6 semantic IDs + node resolution       ✅\n           └─ 2.7 ports/cardinality/bindings          ▶ CURRENT",
+                      "           ├─ 2.6 semantic IDs + node resolution       ✅\n           ├─ 2.7 ports/cardinality/bindings          ✅\n           └─ 2.8 constrained port compatibility      ▶ CURRENT",
+                  ),
+                  (
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.7 current** |",
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.8 current** |",
+                  ),
+              ],
+              Path("harness/GRAPH.md"): [
+                  (
+                      "`multiple` is input connection/binding cardinality metadata. Its deterministic aggregation behavior is enforced when port/cardinality validation lands.",
+                      "`multiple` is input connection/binding cardinality metadata. The 2.7 semantic pass enforces it deterministically across both non-edge bindings and incoming data edges.",
+                  ),
+                  (
+                      "### Graph JSON v1 semantic identity validator\n\n`validateGraphJsonV1Semantics(graph, resolver)` owns the narrow 2.6 semantic layer: IDs must be unique inside each semantic namespace (`inputs`, `outputs`, `nodes`, `edges`, and `entrypoints`), and every node must resolve an exact pinned `type@version`. IDs are not globally unique across namespaces.\n\nThe resolver is a small structural `NodeManifestResolver` interface rather than a dependency on `packages/core`, so the graph/compiler package remains registry-implementation-neutral. Port existence/cardinality, graph references, compatibility, topology, cycles, policies, and stable diagnostics remain later passes.",
+                      "### Graph JSON v1 semantic validator\n\n`validateGraphJsonV1Semantics(graph, resolver)` owns the narrow 2.6–2.7 semantic layer. IDs must be unique inside each semantic namespace (`inputs`, `outputs`, `nodes`, `edges`, and `entrypoints`), every node must resolve an exact pinned `type@version`, graph outputs/data edges/bindings must reference existing declared ports or public graph inputs, entrypoint references must resolve, and `options.defaultEntrypoint` must name an existing entrypoint. IDs are not globally unique across namespaces.\n\nFor each manifest input, 2.7 counts all non-edge bindings plus incoming data edges as input sources. `required: true` requires at least one source; ports without `multiple: true` reject more than one source. Multiple-input ports may accept more than one source. The validator is read-only and never normalizes or rewrites Graph JSON.\n\nThe resolver remains a small structural `NodeManifestResolver` interface rather than a dependency on `packages/core`, so the graph/compiler package stays registry-implementation-neutral. Schema/type compatibility is deliberately reserved for 2.8; structured control-port meaning, topology/liveness, cycles, policies, secret-only enforcement, and stable diagnostics remain later passes.",
+                  ),
+              ],
+          }
+
+          for path, edits in replacements.items():
+              text = path.read_text(encoding="utf-8")
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"expected tracker text not found in {path}: {old[:100]!r}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding="utf-8")
+
+      - name: Commit tracker transition and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/harness-complete-2-7.yml
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/GRAPH.md
+          git commit -m "docs(harness): freeze 2.7 and advance 2.8"
+          git pull --rebase origin zet-harness-v1
+          git push origin HEAD:zet-harness-v1
