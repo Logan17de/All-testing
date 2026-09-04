@@ -100,7 +100,8 @@ Phase 0 is complete. Phase 1 is in progress on `zet-harness-v1`:
 1.2 public primitives    ✅
 1.3 plugin lifecycle     ✅
 1.4 plugin host          ✅
-1.5 typed registry       ▶ CURRENT
+1.5 typed registry       ✅
+1.6 node contract        ▶ CURRENT
 ```
 
 Then:
