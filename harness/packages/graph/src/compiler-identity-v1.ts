@@ -94,9 +94,7 @@ function clonePluginPins(
 export async function recordGraphCompilerIdentityV1(
   input: GraphCompilerIdentityInputV1,
 ): Promise<GraphCompilerIdentityV1> {
-  const documentJson = stringifyCanonicalJsonV1(
-    input.normalized.document as unknown as JsonValue,
-  );
+  const documentJson = stringifyCanonicalJsonV1(input.normalized.document as unknown as JsonValue);
   const registryJson = stringifyCanonicalJsonV1({
     nodePins: input.canonical.nodePins,
     pluginPins: input.canonical.pluginPins,
