@@ -45,7 +45,7 @@ Goal: freeze the smallest stable extension boundary before graph/runtime code de
 - [x] 1.3 Define `HarnessPlugin` lifecycle: load/activate → tracked registrations → dispose.
 - [x] 1.4 Implement the plugin host in `packages/core`.
 - [x] 1.5 Add a generic typed registry primitive used by plugin-provided capabilities.
-- [ ] 1.6 Freeze the universal `NodeDefinition`/`NodeManifest` contract.
+- [x] 1.6 Freeze the universal `NodeDefinition`/`NodeManifest` contract.
 - [ ] 1.7 Include node input/config/output schemas in the manifest.
 - [ ] 1.8 Include node behavior metadata: primitive family, determinism, effect/idempotency, recovery, timeout/retry defaults, execution mode, required capabilities.
 - [ ] 1.9 Ensure manifests can be inspected without executing plugin node code.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**1.6 — Freeze the universal `NodeDefinition`/`NodeManifest` contract.**
+**1.7 — Include node input/config/output schemas in the manifest.**
