@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "./graph-json-v1.js";
+import { GRAPH_JSON_VERSION, type GraphJsonV1, type GraphSemanticsV1 } from "./graph-json-v1.js";
 
 const exampleGraph = {
   schemaVersion: GRAPH_JSON_VERSION,
@@ -54,6 +54,12 @@ const exampleGraph = {
       version: "2.1.0",
       config: {},
     },
+    {
+      id: "audit",
+      type: "builtin.effect.audit",
+      version: "1.3.0",
+      config: {},
+    },
   ],
   edges: [
     {
@@ -63,10 +69,10 @@ const exampleGraph = {
       to: { nodeId: "finish", port: "text" },
     },
     {
-      id: "control.prepare-finish",
+      id: "control.finish-audit",
       kind: "control",
-      from: { nodeId: "prepare", port: "success" },
-      to: { nodeId: "finish" },
+      from: { nodeId: "finish", port: "success" },
+      to: { nodeId: "audit" },
     },
   ],
   entrypoints: [{ id: "default", nodeId: "prepare" }],
@@ -75,8 +81,9 @@ const exampleGraph = {
     maxParallelism: 2,
     maxWallTimeMs: 30_000,
     capabilities: {
-      allow: ["secrets:read"],
-      deny: ["network:http"],
+      required: ["secrets:read"],
+      optional: ["network:http"],
+      deny: ["shell:run"],
     },
   },
   options: {
@@ -87,6 +94,7 @@ const exampleGraph = {
     nodes: {
       prepare: { position: { x: 100, y: 200 } },
       finish: { position: { x: 420, y: 200 }, collapsed: true },
+      audit: { position: { x: 720, y: 200 } },
     },
     annotations: [
       {
@@ -101,10 +109,33 @@ const exampleGraph = {
   },
 } satisfies GraphJsonV1;
 
+function semanticProjection(graph: GraphJsonV1): GraphSemanticsV1 {
+  return {
+    schemaVersion: graph.schemaVersion,
+    inputs: graph.inputs,
+    outputs: graph.outputs,
+    nodes: graph.nodes,
+    edges: graph.edges,
+    entrypoints: graph.entrypoints,
+    policies: graph.policies,
+    options: graph.options,
+  };
+}
+
 describe("Graph JSON v1", () => {
   it("pins node type versions and keeps data/control edges distinct", () => {
-    expect(exampleGraph.nodes.map((node) => node.version)).toEqual(["1.0.0", "2.1.0"]);
+    expect(exampleGraph.nodes.map((node) => node.version)).toEqual(["1.0.0", "2.1.0", "1.3.0"]);
     expect(exampleGraph.edges.map((edge) => edge.kind)).toEqual(["data", "control"]);
+  });
+
+  it("uses data edges for value flow without requiring duplicate control edges", () => {
+    const dataEdge = exampleGraph.edges[0];
+    const duplicateControlEdge = exampleGraph.edges.find(
+      (edge) => edge.kind === "control" && edge.from.nodeId === "prepare" && edge.to.nodeId === "finish",
+    );
+
+    expect(dataEdge?.kind).toBe("data");
+    expect(duplicateControlEdge).toBeUndefined();
   });
 
   it("represents literals, public inputs, and secrets as distinct binding kinds", () => {
@@ -113,6 +144,30 @@ describe("Graph JSON v1", () => {
       "literal",
       "secret",
     ]);
+  });
+
+  it("treats graph capabilities as requests/self-restrictions rather than grants", () => {
+    expect(exampleGraph.policies.capabilities).toEqual({
+      required: ["secrets:read"],
+      optional: ["network:http"],
+      deny: ["shell:run"],
+    });
+    expect(exampleGraph.policies.capabilities).not.toHaveProperty("allow");
+  });
+
+  it("keeps document metadata/editor state outside the semantic hash domain", () => {
+    const changedDocument: GraphJsonV1 = {
+      ...exampleGraph,
+      graphId: "copied.graph",
+      revisionId: "rev-999",
+      metadata: { title: "Renamed workflow" },
+      editor: {
+        ...exampleGraph.editor,
+        viewport: { x: 999, y: 999, zoom: 0.5 },
+      },
+    };
+
+    expect(semanticProjection(changedDocument)).toEqual(semanticProjection(exampleGraph));
   });
 
   it("remains plain JSON with editor metadata isolated in its own bucket", () => {
