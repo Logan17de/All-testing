@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "test:startup": "node scripts/startup-smoke.mjs",
     "test:watch": "vitest",
