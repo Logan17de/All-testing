@@ -22,7 +22,7 @@ Historical items already completed remain checked so progress is never lost.
 - [x] 0.12 Add `data/.gitkeep` with matching ignore rules, plus `tests/`.
 - [x] 0.13 Add Next Core Web Vitals rules and type-checked TypeScript linting.
 - [x] 0.14 Add a project `LICENSE`.
-- [ ] 0.15 Wire one internal package into `apps/web` and add `transpilePackages` to prove the workspace graph.
+- [x] 0.15 Wire one internal package into `apps/web` and add `transpilePackages` to prove the workspace graph.
 - [x] 0.16 Remove the unrelated physical-safety research artifact.
 - [x] 0.22 Decide runtime ownership: a long-lived lightweight Node daemon owns durable execution; web is a client.
 
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**0.15 — Wire one internal package into `apps/web` and prove workspace transpilation.**
+**1.1 — Create `packages/plugin-api` with zero/near-zero runtime dependencies.**
