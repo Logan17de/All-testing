@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@zet-harness/plugin-api": "0.0.0"
+    "@zet-harness/plugin-api": "0.0.0",
+    "ajv": "8.20.0"
   }
 }
