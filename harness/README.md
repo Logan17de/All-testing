@@ -101,8 +101,9 @@ Phase 1 plugin + node contract  ✅ COMPLETE
 2.1 graph workspace             ✅
 2.2 Graph JSON v1               ✅
 2.3 JSON Schema Draft 2020-12   ✅
-2.4 Ajv boundary decision       ▶ CURRENT
-2.5+ validation/compiler/IR     ⏳
+2.4 Ajv boundary decision       ✅
+2.5 shape/schema validation     ▶ CURRENT
+2.6+ semantic/compiler/IR       ⏳
 ```
 
 The Graph JSON v1 freeze now includes:

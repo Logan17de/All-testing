@@ -64,7 +64,7 @@ Goal: freeze what workflows mean before adding durable execution.
 - [x] 2.1 Create a lightweight `packages/graph` workspace for Graph source, compiler, and IR modules.
 - [x] 2.2 Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.
 - [x] 2.3 Choose JSON Schema Draft 2020-12 as the public shape-validation format.
-- [ ] 2.4 Add Ajv only if its compiled validation materially simplifies the boundary; keep it out of runtime scheduling logic.
+- [x] 2.4 Add Ajv only if its compiled validation materially simplifies the boundary; keep it out of runtime scheduling logic.
 - [ ] 2.5 Add shape/schema validation.
 - [ ] 2.6 Add semantic validation for unique IDs and node type/version resolution.
 - [ ] 2.7 Add port existence, cardinality, and binding validation.
