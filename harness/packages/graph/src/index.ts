@@ -28,3 +28,5 @@ export * from "./graph-json-v1-ui-metadata.js";
 export * from "./graph-json-v1-canonical.js";
 // 2.20 freezes the compact immutable indexed Execution IR contract; hashing remains 2.21 and Graph-to-IR lowering remains 2.22.
 export * from "./execution-ir-v1.js";
+// 2.21 records independent document/semantic/registry/IR SHA-256 identities plus compiler version and exact resolved pins; lowering remains 2.22.
+export * from "./compiler-identity-v1.js";
