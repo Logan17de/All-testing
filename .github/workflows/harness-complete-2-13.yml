@@ -1,0 +1,109 @@
+name: Harness complete 2.13 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-13.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Freeze 2.13 and advance 2.14
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              "harness/TODO.md": [
+                  (
+                      "- [ ] 2.13 Add compile-time capability/policy validation.",
+                      "- [x] 2.13 Add compile-time capability/policy validation.",
+                  ),
+              ],
+              "harness/README.md": [
+                  (
+                      "2.13 capability/policy validation ▶ CURRENT\n2.14+ compiler/IR                ⏳",
+                      "2.13 capability/policy validation ✅\n2.14 side-effect/retry/recovery   ▶ CURRENT\n2.15+ validation/compiler/IR      ⏳",
+                  ),
+                  (
+                      "2.12 requires every structured loop invocation to carry a compiler-visible `config.maxIterations` positive safe integer. The bound is per invocation, does not make cycles executable, and does not absorb graph resource-policy checks; those begin in 2.13.",
+                      "2.12 requires every structured loop invocation to carry a compiler-visible `config.maxIterations` positive safe integer. The bound is per invocation and does not make cycles executable. 2.13 separately validates capability/policy semantics: hard capability demand is graph `required` plus manifest `requiredCapabilities`; graph `optional` is opportunistic; graph `deny` only subtracts authority; and all requested authority is intersected with explicit external compile grants. Graph JSON never self-grants. Duplicate/cross-bucket capability intent is rejected, and a loop bound already exceeding graph `maxNodeExecutions` is rejected as a static policy contradiction. Runtime policy may always be stricter.",
+                  ),
+              ],
+              "harness/PLAN.md": [
+                  (
+                      "           └─ 2.13 capability/policy validation        ▶ CURRENT",
+                      "           ├─ 2.13 capability/policy validation        ✅\n           └─ 2.14 side-effect/retry/recovery validation ▶ CURRENT",
+                  ),
+                  (
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.13 current** |",
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.14 current** |",
+                  ),
+                  (
+                      "No arbitrary visual cycles initially. Every executable loop needs compiler-visible hard bounds. In Graph JSON v1, a node resolved to a structured loop contract must carry a per-invocation top-level `config.maxIterations` positive safe integer. This reserves a deterministic hard ceiling for later lowering/execution without weakening current SCC rejection; graph-wide resource-policy interaction remains a separate compile-time concern.",
+                      "No arbitrary visual cycles initially. Every executable loop needs compiler-visible hard bounds. In Graph JSON v1, a node resolved to a structured loop contract must carry a per-invocation top-level `config.maxIterations` positive safe integer. This reserves a deterministic hard ceiling for later lowering/execution without weakening current SCC rejection. Capability/policy validation is a separate compile-time stage: node manifest requirements plus graph-required capability requests must be present in external compile authority, optional requests are opportunistic, and graph deny can only reduce authority. A loop bound greater than graph `maxNodeExecutions` is rejected as a statically known policy contradiction.",
+                  ),
+                  (
+                      "> **Phase 2 / Item 2.13 — Add compile-time capability/policy validation.**",
+                      "> **Phase 2 / Item 2.14 — Add compile-time side-effect/retry/recovery validation.**",
+                  ),
+              ],
+              "harness/GRAPH.md": [
+                  (
+                      "The `maxIterations` key has Harness loop meaning only for nodes resolved to a structured loop contract; ordinary node configuration may use the same text without becoming a loop. The fixed top-level location keeps the future compiler deterministic and avoids JSONPath/dynamic-expression inference. 2.12 does not execute loops, interpret stop conditions, lower loop regions into IR, or compare the local bound with graph resource limits. A valid bound still does not legalize a cycle: 2.10 continues to reject every SCC/self-loop until executable loop lowering lands later. Capability/resource policy semantics begin in 2.13; secret-only enforcement and generalized stable diagnostics remain later passes.\n\nAjv error objects are not part of any public contract.",
+                      "The `maxIterations` key has Harness loop meaning only for nodes resolved to a structured loop contract; ordinary node configuration may use the same text without becoming a loop. The fixed top-level location keeps the future compiler deterministic and avoids JSONPath/dynamic-expression inference. 2.12 does not execute loops, interpret stop conditions, lower loop regions into IR, or compare the local bound with graph resource limits. A valid bound still does not legalize a cycle: 2.10 continues to reject every SCC/self-loop until executable loop lowering lands later.\n\n### Graph JSON v1 capability/policy validation\n\n2.13 is a separate compile-time stage with explicit external authority input. Hard capability demand is the union of graph `capabilities.required` and every resolved node manifest's `behavior.requiredCapabilities`. Graph `capabilities.optional` is opportunistic and does not fail compilation merely because a grant is absent. Graph `capabilities.deny` is a self-restriction only: it can remove authority but can never add it. Duplicate entries inside a capability bucket and capabilities declared across multiple graph intent buckets are rejected rather than normalized silently.\n\nEffective compile-time authority is requested hard/optional capability intent intersected with external grants, minus graph self-denials. A graph-required or node-required capability that is absent externally fails compilation; a self-denied hard requirement also fails. Unrequested external grants do not become graph effective capabilities merely because the compiler context has them. The host/runtime may always impose stricter policy later.\n\n2.13 also performs the first deliberately narrow resource-policy cross-check promised by 2.12: when `policies.maxNodeExecutions` exists, a valid structured-loop `config.maxIterations` greater than that ceiling is rejected because the graph already contradicts its own hard execution budget. No scheduler accounting, wall-time prediction, or parallelism simulation is attempted here. Side-effect/retry/recovery consistency remains 2.14; secret-only enforcement remains 2.15; generalized stable diagnostics remain 2.16.\n\nAjv error objects are not part of any public contract.",
+                  ),
+                  (
+                      "graph required/optional requests\n        ∩\nuser/project/runtime grants\n        −\ngraph self-deny\n        ↓\neffective authority",
+                      "graph required + node manifest hard requirements\n                + graph optional requests\n                          ∩\n              external compile grants\n                          −\n                 graph self-deny\n                          ↓\n                 effective authority",
+                  ),
+                  (
+                      "`required` means compilation/execution must fail if the external authority is unavailable. `optional` may be used only when externally granted. `deny` is a graph self-restriction and can only reduce authority.",
+                      "Graph `required` means compilation must fail if the external authority is unavailable. Node manifest `requiredCapabilities` are hard requirements even if the graph omits them. Graph `optional` may be used only when externally granted. Graph `deny` is a self-restriction and can only reduce authority; denying a hard node/graph requirement makes the graph invalid.",
+                  ),
+              ],
+          }
+
+          for filename, edits in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"missing expected text in {filename}: {old[:120]}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+      - name: Format tracker docs
+        working-directory: harness
+        run: npx prettier --write TODO.md README.md PLAN.md GRAPH.md
+
+      - name: Commit tracker freeze and remove helper
+        run: |
+          rm .github/workflows/harness-complete-2-13.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/GRAPH.md .github/workflows/harness-complete-2-13.yml
+          git commit -m "docs(harness): freeze 2.13 and advance 2.14"
+          git push origin HEAD:zet-harness-v1
