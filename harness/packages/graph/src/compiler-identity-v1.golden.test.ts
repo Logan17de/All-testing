@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { NodeManifest } from "@zet-harness/plugin-api";
 
-import {
-  GRAPH_COMPILER_VERSION,
-  recordGraphCompilerIdentityV1,
-} from "./compiler-identity-v1.js";
+import { GRAPH_COMPILER_VERSION, recordGraphCompilerIdentityV1 } from "./compiler-identity-v1.js";
 import { canonicalizeGraphJsonV1Semantics } from "./graph-json-v1-canonical.js";
 import { lowerCanonicalGraphJsonV1ToExecutionIr } from "./graph-json-v1-lowering.js";
 import type {
@@ -45,7 +42,9 @@ const echoManifest: NodeManifest = {
 
 const resolver: NodeResolutionResolver = {
   getManifest(type, version) {
-    return type === echoManifest.type && version === echoManifest.version ? echoManifest : undefined;
+    return type === echoManifest.type && version === echoManifest.version
+      ? echoManifest
+      : undefined;
   },
   getResolution(type, version) {
     return type === echoManifest.type && version === echoManifest.version
