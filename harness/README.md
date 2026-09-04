@@ -21,7 +21,7 @@ The harness owns durable workflow state. Models and integrations are replaceable
 7. **Safe execution** — the harness enforces workspace boundaries and approval rules around model-requested actions.
 8. **Observable** — important model/tool/state transitions are traceable.
 9. **Lazy integrations** — disabled plugins should add effectively zero runtime work.
-10. **Plain TypeScript first** — no agent framework, workflow engine, or multi-agent framework before the basic loop works extremely well.
+10. **Plain TypeScript first** — no agent framework, workflow engine, or multi-agent framework before the basic runtime works extremely well.
 
 ## Planned v1 stack
 
@@ -31,6 +31,8 @@ The harness owns durable workflow state. Models and integrations are replaceable
 - Next.js local web UI as a client of the runtime
 - built-in `node:sqlite` + small SQL repository/migration layer
 - tiny native plugin kernel
+- portable Graph JSON compiled into immutable Execution IR
+- framework-free async scheduler
 - OpenAI-compatible model plugin first
 - SSE for streamed events
 - native files/shell/Git tools first
@@ -42,6 +44,7 @@ The base runtime should not require Python, Docker, Redis, a native database add
 
 The kernel owns only lifecycle/registration/configuration/security primitives. Plugins may eventually add:
 
+- node definitions
 - model providers
 - tools
 - auth/subscription providers
@@ -57,18 +60,45 @@ A small public `@zet-harness/plugin-api` package will keep third-party plugins a
 
 Trusted in-process plugins stay extremely cheap. A truly isolated plugin mode can be added later for untrusted/community extensions without forcing every plugin into a subprocess today.
 
+## Execution doctrine
+
+```text
+Visual/JSON/SDK graph
+        ↓
+Graph JSON
+        ↓
+Validator + Compiler
+        ↓
+Execution IR
+        ↓
+Tiny Scheduler
+        ↓
+Runtime daemon
+        ↓
+SQLite journal + blob store
+```
+
+The visual/editor representation is source code, not runtime state. The scheduler executes immutable compiled semantics, and SQLite records what actually happened.
+
 ## Documentation
 
-- [`PLAN.md`](./PLAN.md) — consolidated architecture, components, data model, API, milestones, and acceptance criteria.
-- [`LIGHTWEIGHT.md`](./LIGHTWEIGHT.md) — authoritative lightweight runtime profile.
-- [`PLUGINS.md`](./PLUGINS.md) — plugin architecture and extension contract direction.
+- [`PLAN.md`](./PLAN.md) — **authoritative master architecture and milestone roadmap**, including completed and remaining work.
+- [`TODO.md`](./TODO.md) — strict implementation order; we complete these items one by one.
+- [`LIGHTWEIGHT.md`](./LIGHTWEIGHT.md) — lightweight runtime profile.
+- [`PLUGINS.md`](./PLUGINS.md) — plugin architecture and extension direction.
 - [`RUNTIME.md`](./RUNTIME.md) — durable runtime ownership and process boundaries.
-- [`GRAPH.md`](./GRAPH.md) — optional visual graph authoring contract.
-- [`GAPS.md`](./GAPS.md) — gap review and deferred architectural decisions.
-- [`TODO.md`](./TODO.md) — exact implementation order. We complete these items one by one.
-
-Raw research is kept under `research/` as reference material only; accepted architecture is recorded in the documents above.
+- [`GRAPH.md`](./GRAPH.md) — visual graph/source/IR design notes.
+- [`GAPS.md`](./GAPS.md) — historical gap review and deferred decisions.
+- Research reports — reference inputs only; accepted decisions are promoted into `PLAN.md`/`TODO.md`.
 
 ## Status
 
-Phase 0 scaffold is in progress on `zet-harness-v1`. We are cleaning the foundation before starting persistent runtime state.
+Phase 0 foundation is nearly closed on `zet-harness-v1`. The next engineering order is:
+
+```text
+license + workspace proof
+→ plugin/node contract
+→ Graph JSON + compiler + Execution IR
+→ in-memory scheduler
+→ durable Node + SQLite runtime
+```
