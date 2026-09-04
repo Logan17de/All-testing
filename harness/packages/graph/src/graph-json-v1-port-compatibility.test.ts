@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { JsonSchema, NodeInputPort, NodeManifest, NodeOutputPort } from "@zet-harness/plugin-api";
+import type {
+  JsonSchema,
+  NodeInputPort,
+  NodeManifest,
+  NodeOutputPort,
+} from "@zet-harness/plugin-api";
 
 import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "./graph-json-v1.js";
 import {
@@ -107,9 +112,9 @@ describe("Graph JSON v1 constrained port compatibility", () => {
   it("supports universal targets, impossible sources, same primitives, and integer-to-number", () => {
     expect(isJsonSchemaPortCompatible({ type: "string" }, true)).toBe(true);
     expect(isJsonSchemaPortCompatible({ type: "string" }, {})).toBe(true);
-    expect(
-      isJsonSchemaPortCompatible({ type: "string" }, { description: "annotation only" }),
-    ).toBe(true);
+    expect(isJsonSchemaPortCompatible({ type: "string" }, { description: "annotation only" })).toBe(
+      true,
+    );
     expect(isJsonSchemaPortCompatible(false, { type: "string", minLength: 10 })).toBe(true);
     expect(
       isJsonSchemaPortCompatible(
@@ -159,12 +164,12 @@ describe("Graph JSON v1 constrained port compatibility", () => {
     expect(validateGraphJsonV1PortCompatibility(compatible, resolver)).toBe(true);
     expect(validateGraphJsonV1PortCompatibility(widening, resolver)).toBe(true);
     expect(validateGraphJsonV1PortCompatibility(incompatible, resolver)).toBe(false);
-    expect(validateGraphJsonV1PortCompatibility(dataGraph("source.number", "sink.integer"), resolver)).toBe(
-      false,
-    );
-    expect(validateGraphJsonV1PortCompatibility(dataGraph("source.enum", "sink.string"), resolver)).toBe(
-      false,
-    );
+    expect(
+      validateGraphJsonV1PortCompatibility(dataGraph("source.number", "sink.integer"), resolver),
+    ).toBe(false);
+    expect(
+      validateGraphJsonV1PortCompatibility(dataGraph("source.enum", "sink.string"), resolver),
+    ).toBe(false);
     expect(
       validateGraphJsonV1PortCompatibility(
         dataGraph("source.string", "sink.constrained-string"),

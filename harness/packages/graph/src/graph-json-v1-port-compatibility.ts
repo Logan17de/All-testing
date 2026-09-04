@@ -4,13 +4,7 @@ import type { GraphJsonV1 } from "./graph-json-v1.js";
 import type { NodeManifestResolver } from "./graph-json-v1-semantic-validator.js";
 
 export type JsonPrimitiveSchemaType =
-  | "array"
-  | "boolean"
-  | "integer"
-  | "null"
-  | "number"
-  | "object"
-  | "string";
+  "array" | "boolean" | "integer" | "null" | "number" | "object" | "string";
 
 const PRIMITIVE_SCHEMA_TYPES = new Set<JsonPrimitiveSchemaType>([
   "array",
@@ -73,9 +67,7 @@ function jsonValuesExactlyEqual(left: JsonValue, right: JsonValue): boolean {
     return false;
   }
 
-  return leftKeys.every((key) =>
-    jsonValuesExactlyEqual(leftObject[key]!, rightObject[key]!),
-  );
+  return leftKeys.every((key) => jsonValuesExactlyEqual(leftObject[key]!, rightObject[key]!));
 }
 
 function schemasExactlyEqual(source: JsonSchema, target: JsonSchema): boolean {
@@ -207,10 +199,7 @@ export function validateGraphJsonV1PortCompatibility(
     const manifest = manifests.get(output.source.nodeId);
     const sourcePort = manifest?.outputs[output.source.port];
 
-    if (
-      sourcePort === undefined ||
-      !isJsonSchemaPortCompatible(sourcePort.schema, output.schema)
-    ) {
+    if (sourcePort === undefined || !isJsonSchemaPortCompatible(sourcePort.schema, output.schema)) {
       return false;
     }
   }
