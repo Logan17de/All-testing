@@ -128,19 +128,10 @@ export type NodeEffectClass = "none" | "external-read" | "external-write";
  * `idempotency-key` means the executor/integration can honor a stable key owned
  * by the harness. `unknown` means the harness must not assume a repeat is safe.
  */
-export type NodeIdempotency =
-  | "not-applicable"
-  | "idempotent"
-  | "idempotency-key"
-  | "unknown";
+export type NodeIdempotency = "not-applicable" | "idempotent" | "idempotency-key" | "unknown";
 
 /** Crash/restart strategy available to the future durable runtime. */
-export type NodeRecoveryPolicy =
-  | "not-applicable"
-  | "rerun"
-  | "reuse"
-  | "reconcile"
-  | "manual";
+export type NodeRecoveryPolicy = "not-applicable" | "rerun" | "reuse" | "reconcile" | "manual";
 
 /**
  * Where a node implementation is intended to execute.
