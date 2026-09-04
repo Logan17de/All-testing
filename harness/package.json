@@ -2,7 +2,9 @@
   "name": "zet-harness",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "description": "Provider-neutral AI harness for models, tools, goals, memory, and agent workflows.",
+  "packageManager": "npm@12.0.2",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -27,6 +29,7 @@
     "vitest": "^4.1.11"
   },
   "engines": {
-    "node": ">=24.20.0 <25"
+    "node": ">=24.20.0 <25",
+    "npm": ">=12.0.2 <13"
   }
 }
