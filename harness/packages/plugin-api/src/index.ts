@@ -86,30 +86,6 @@ export interface PluginManifest {
   readonly capabilities?: readonly CapabilityRequirement[];
 }
 
-/**
- * Host-owned activation scope for one plugin instance.
- *
- * Every registration/resource created during activation must contribute a
- * disposer through `onDispose`. The host later unwinds those callbacks in
- * reverse registration order, including partial activation failures.
- */
-export interface PluginContext {
-  readonly config?: JsonValue;
-  onDispose(disposer: PluginDisposer): void;
-}
-
-/**
- * Public plugin lifecycle contract.
- *
- * Loading/importing a module is the host's responsibility. Once loaded, the
- * host validates the manifest, calls `activate`, tracks all disposers registered
- * through the context, and later disposes the activation scope.
- */
-export interface HarnessPlugin {
-  readonly manifest: PluginManifest;
-  activate(context: PluginContext): void | Promise<void>;
-}
-
 /** Stable globally-namespaced node type, for example `builtin.transform.json`. */
 export type NodeType = string;
 
@@ -214,4 +190,40 @@ export type NodeExecutor = (
 export interface NodeDefinition {
   readonly manifest: NodeManifest;
   readonly execute?: NodeExecutor;
+}
+
+/**
+ * Host-owned node registration surface exposed during plugin activation.
+ *
+ * Plugins never receive private registry internals. The host tracks cleanup for
+ * every successful registration automatically as part of the activation scope.
+ */
+export interface PluginNodeRegistry {
+  register(definition: NodeDefinition): void;
+}
+
+/**
+ * Host-owned activation scope for one plugin instance.
+ *
+ * Registry writes are host-tracked automatically. Any additional resource
+ * created during activation must contribute a disposer through `onDispose`.
+ * The host unwinds cleanup in reverse registration order, including partial
+ * activation failures.
+ */
+export interface PluginContext {
+  readonly config?: JsonValue;
+  readonly nodes: PluginNodeRegistry;
+  onDispose(disposer: PluginDisposer): void;
+}
+
+/**
+ * Public plugin lifecycle contract.
+ *
+ * Loading/importing a module is the host's responsibility. Once loaded, the
+ * host validates the manifest, calls `activate`, tracks all registrations and
+ * disposers through the context, and later disposes the activation scope.
+ */
+export interface HarnessPlugin {
+  readonly manifest: PluginManifest;
+  activate(context: PluginContext): void | Promise<void>;
 }
