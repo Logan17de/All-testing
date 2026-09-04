@@ -24,3 +24,5 @@ export * from "./graph-json-v1-diagnostics.js";
 export * from "./graph-json-v1-normalization.js";
 // 2.18 strips only the top-level semantically inert editor bucket; canonical ordering/semantic projection remain 2.19.
 export * from "./graph-json-v1-ui-metadata.js";
+// 2.19 projects executable semantics and applies deterministic Harness canonical ordering/JSON; hashes and IR remain 2.20+.
+export * from "./graph-json-v1-canonical.js";
