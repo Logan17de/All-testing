@@ -228,7 +228,7 @@ describe("Graph compiler identity v1", () => {
     expect(after.irHash).not.toBe(before.irHash);
   });
 
-  it("is deterministic across repeated recordings without hard-coding digest vectors yet", async () => {
+  it("is deterministic across repeated recordings", async () => {
     const normalized = normalizedSource();
     const canonical = canonicalSource(normalized);
     const ir = executionIr();
