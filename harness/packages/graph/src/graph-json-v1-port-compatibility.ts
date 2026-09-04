@@ -57,8 +57,10 @@ function jsonValuesExactlyEqual(left: JsonValue, right: JsonValue): boolean {
     return false;
   }
 
-  const leftKeys = Object.keys(left).sort();
-  const rightKeys = Object.keys(right).sort();
+  const leftObject = left as JsonObject;
+  const rightObject = right as JsonObject;
+  const leftKeys = Object.keys(leftObject).sort();
+  const rightKeys = Object.keys(rightObject).sort();
 
   if (
     leftKeys.length !== rightKeys.length ||
@@ -67,7 +69,9 @@ function jsonValuesExactlyEqual(left: JsonValue, right: JsonValue): boolean {
     return false;
   }
 
-  return leftKeys.every((key) => jsonValuesExactlyEqual(left[key]!, right[key]!));
+  return leftKeys.every((key) =>
+    jsonValuesExactlyEqual(leftObject[key]!, rightObject[key]!),
+  );
 }
 
 function schemasExactlyEqual(source: JsonSchema, target: JsonSchema): boolean {
