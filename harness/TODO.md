@@ -47,7 +47,7 @@ Goal: freeze the smallest stable extension boundary before graph/runtime code de
 - [x] 1.5 Add a generic typed registry primitive used by plugin-provided capabilities.
 - [x] 1.6 Freeze the universal `NodeDefinition`/`NodeManifest` contract.
 - [x] 1.7 Include node input/config/output schemas in the manifest.
-- [ ] 1.8 Include node behavior metadata: primitive family, determinism, effect/idempotency, recovery, timeout/retry defaults, execution mode, required capabilities.
+- [x] 1.8 Include node behavior metadata: primitive family, determinism, effect/idempotency, recovery, timeout/retry defaults, execution mode, required capabilities.
 - [ ] 1.9 Ensure manifests can be inspected without executing plugin node code.
 - [ ] 1.10 Prove one built-in plugin and one external/local test plugin use the exact same host/registry path.
 - [ ] 1.11 Add plugin lifecycle/unload tests.
@@ -152,7 +152,7 @@ Goal: make the scheduler durable without changing Graph/IR semantics.
 
 Goal: make side effects and privilege boundaries explicit before broad real-world tool use.
 
-- [ ] 5.1 Freeze exact node enums/contracts for determinism, effect class, idempotency, and recovery policy.
+- [ ] 5.1 Define and enforce cross-field effect/idempotency/recovery invariants over the Phase 1 node enums.
 - [ ] 5.2 Generate a stable logical effect/idempotency ID that survives retry attempts.
 - [ ] 5.3 Add effect-aware retry rules; never infer that an uncertain external write is safe to repeat.
 - [ ] 5.4 Add reconciliation/manual-review outcomes for ambiguous external writes.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**1.8 — Include node behavior metadata: primitive family, determinism, effect/idempotency, recovery, timeout/retry defaults, execution mode, required capabilities.**
+**1.9 — Ensure manifests can be inspected without executing plugin node code.**
