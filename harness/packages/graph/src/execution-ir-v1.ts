@@ -230,7 +230,9 @@ function assertIndex(label: string, index: number, length: number): void {
 function assertCanonicalDependencies(opIndex: number, dependencies: readonly number[]): void {
   let previous = -1;
   for (const dependency of dependencies) {
-    assertIndex(`ops[${String(opIndex)}].dependencies`, dependency, Number.MAX_SAFE_INTEGER);
+    if (!Number.isSafeInteger(dependency) || dependency < 0) {
+      throw new TypeError(`ops[${String(opIndex)}].dependencies contains an invalid index.`);
+    }
     if (dependency === opIndex) {
       throw new TypeError(`ops[${String(opIndex)}] cannot depend on itself.`);
     }
@@ -244,10 +246,6 @@ function assertCanonicalDependencies(opIndex: number, dependencies: readonly num
 }
 
 function assertResolvedIndexes(ir: ExecutionIrV1): void {
-  if (ir.format !== EXECUTION_IR_FORMAT) {
-    throw new TypeError(`Execution IR format must be '${EXECUTION_IR_FORMAT}'.`);
-  }
-
   const opCount = ir.ops.length;
   const graphInputCount = ir.graphInputs.length;
   const entrypointCount = ir.entrypoints.length;
