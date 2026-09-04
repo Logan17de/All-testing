@@ -27,7 +27,8 @@ The harness owns durable workflow state. Models and integrations are replaceable
 
 - Node.js 24 LTS
 - TypeScript
-- Next.js local web UI/API
+- lightweight long-lived Node runtime daemon using built-in APIs where practical
+- Next.js local web UI as a client of the runtime
 - built-in `node:sqlite` + small SQL repository/migration layer
 - tiny native plugin kernel
 - OpenAI-compatible model plugin first
@@ -58,13 +59,15 @@ Trusted in-process plugins stay extremely cheap. A truly isolated plugin mode ca
 
 ## Documentation
 
-- [`PLAN.md`](./PLAN.md) — original architecture, components, data model, API, milestones, and acceptance criteria.
+- [`PLAN.md`](./PLAN.md) — consolidated architecture, components, data model, API, milestones, and acceptance criteria.
 - [`LIGHTWEIGHT.md`](./LIGHTWEIGHT.md) — authoritative lightweight runtime profile.
 - [`PLUGINS.md`](./PLUGINS.md) — plugin architecture and extension contract direction.
+- [`RUNTIME.md`](./RUNTIME.md) — durable runtime ownership and process boundaries.
+- [`GRAPH.md`](./GRAPH.md) — optional visual graph authoring contract.
 - [`GAPS.md`](./GAPS.md) — gap review and deferred architectural decisions.
 - [`TODO.md`](./TODO.md) — exact implementation order. We complete these items one by one.
 
-Where the original `PLAN.md` conflicts with the newer lightweight/plugin documents, the newer document is the current direction until `PLAN.md` is consolidated.
+Raw research is kept under `research/` as reference material only; accepted architecture is recorded in the documents above.
 
 ## Status
 
