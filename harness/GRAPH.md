@@ -154,6 +154,26 @@ Examples:
 
 Disabled plugins contribute no active definitions/executors.
 
+## Public JSON Schema dialect
+
+Zet Harness v1 uses **JSON Schema Draft 2020-12** for every public schema surface. The public plugin API exports the canonical dialect URI:
+
+```ts
+JSON_SCHEMA_DIALECT_URI = "https://json-schema.org/draft/2020-12/schema"
+```
+
+This single dialect applies to:
+
+- node input-port schemas;
+- node output-port schemas;
+- node config schemas;
+- graph public input schemas;
+- graph public output schemas.
+
+V1 does not negotiate or mix schema dialects per plugin, node, port, or graph field. JSON Schema is used for **shape/value validation**. Port-to-port compatibility remains a separate Harness compiler rule with a deliberately small, deterministic compatibility model; the compiler must not attempt arbitrary JSON-Schema implication/theorem proving.
+
+Validator implementation is an internal graph-package choice and must never leak into scheduler/runtime semantics.
+
 ## Graph JSON v1
 
 `@zet-harness/graph` defines the portable source contract. The implementation lives in `packages/graph/src/graph-json-v1.ts` and is re-exported from the package entrypoint.
