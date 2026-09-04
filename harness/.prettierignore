@@ -3,3 +3,5 @@ node_modules
 **/.next
 coverage
 *.log
+**/*.md
+data
