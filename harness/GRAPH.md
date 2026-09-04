@@ -230,7 +230,13 @@ The internal engine is created with strict schema checking, all-errors collectio
 
 This pass intentionally does **not** reject duplicate IDs, unresolved node references, nonexistent ports, incompatible connections, cycles, or policy semantics. Those belong to later semantic passes. Ajv error objects also remain private implementation details here; stable Harness diagnostics are introduced separately in item 2.16.
 
-Ajv error objects are not part of any public contract. Shape validation will translate them into Harness-owned diagnostics when item 2.5 lands. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
+### Graph JSON v1 semantic identity validator
+
+`validateGraphJsonV1Semantics(graph, resolver)` owns the narrow 2.6 semantic layer: IDs must be unique inside each semantic namespace (`inputs`, `outputs`, `nodes`, `edges`, and `entrypoints`), and every node must resolve an exact pinned `type@version`. IDs are not globally unique across namespaces.
+
+The resolver is a small structural `NodeManifestResolver` interface rather than a dependency on `packages/core`, so the graph/compiler package remains registry-implementation-neutral. Port existence/cardinality, graph references, compatibility, topology, cycles, policies, and stable diagnostics remain later passes.
+
+Ajv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
 
 ## Graph JSON v1
 

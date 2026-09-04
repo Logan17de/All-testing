@@ -66,7 +66,7 @@ Goal: freeze what workflows mean before adding durable execution.
 - [x] 2.3 Choose JSON Schema Draft 2020-12 as the public shape-validation format.
 - [x] 2.4 Add Ajv only if its compiled validation materially simplifies the boundary; keep it out of runtime scheduling logic.
 - [x] 2.5 Add shape/schema validation.
-- [ ] 2.6 Add semantic validation for unique IDs and node type/version resolution.
+- [x] 2.6 Add semantic validation for unique IDs and node type/version resolution.
 - [ ] 2.7 Add port existence, cardinality, and binding validation.
 - [ ] 2.8 Add deliberately constrained port type compatibility; do not attempt arbitrary JSON-Schema implication.
 - [ ] 2.9 Add reachability/liveness validation.
