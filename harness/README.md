@@ -1,55 +1,71 @@
 # Zet Harness
 
-A local-first, model-agnostic AI agent harness owned by us.
+A lightweight, local-first, model-agnostic AI agent harness owned by us.
 
-This project is intentionally separate from the existing DeepSeek Harness experiments under `llm/`. Those experiments remain useful reference implementations and provider bridges, but Zet Harness should not depend on DeepSeek Harness internally.
+This project is intentionally separate from the existing DeepSeek Harness experiments under `llm/`. Those experiments remain useful reference implementations and provider bridges, but Zet Harness does not depend on DeepSeek Harness internally.
 
 ## Goal
 
-Build one persistent runtime that can sit between a user and multiple AI models, tools, memories, projects, goals, and long-running tasks.
+Build one small persistent runtime that can sit between a user and multiple AI models, tools, plugins, memories, projects, goals, and long-running tasks.
 
-The harness owns:
-
-- conversations and context assembly
-- model/provider routing
-- tools and permissions
-- goals and todos
-- memory
-- workspace/files
-- agent execution loop
-- events and resumable runs
-- logs, costs, usage, and failures
-
-Models are replaceable workers. The harness is the stable system.
+The harness owns durable workflow state. Models and integrations are replaceable workers/extensions.
 
 ## v1 principles
 
-1. **Local-first** — the core can run on one Windows/Linux/macOS machine.
-2. **Model-agnostic** — OpenAI, Anthropic, Qwen, and OpenAI-compatible local endpoints use adapters.
-3. **Tool-agnostic** — native tools, HTTP APIs, CLI commands, and MCP tools share one registry.
-4. **Persistent state** — goals, todos, runs, tool calls, and memories survive restarts.
-5. **Safe execution** — the harness enforces workspace boundaries and approval rules.
-6. **Observable** — every model call and tool call has a run ID and trace.
-7. **Simple first** — one process and SQLite before distributed workers or microservices.
+1. **Lightweight core** — one Node.js process and one local SQLite file before any distributed machinery.
+2. **Wide plugin door** — built-ins and third-party extensions use the same public registration APIs wherever practical.
+3. **Local-first** — no Redis, Docker, database server, vector DB, or mandatory cloud service for the base install.
+4. **Model-agnostic** — model providers register behind capability-aware contracts.
+5. **Tool-agnostic** — native tools and plugin tools share the same execution, approval, and trace path.
+6. **Persistent state** — goals, todos, runs, messages, tool calls, and memories survive restarts.
+7. **Safe execution** — the harness enforces workspace boundaries and approval rules around model-requested actions.
+8. **Observable** — important model/tool/state transitions are traceable.
+9. **Lazy integrations** — disabled plugins should add effectively zero runtime work.
+10. **Plain TypeScript first** — no agent framework, workflow engine, or multi-agent framework before the basic loop works extremely well.
 
 ## Planned v1 stack
 
+- Node.js 24 LTS
 - TypeScript
-- Node.js
-- Next.js web UI
-- SQLite + Drizzle ORM
-- Zod schemas
-- provider adapters for OpenAI-compatible APIs first
+- Next.js local web UI/API
+- built-in `node:sqlite` + small SQL repository/migration layer
+- tiny native plugin kernel
+- OpenAI-compatible model plugin first
 - SSE for streamed events
-- MCP client support after native tool execution works
+- native files/shell/Git tools first
+- optional MCP and external integrations through plugins later
 
-A desktop wrapper can be added later with Tauri if we want a native app.
+The base runtime should not require Python, Docker, Redis, a native database addon, or a vector database.
+
+## Plugin direction
+
+The kernel owns only lifecycle/registration/configuration/security primitives. Plugins may eventually add:
+
+- model providers
+- tools
+- auth/subscription providers
+- services
+- hooks/events
+- memory providers
+- settings
+- API routes
+- UI contributions
+- external workers/event sources
+
+A small public `@zet-harness/plugin-api` package will keep third-party plugins away from private core internals.
+
+Trusted in-process plugins stay extremely cheap. A truly isolated plugin mode can be added later for untrusted/community extensions without forcing every plugin into a subprocess today.
 
 ## Documentation
 
-- [`PLAN.md`](./PLAN.md) — architecture, components, data model, API, milestones, and acceptance criteria.
+- [`PLAN.md`](./PLAN.md) — original architecture, components, data model, API, milestones, and acceptance criteria.
+- [`LIGHTWEIGHT.md`](./LIGHTWEIGHT.md) — authoritative lightweight runtime profile.
+- [`PLUGINS.md`](./PLUGINS.md) — plugin architecture and extension contract direction.
+- [`GAPS.md`](./GAPS.md) — gap review and deferred architectural decisions.
 - [`TODO.md`](./TODO.md) — exact implementation order. We complete these items one by one.
+
+Where the original `PLAN.md` conflicts with the newer lightweight/plugin documents, the newer document is the current direction until `PLAN.md` is consolidated.
 
 ## Status
 
-Planning only. No Zet Harness runtime code has been added yet.
+Phase 0 scaffold is in progress on `zet-harness-v1`. We are cleaning the foundation before starting persistent runtime state.
