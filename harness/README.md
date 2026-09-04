@@ -104,7 +104,8 @@ Phase 0 is complete. Phase 1 is in progress on `zet-harness-v1`:
 1.6 node contract            ✅
 1.7 node schemas             ✅
 1.8 behavior metadata        ✅
-1.9 static manifest inspect  ▶ CURRENT
+1.9 static manifest inspect  ✅
+1.10 built-in/external path  ▶ CURRENT
 ```
 
 Then:
