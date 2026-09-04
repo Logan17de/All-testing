@@ -1,0 +1,50 @@
+name: Harness format 2.11
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-format-2-11.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Format 2.11 files
+        working-directory: harness
+        run: >-
+          npx prettier --write
+          packages/plugin-api/src/index.ts
+          packages/graph/src/graph-json-v1-structured-control.ts
+          packages/graph/src/graph-json-v1-structured-control.test.ts
+          packages/graph/src/index.ts
+
+      - name: Commit formatting and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/harness-format-2-11.yml
+          git add harness/packages/plugin-api/src/index.ts harness/packages/graph/src/graph-json-v1-structured-control.ts harness/packages/graph/src/graph-json-v1-structured-control.test.ts harness/packages/graph/src/index.ts
+          git commit -m "style(harness): format 2.11 structured control"
+          git pull --rebase origin zet-harness-v1
+          git push origin HEAD:zet-harness-v1
