@@ -25,10 +25,7 @@ function hasUniqueIds(values: readonly { readonly id: string }[]): boolean {
   return true;
 }
 
-function hasOwnPort(
-  ports: Readonly<Record<string, unknown>>,
-  port: string,
-): boolean {
+function hasOwnPort(ports: Readonly<Record<string, unknown>>, port: string): boolean {
   return Object.prototype.hasOwnProperty.call(ports, port);
 }
 

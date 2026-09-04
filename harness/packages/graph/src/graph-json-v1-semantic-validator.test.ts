@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  NodeInputPort,
-  NodeManifest,
-  NodeOutputPort,
-} from "@zet-harness/plugin-api";
+import type { NodeInputPort, NodeManifest, NodeOutputPort } from "@zet-harness/plugin-api";
 
 import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "./graph-json-v1.js";
 import {
@@ -168,9 +164,7 @@ describe("Graph JSON v1 semantic validation", () => {
       validateGraphJsonV1Semantics(
         {
           ...graph,
-          outputs: [
-            { ...graph.outputs[0]!, source: { nodeId: "missing-node", port: "text" } },
-          ],
+          outputs: [{ ...graph.outputs[0]!, source: { nodeId: "missing-node", port: "text" } }],
         },
         resolver,
       ),
@@ -179,9 +173,7 @@ describe("Graph JSON v1 semantic validation", () => {
       validateGraphJsonV1Semantics(
         {
           ...graph,
-          outputs: [
-            { ...graph.outputs[0]!, source: { nodeId: "finish", port: "missing-output" } },
-          ],
+          outputs: [{ ...graph.outputs[0]!, source: { nodeId: "finish", port: "missing-output" } }],
         },
         resolver,
       ),
@@ -195,9 +187,7 @@ describe("Graph JSON v1 semantic validation", () => {
       validateGraphJsonV1Semantics(
         {
           ...graph,
-          edges: [
-            { ...dataEdge, from: { nodeId: "missing-node", port: "text" } },
-          ],
+          edges: [{ ...dataEdge, from: { nodeId: "missing-node", port: "text" } }],
         },
         resolver,
       ),
@@ -206,9 +196,7 @@ describe("Graph JSON v1 semantic validation", () => {
       validateGraphJsonV1Semantics(
         {
           ...graph,
-          edges: [
-            { ...dataEdge, from: { nodeId: "start", port: "missing-output" } },
-          ],
+          edges: [{ ...dataEdge, from: { nodeId: "start", port: "missing-output" } }],
         },
         resolver,
       ),
@@ -217,9 +205,7 @@ describe("Graph JSON v1 semantic validation", () => {
       validateGraphJsonV1Semantics(
         {
           ...graph,
-          edges: [
-            { ...dataEdge, to: { nodeId: "missing-node", port: "text" } },
-          ],
+          edges: [{ ...dataEdge, to: { nodeId: "missing-node", port: "text" } }],
         },
         resolver,
       ),
@@ -228,9 +214,7 @@ describe("Graph JSON v1 semantic validation", () => {
       validateGraphJsonV1Semantics(
         {
           ...graph,
-          edges: [
-            { ...dataEdge, to: { nodeId: "finish", port: "missing-input" } },
-          ],
+          edges: [{ ...dataEdge, to: { nodeId: "finish", port: "missing-input" } }],
         },
         resolver,
       ),
