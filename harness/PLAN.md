@@ -233,7 +233,7 @@ Human      → interrupt
 Subgraph   → compile-time structure
 ```
 
-A node manifest carries versioned identity, input/config/output schemas, primitive family, determinism, effect/idempotency and recovery policy, timeout/retry defaults, execution mode, and required capabilities. `NodeCatalog` provides a manifest-only inspection path keyed by node type + version, proven not to invoke node executors. Built-in and dynamically imported external/local JavaScript plugins register through the same public `PluginContext.nodes` → `PluginHost` → `NodeCatalog` path with host-owned cleanup. Dedicated lifecycle tests now cover reverse cleanup, partial activation rollback, duplicate activation, unload idempotence, cleanup-error aggregation, in-flight activation protection, and closed activation contexts. A focused plugin smoke gate now runs explicitly in Linux and Windows CI. Phase 1 is complete; Phase 2 begins with the lightweight graph workspace before Graph JSON semantics are frozen.
+A node manifest carries versioned identity, input/config/output schemas, primitive family, determinism, effect/idempotency and recovery policy, timeout/retry defaults, execution mode, and required capabilities. `NodeCatalog` provides a manifest-only inspection path keyed by node type + version, proven not to invoke node executors. Built-in and dynamically imported external/local JavaScript plugins register through the same public `PluginContext.nodes` → `PluginHost` → `NodeCatalog` path with host-owned cleanup. Dedicated lifecycle tests now cover reverse cleanup, partial activation rollback, duplicate activation, unload idempotence, cleanup-error aggregation, in-flight activation protection, and closed activation contexts. A focused plugin smoke gate now runs explicitly in Linux and Windows CI. Phase 1 is complete; Phase 2 has frozen Graph JSON v1 plus JSON Schema Draft 2020-12 and is moving into the validator/compiler boundary.
 
 ---
 
@@ -256,6 +256,19 @@ timeout/retry policy
 secrets
 resource limits
 ```
+
+Permanent validation-ownership rule:
+
+> **Validate each concern at the narrowest layer that actually owns it. Never promote a runtime concern into the schema validator, and never turn semantic validation into general-purpose schema reasoning.**
+
+```text
+JSON Schema validation  = shape + local value constraints
+Graph semantic validation = harness meaning
+Port compatibility      = small deterministic rules only
+Runtime validation      = execution-time conditions
+```
+
+The compiler must not attempt arbitrary JSON-Schema implication/theorem proving. Port compatibility is intentionally constrained to explicit, deterministic relationships.
 
 Initial control-flow rule:
 

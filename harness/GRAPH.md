@@ -174,6 +174,33 @@ V1 does not negotiate or mix schema dialects per plugin, node, port, or graph fi
 
 Validator implementation is an internal graph-package choice and must never leak into scheduler/runtime semantics.
 
+### Validation ownership rule
+
+> **Validate each concern at the narrowest layer that actually owns it. Never promote a runtime concern into the schema validator, and never turn semantic validation into general-purpose schema reasoning.**
+
+```text
+JSON Schema validation
+= shape + local value constraints
+
+Graph semantic validation
+= harness meaning
+
+Port compatibility
+= small deterministic rules only
+
+Runtime validation
+= actual execution-time conditions
+```
+
+Examples:
+
+- JSON Schema may require a timeout value to be a positive integer.
+- Semantic validation checks that referenced node IDs, versions, ports, entrypoints, and graph relationships exist and are meaningful.
+- Port compatibility checks only explicitly supported relationships such as exact or known-safe primitive compatibility. It does not try to prove that arbitrary schema A mathematically implies schema B.
+- Runtime validation checks facts that cannot be established statically, such as whether a secret resolves or an external endpoint is reachable.
+
+This boundary keeps diagnostics explainable, the compiler deterministic, and the default dependency/runtime surface small.
+
 ## Graph JSON v1
 
 `@zet-harness/graph` defines the portable source contract. The implementation lives in `packages/graph/src/graph-json-v1.ts` and is re-exported from the package entrypoint.
