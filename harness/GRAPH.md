@@ -300,6 +300,16 @@ The unified facade short-circuits on shape failure, then on semantic failure, so
 
 Ajv error objects are not part of any public contract. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, runtime records, or the Harness diagnostic contract.
 
+### Graph JSON v1 normalization and resolved version pins
+
+2.17 is the first source-normalization stage and runs only after the frozen validation stack succeeds. `normalizeGraphJsonV1(graph, resolver)` is pure: it returns a new normalized document plus resolved pins and does not mutate the editable Graph JSON. The registry-neutral `NodeResolutionResolver` extends exact manifest lookup with the active plugin provenance for that node registration. `PluginHost` supplies `{ pluginId, pluginVersion }` to `NodeCatalog` internally when a plugin registers a node; the public plugin registration API remains unchanged and `packages/graph` does not depend on `packages/core`. Direct low-level catalog registrations without plugin provenance may still be inspected, but cannot satisfy compiler normalization/pinning.
+
+The closed v1 defaults materialized here are intentionally small: omitted graph-input `required` becomes `false`, omitted node `bindings` becomes `[]`, omitted graph capability buckets become empty arrays, and omitted `policies`/`options` become explicit normalized containers. Explicit source values are preserved. JSON Schema `default` remains an annotation and is not applied to node config; executable config defaults would require a separate explicit Harness contract rather than silently redefining JSON Schema behavior.
+
+Each normalized node records `nodeId`, exact `type`, exact node `version`, owning `pluginId`, and exact `pluginVersion`. A deduplicated plugin-pin list is also produced. Resolution must match the source `type@version`; plugin id/version must be non-empty; and one normalized graph cannot resolve two versions of the same active plugin id. Normalization failures use the common 2.16 diagnostic vocabulary with `stage: "normalization"` and JSON Pointer node paths.
+
+2.17 deliberately preserves graph/editor metadata and source collection order. 2.18 owns removal of UI-only editor state, while 2.19 owns deterministic canonical ordering/serialization. This stage does not compute package digests, registry/compiler hashes, semantic/document hashes, or Execution IR; those remain later compiler items.
+
 ## Graph JSON v1
 
 `@zet-harness/graph` defines the portable source contract. The implementation lives in `packages/graph/src/graph-json-v1.ts` and is re-exported from the package entrypoint.
