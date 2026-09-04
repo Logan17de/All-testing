@@ -6,9 +6,7 @@ const schemaEngine = createDraft202012SchemaEngine();
 const validateGraphJsonV1Document = schemaEngine.compile<GraphJsonV1>(GRAPH_JSON_V1_SCHEMA);
 
 export type GraphShapeDiagnosticCode =
-  | "GRAPH_SHAPE_REQUIRED_PROPERTY"
-  | "GRAPH_SHAPE_ADDITIONAL_PROPERTY"
-  | "GRAPH_SHAPE_INVALID_VALUE";
+  "GRAPH_SHAPE_REQUIRED_PROPERTY" | "GRAPH_SHAPE_ADDITIONAL_PROPERTY" | "GRAPH_SHAPE_INVALID_VALUE";
 
 /** Harness-owned shape diagnostic. Ajv details never cross this boundary. */
 export interface GraphShapeDiagnostic {

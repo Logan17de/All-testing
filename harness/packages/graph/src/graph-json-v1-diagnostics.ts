@@ -36,10 +36,7 @@ import {
   checkGraphJsonV1StructuredControl,
   type GraphStructuredControlDiagnosticCode,
 } from "./graph-json-v1-structured-control.js";
-import {
-  checkGraphJsonV1Shape,
-  type GraphShapeDiagnosticCode,
-} from "./graph-json-v1-validator.js";
+import { checkGraphJsonV1Shape, type GraphShapeDiagnosticCode } from "./graph-json-v1-validator.js";
 import type { GraphJsonV1 } from "./graph-json-v1.js";
 
 export type GraphDiagnosticCode =
@@ -169,10 +166,7 @@ function findBindingPath(
   return bindingIndex >= 0 ? `/nodes/${nodeIndex}/bindings/${bindingIndex}` : undefined;
 }
 
-function derivePath(
-  graph: GraphJsonV1,
-  diagnostic: DiagnosticLike,
-): string | undefined {
+function derivePath(graph: GraphJsonV1, diagnostic: DiagnosticLike): string | undefined {
   const record = diagnostic as unknown as Readonly<Record<string, unknown>>;
   const explicitPath = readString(record, "path");
   if (explicitPath !== undefined) {
@@ -352,11 +346,8 @@ export function checkGraphJsonV1Diagnostics(
     diagnostics,
     graph,
     "capability-policy",
-    checkGraphJsonV1CapabilityPolicy(
-      graph,
-      context.resolver,
-      context.capabilityAuthority,
-    ).diagnostics,
+    checkGraphJsonV1CapabilityPolicy(graph, context.resolver, context.capabilityAuthority)
+      .diagnostics,
   );
   appendDiagnostics(
     diagnostics,
