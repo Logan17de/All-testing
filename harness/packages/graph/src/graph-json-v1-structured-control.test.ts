@@ -226,7 +226,12 @@ describe("Graph JSON v1 structured control contracts", () => {
 
   it("reserves join lanes and the all-active output without adding any/quorum semantics", () => {
     const value = graph(
-      [node("left", "ordinary"), node("right", "ordinary"), node("join", "join"), node("end", "ordinary")],
+      [
+        node("left", "ordinary"),
+        node("right", "ordinary"),
+        node("join", "join"),
+        node("end", "ordinary"),
+      ],
       [
         {
           id: "left-join",
@@ -338,11 +343,7 @@ describe("Graph JSON v1 structured control contracts", () => {
       },
     };
     const value = graph(
-      [
-        node("a", "malformed"),
-        node("b", "wrong-family"),
-        node("c", "wrong-human-family"),
-      ],
+      [node("a", "malformed"), node("b", "wrong-family"), node("c", "wrong-human-family")],
       [],
     );
 
