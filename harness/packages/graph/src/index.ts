@@ -18,3 +18,5 @@ export * from "./graph-json-v1-capability-policy.js";
 export * from "./graph-json-v1-effect-recovery.js";
 // 2.15 enforces secret-only input source rules without inspecting, resolving, or echoing secret material.
 export * from "./graph-json-v1-secret-bindings.js";
+// 2.16 exposes one stable compiler/editor diagnostic shape over the frozen validation stack.
+export * from "./graph-json-v1-diagnostics.js";
