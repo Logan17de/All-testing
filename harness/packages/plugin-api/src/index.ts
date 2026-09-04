@@ -100,3 +100,53 @@ export interface HarnessPlugin {
   readonly manifest: PluginManifest;
   activate(context: PluginContext): void | Promise<void>;
 }
+
+/** Stable globally-namespaced node type, for example `builtin.transform.json`. */
+export type NodeType = string;
+
+/**
+ * Static identity/display metadata for one versioned node type.
+ *
+ * Schemas, behavior metadata, effects, recovery policy, execution mode, and
+ * capabilities are layered onto this manifest by the next contract steps.
+ */
+export interface NodeManifest {
+  readonly type: NodeType;
+  readonly version: Version;
+  readonly title: string;
+  readonly description?: string;
+}
+
+/** JSON-safe values supplied to one node execution. */
+export interface NodeExecutionRequest {
+  readonly inputs: JsonObject;
+  readonly config: JsonObject;
+}
+
+/** JSON-safe result produced by one node execution. */
+export interface NodeExecutionResult {
+  readonly outputs: JsonObject;
+}
+
+/** Minimal host controls available while one node execution is active. */
+export interface NodeExecutionContext {
+  readonly signal: AbortSignal;
+}
+
+/** Runtime implementation for an executable node definition. */
+export type NodeExecutor = (
+  request: NodeExecutionRequest,
+  context: NodeExecutionContext,
+) => NodeExecutionResult | Promise<NodeExecutionResult>;
+
+/**
+ * Universal public node definition.
+ *
+ * `execute` is optional because some node types are compile-time/control
+ * structures rather than directly executable operations. Later manifest
+ * behavior metadata tells the compiler/runtime which shapes are valid.
+ */
+export interface NodeDefinition {
+  readonly manifest: NodeManifest;
+  readonly execute?: NodeExecutor;
+}
