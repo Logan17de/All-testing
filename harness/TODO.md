@@ -43,7 +43,7 @@ Goal: freeze the smallest stable extension boundary before graph/runtime code de
 - [x] 1.1 Create `packages/plugin-api` with zero/near-zero runtime dependencies.
 - [x] 1.2 Define public `Json`, schema reference, diagnostic, capability, and version primitives.
 - [x] 1.3 Define `HarnessPlugin` lifecycle: load/activate → tracked registrations → dispose.
-- [ ] 1.4 Implement the plugin host in `packages/core`.
+- [x] 1.4 Implement the plugin host in `packages/core`.
 - [ ] 1.5 Add a generic typed registry primitive used by plugin-provided capabilities.
 - [ ] 1.6 Freeze the universal `NodeDefinition`/`NodeManifest` contract.
 - [ ] 1.7 Include node input/config/output schemas in the manifest.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**1.4 — Implement the plugin host in `packages/core`.**
+**1.5 — Add a generic typed registry primitive used by plugin-provided capabilities.**
