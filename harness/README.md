@@ -99,19 +99,23 @@ Phase 0 and Phase 1 are complete. Phase 2 is now in progress on `zet-harness-v1`
 Phase 1 plugin + node contract  ✅ COMPLETE
 
 2.1 graph workspace             ✅
-2.2 Graph JSON v1               ▶ CURRENT (design review)
-2.3 JSON Schema dialect         ⏳
-2.4+ validator/compiler/IR      ⏳
+2.2 Graph JSON v1               ✅
+2.3 JSON Schema Draft 2020-12   ✅
+2.4 Ajv boundary decision       ▶ CURRENT
+2.5+ validation/compiler/IR     ⏳
 ```
 
-The 2.2 freeze review is explicitly checking four invariants before the validator starts:
+The Graph JSON v1 freeze now includes:
 
 ```text
-node ports are first-class manifest data
-document hash and semantic hash have separate domains
-graphs request/restrict capabilities but never grant themselves authority
-data edges carry values and imply execution dependencies
+first-class node ports
+document hash and semantic hash as separate domains
+graph capability requests/self-restrictions, never self-grants
+data edges = value + execution dependency
+control edges = activation/ordering only
 ```
+
+All public v1 `JsonSchema` surfaces use **JSON Schema Draft 2020-12**. JSON Schema is for shape/value validation; port compatibility remains a deliberately small deterministic Harness compiler rule rather than arbitrary schema implication.
 
 Then:
 
