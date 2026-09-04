@@ -310,6 +310,14 @@ Each normalized node records `nodeId`, exact `type`, exact node `version`, ownin
 
 2.17 deliberately preserves graph/editor metadata and source collection order. 2.18 owns removal of UI-only editor state, while 2.19 owns deterministic canonical ordering/serialization. This stage does not compute package digests, registry/compiler hashes, semantic/document hashes, or Execution IR; those remain later compiler items.
 
+### Graph JSON v1 compiler UI-metadata stripping
+
+2.18 introduces `stripGraphJsonV1UiMetadata(normalized)`, a pure compiler stage over 2.17 output. It returns `GraphCompilerSourceV1`, carrying the normalized document without its top-level `editor` property plus the exact node/plugin pins established by 2.17. The editable/normalized source is not mutated.
+
+The stripping rule is deliberately narrow: the entire top-level `GraphEditorMetadataV1` bucket is excluded, including viewport, node positions/collapse state, annotations, and arbitrary editor `data`. Human-facing `metadata`, `graphId`, `revisionId`, policies/options, executable node config, bindings, edges, entrypoints, and resolved pins remain present. A property named `editor` inside node config is ordinary executable config and is not recursively removed. Therefore two normalized sources that differ only in top-level editor state produce the same 2.18 compiler-facing source.
+
+2.18 does not canonicalize or reorder collections, project `GraphSemanticsV1`, compute document/semantic/registry/IR hashes, or lower Execution IR. Source order is preserved for 2.19, which owns deterministic canonical source semantics. The separate document-hash domain remains free to cover the complete normalized editable document, while executable semantic identity will exclude editor state by construction.
+
 ## Graph JSON v1
 
 `@zet-harness/graph` defines the portable source contract. The implementation lives in `packages/graph/src/graph-json-v1.ts` and is re-exported from the package entrypoint.
