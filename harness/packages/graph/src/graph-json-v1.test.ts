@@ -131,7 +131,8 @@ describe("Graph JSON v1", () => {
   it("uses data edges for value flow without requiring duplicate control edges", () => {
     const dataEdge = exampleGraph.edges[0];
     const duplicateControlEdge = exampleGraph.edges.find(
-      (edge) => edge.kind === "control" && edge.from.nodeId === "prepare" && edge.to.nodeId === "finish",
+      (edge) =>
+        edge.kind === "control" && edge.from.nodeId === "prepare" && edge.to.nodeId === "finish",
     );
 
     expect(dataEdge?.kind).toBe("data");

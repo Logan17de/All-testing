@@ -81,9 +81,7 @@ export interface GraphSecretBindingV1 {
  * document never has two competing ways to express the same dependency.
  */
 export type GraphInputBindingV1 =
-  | GraphLiteralBindingV1
-  | GraphInputPortBindingV1
-  | GraphSecretBindingV1;
+  GraphLiteralBindingV1 | GraphInputPortBindingV1 | GraphSecretBindingV1;
 
 /** One pinned node invocation in the source graph. */
 export interface GraphNodeV1 {
