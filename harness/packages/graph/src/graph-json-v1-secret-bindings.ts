@@ -39,6 +39,8 @@ function isSecretOnlyInput(manifest: NodeManifest, port: string): boolean {
  * something "looks secret", never resolves a secret reference, and never emits
  * literal values or secret references in diagnostics.
  *
+ * This stage is fail-closed only for declared secret-only destinations; it does
+ * not broaden scope by classifying ordinary input values as secret material.
  * Required-input/cardinality checks remain owned by 2.7. Secret provider
  * existence, authorization, and resolution remain runtime security concerns.
  */
