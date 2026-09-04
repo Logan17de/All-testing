@@ -43,6 +43,14 @@ export default tseslint.config(
     },
   },
   ...nextWebConfig,
+  {
+    files: webFiles,
+    settings: {
+      next: {
+        rootDir: "apps/web/",
+      },
+    },
+  },
   ...typedConfig,
   {
     files: typedFiles,
