@@ -46,7 +46,7 @@ Goal: freeze the smallest stable extension boundary before graph/runtime code de
 - [x] 1.4 Implement the plugin host in `packages/core`.
 - [x] 1.5 Add a generic typed registry primitive used by plugin-provided capabilities.
 - [x] 1.6 Freeze the universal `NodeDefinition`/`NodeManifest` contract.
-- [ ] 1.7 Include node input/config/output schemas in the manifest.
+- [x] 1.7 Include node input/config/output schemas in the manifest.
 - [ ] 1.8 Include node behavior metadata: primitive family, determinism, effect/idempotency, recovery, timeout/retry defaults, execution mode, required capabilities.
 - [ ] 1.9 Ensure manifests can be inspected without executing plugin node code.
 - [ ] 1.10 Prove one built-in plugin and one external/local test plugin use the exact same host/registry path.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**1.7 — Include node input/config/output schemas in the manifest.**
+**1.8 — Include node behavior metadata: primitive family, determinism, effect/idempotency, recovery, timeout/retry defaults, execution mode, required capabilities.**
