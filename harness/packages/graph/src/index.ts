@@ -22,3 +22,5 @@ export * from "./graph-json-v1-secret-bindings.js";
 export * from "./graph-json-v1-diagnostics.js";
 // 2.17 materializes closed Harness defaults and records exact node/plugin pins; UI stripping/canonicalization remain 2.18-2.19.
 export * from "./graph-json-v1-normalization.js";
+// 2.18 strips only the top-level semantically inert editor bucket; canonical ordering/semantic projection remain 2.19.
+export * from "./graph-json-v1-ui-metadata.js";
