@@ -42,9 +42,11 @@ function validateManifest(manifest: PluginManifest): void {
   assertNonEmpty(manifest.name, "name");
   assertNonEmpty(manifest.version, "version");
 
-  if (manifest.apiVersion !== PLUGIN_API_VERSION) {
+  // Widen the compile-time literal so runtime JavaScript plugins are still checked.
+  const apiVersion: number = manifest.apiVersion;
+  if (apiVersion !== PLUGIN_API_VERSION) {
     throw new Error(
-      `Plugin "${manifest.id}" uses API version ${String(manifest.apiVersion)}; ` +
+      `Plugin "${manifest.id}" uses API version ${String(apiVersion)}; ` +
         `this host supports version ${PLUGIN_API_VERSION}.`,
     );
   }
