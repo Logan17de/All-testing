@@ -1,0 +1,77 @@
+name: Harness reopen 2.2 review
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-reopen-2-2-review.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  reopen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+      - name: Reopen Graph JSON v1 review
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              Path("harness/TODO.md"): [
+                  (
+                      '- [x] 1.7 Include node input/config/output schemas in the manifest.',
+                      '- [x] 1.7 Include explicit node input/output port schemas plus config schema in the manifest.',
+                  ),
+                  (
+                      '- [x] 2.2 Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.',
+                      '- [ ] 2.2 Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.',
+                  ),
+                  (
+                      '- [ ] 2.21 Record graph/source hash, IR hash, compiler version, registry hash, and pinned node versions.',
+                      '- [ ] 2.21 Record document hash, semantic hash, IR hash, compiler version, registry hash, and pinned node versions.',
+                  ),
+              ],
+              Path("harness/PLAN.md"): [
+                  (
+                      '           ├─ 2.2 Graph JSON v1                  ✅\n           └─ 2.3 JSON Schema Draft 2020-12         ▶ CURRENT',
+                      '           └─ 2.2 Graph JSON v1                  ▶ CURRENT (design review)',
+                  ),
+                  (
+                      '| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.3 current** |',
+                      '| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.2 design review** |',
+                  ),
+                  (
+                      '> **Phase 2 / Item 2.3 — Choose JSON Schema Draft 2020-12 as the public shape-validation format.**',
+                      '> **Phase 2 / Item 2.2 — Freeze the reviewed Graph JSON v1 semantics: first-class ports, hash domains, capability requests, and data/control edge meaning.**',
+                  ),
+              ],
+              Path("harness/README.md"): [
+                  (
+                      '2.2 Graph JSON v1               ✅\n2.3 JSON Schema dialect         ▶ CURRENT',
+                      '2.2 Graph JSON v1               ▶ CURRENT (design review)\n2.3 JSON Schema dialect         ⏳',
+                  ),
+              ],
+          }
+
+          for path, pairs in replacements.items():
+              text = path.read_text(encoding="utf-8")
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f"Expected text not found in {path}: {old}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding="utf-8", newline="\n")
+      - name: Commit review state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/PLAN.md harness/README.md
+          git commit -m "docs(harness): reopen Graph JSON v1 design review"
+          git pull --rebase origin zet-harness-v1
+          git push origin HEAD:zet-harness-v1
