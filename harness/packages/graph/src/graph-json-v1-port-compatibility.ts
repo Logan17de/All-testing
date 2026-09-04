@@ -6,6 +6,39 @@ import type { NodeManifestResolver } from "./graph-json-v1-semantic-validator.js
 export type JsonPrimitiveSchemaType =
   "array" | "boolean" | "integer" | "null" | "number" | "object" | "string";
 
+export type JsonSchemaPortCompatibilityReason =
+  | "exact"
+  | "impossible-source"
+  | "universal-target"
+  | "same-primitive"
+  | "integer-to-number"
+  | "incompatible-primitive"
+  | "unsupported-inference";
+
+export interface JsonSchemaPortCompatibilityDecision {
+  readonly compatible: boolean;
+  readonly reason: JsonSchemaPortCompatibilityReason;
+}
+
+export type GraphPortCompatibilityDiagnosticCode =
+  | "GRAPH_PORT_TYPE_INCOMPATIBLE"
+  | "GRAPH_PORT_COMPATIBILITY_UNSUPPORTED"
+  | "GRAPH_PORT_COMPATIBILITY_PREREQUISITE_FAILED";
+
+export interface GraphPortCompatibilityDiagnostic {
+  readonly code: GraphPortCompatibilityDiagnosticCode;
+  readonly message: string;
+  readonly edgeId?: string;
+  readonly nodeId?: string;
+  readonly port?: string;
+  readonly graphPortId?: string;
+}
+
+export interface GraphPortCompatibilityResult {
+  readonly valid: boolean;
+  readonly diagnostics: readonly GraphPortCompatibilityDiagnostic[];
+}
+
 const PRIMITIVE_SCHEMA_TYPES = new Set<JsonPrimitiveSchemaType>([
   "array",
   "boolean",
@@ -110,48 +143,60 @@ function getUnconstrainedPrimitiveTargetType(
 }
 
 /**
- * Deliberately constrained Graph JSON v1 schema compatibility.
+ * Classify the deliberately constrained Graph JSON v1 schema compatibility rule.
  *
- * `source` is compatible with `target` only when v1 can establish safety using
- * one of these explicit rules:
- *
- * 1. schemas are structurally identical, ignoring only JSON object key order;
- * 2. `false` source schema (no possible values) is compatible with any target;
- * 3. `true` or annotation-only target accepts every JSON value;
- * 4. source declares one primitive `type` and target is an unconstrained schema
- *    for that same primitive type; or
- * 5. source declares `integer` and target is unconstrained `number`.
- *
- * Source-side constraints are safe in rule 4/5 because an explicit single
- * `type` still bounds every value the source may emit. Target-side assertion
- * keywords are never reasoned about. V1 therefore does not attempt implication
- * for enum/const/ranges/patterns/object properties/arrays/combinators/$ref/etc.
+ * This function never treats unknown compatibility as compatible. When the
+ * frozen v1 rules cannot establish safety, the result is `unsupported-inference`
+ * rather than an attempt to reason about arbitrary JSON Schema implication.
  */
-export function isJsonSchemaPortCompatible(source: JsonSchema, target: JsonSchema): boolean {
+export function classifyJsonSchemaPortCompatibility(
+  source: JsonSchema,
+  target: JsonSchema,
+): JsonSchemaPortCompatibilityDecision {
   if (schemasExactlyEqual(source, target)) {
-    return true;
+    return { compatible: true, reason: "exact" };
   }
 
-  if (source === false || target === true) {
-    return true;
+  if (source === false) {
+    return { compatible: true, reason: "impossible-source" };
   }
 
-  if (typeof target !== "boolean" && isAnnotationOnlySchema(target)) {
-    return true;
+  if (target === true || (typeof target !== "boolean" && isAnnotationOnlySchema(target))) {
+    return { compatible: true, reason: "universal-target" };
+  }
+
+  if (source === true) {
+    return { compatible: false, reason: "incompatible-primitive" };
   }
 
   if (typeof source === "boolean" || typeof target === "boolean") {
-    return false;
+    return { compatible: false, reason: "unsupported-inference" };
   }
 
   const sourceType = getSinglePrimitiveType(source);
   const targetType = getUnconstrainedPrimitiveTargetType(target);
 
   if (sourceType === undefined || targetType === undefined) {
-    return false;
+    return { compatible: false, reason: "unsupported-inference" };
   }
 
-  return sourceType === targetType || (sourceType === "integer" && targetType === "number");
+  if (sourceType === targetType) {
+    return { compatible: true, reason: "same-primitive" };
+  }
+
+  if (sourceType === "integer" && targetType === "number") {
+    return { compatible: true, reason: "integer-to-number" };
+  }
+
+  return { compatible: false, reason: "incompatible-primitive" };
+}
+
+/**
+ * Boolean convenience wrapper around the classified compatibility decision.
+ * Unknown/unsupported inference always returns false.
+ */
+export function isJsonSchemaPortCompatible(source: JsonSchema, target: JsonSchema): boolean {
+  return classifyJsonSchemaPortCompatibility(source, target).compatible;
 }
 
 function resolveManifests(
@@ -171,43 +216,91 @@ function resolveManifests(
   return manifests;
 }
 
-/**
- * Validate only schema-to-schema value-flow compatibility for Graph JSON v1.
- *
- * This pass is intentionally separate from 2.6-2.7 semantic validation. It
- * checks graph-output declarations, public graph-input bindings, and data edges.
- * Literal values are value-validation inputs rather than schema implication;
- * secret references have no public value schema in v1. Control edges carry no
- * value and are therefore outside this pass.
- *
- * Callers should run shape validation and 2.6-2.7 semantic validation first.
- * Missing references defensively return false here but are owned diagnostically
- * by the earlier semantic layer.
- */
-export function validateGraphJsonV1PortCompatibility(
-  graph: GraphJsonV1,
-  resolver: NodeManifestResolver,
-): boolean {
-  const manifests = resolveManifests(graph, resolver);
-  if (manifests === undefined) {
-    return false;
+function compatibilityDiagnostic(
+  decision: JsonSchemaPortCompatibilityDecision,
+  messagePrefix: string,
+  location: Omit<GraphPortCompatibilityDiagnostic, "code" | "message">,
+): GraphPortCompatibilityDiagnostic | undefined {
+  if (decision.compatible) {
+    return undefined;
   }
 
+  if (decision.reason === "unsupported-inference") {
+    return {
+      code: "GRAPH_PORT_COMPATIBILITY_UNSUPPORTED",
+      message: `${messagePrefix}: compatibility requires JSON-Schema reasoning that Harness v1 deliberately does not perform.`,
+      ...location,
+    };
+  }
+
+  return {
+    code: "GRAPH_PORT_TYPE_INCOMPATIBLE",
+    message: `${messagePrefix}: source and target port schemas are incompatible under Harness v1 rules.`,
+    ...location,
+  };
+}
+
+/**
+ * Run only the 2.8 schema-to-schema value-flow compatibility stage.
+ *
+ * This remains separate from the 2.6-2.7 semantic validator. It reports
+ * incompatible versus deliberately unsupported inference without broadening the
+ * compatibility model. Literal values, secret references, control edges,
+ * reachability/liveness, and impossible-producer diagnostics are owned elsewhere.
+ */
+export function checkGraphJsonV1PortCompatibility(
+  graph: GraphJsonV1,
+  resolver: NodeManifestResolver,
+): GraphPortCompatibilityResult {
+  const manifests = resolveManifests(graph, resolver);
+  if (manifests === undefined) {
+    return {
+      valid: false,
+      diagnostics: [
+        {
+          code: "GRAPH_PORT_COMPATIBILITY_PREREQUISITE_FAILED",
+          message: "Port compatibility requires all graph nodes to resolve before 2.8 runs.",
+        },
+      ],
+    };
+  }
+
+  const diagnostics: GraphPortCompatibilityDiagnostic[] = [];
   const graphInputs = new Map(graph.inputs.map((input) => [input.id, input] as const));
 
   for (const output of graph.outputs) {
-    const manifest = manifests.get(output.source.nodeId);
-    const sourcePort = manifest?.outputs[output.source.port];
+    const sourcePort = manifests.get(output.source.nodeId)?.outputs[output.source.port];
 
-    if (sourcePort === undefined || !isJsonSchemaPortCompatible(sourcePort.schema, output.schema)) {
-      return false;
+    if (sourcePort === undefined) {
+      diagnostics.push({
+        code: "GRAPH_PORT_COMPATIBILITY_PREREQUISITE_FAILED",
+        message: `Graph output '${output.id}' references an unresolved source port; 2.6-2.7 must succeed before 2.8.`,
+        nodeId: output.source.nodeId,
+        port: output.source.port,
+        graphPortId: output.id,
+      });
+      continue;
+    }
+
+    const diagnostic = compatibilityDiagnostic(
+      classifyJsonSchemaPortCompatibility(sourcePort.schema, output.schema),
+      `Graph output '${output.id}' from '${output.source.nodeId}.${output.source.port}'`,
+      {
+        nodeId: output.source.nodeId,
+        port: output.source.port,
+        graphPortId: output.id,
+      },
+    );
+
+    if (diagnostic !== undefined) {
+      diagnostics.push(diagnostic);
     }
   }
 
   for (const node of graph.nodes) {
     const manifest = manifests.get(node.id);
     if (manifest === undefined) {
-      return false;
+      continue;
     }
 
     for (const binding of node.bindings ?? []) {
@@ -218,12 +311,29 @@ export function validateGraphJsonV1PortCompatibility(
       const graphInput = graphInputs.get(binding.input);
       const targetPort = manifest.inputs[binding.port];
 
-      if (
-        graphInput === undefined ||
-        targetPort === undefined ||
-        !isJsonSchemaPortCompatible(graphInput.schema, targetPort.schema)
-      ) {
-        return false;
+      if (graphInput === undefined || targetPort === undefined) {
+        diagnostics.push({
+          code: "GRAPH_PORT_COMPATIBILITY_PREREQUISITE_FAILED",
+          message: `Graph-input binding '${binding.input}' -> '${node.id}.${binding.port}' is unresolved; 2.6-2.7 must succeed before 2.8.`,
+          nodeId: node.id,
+          port: binding.port,
+          graphPortId: binding.input,
+        });
+        continue;
+      }
+
+      const diagnostic = compatibilityDiagnostic(
+        classifyJsonSchemaPortCompatibility(graphInput.schema, targetPort.schema),
+        `Graph input '${binding.input}' to '${node.id}.${binding.port}'`,
+        {
+          nodeId: node.id,
+          port: binding.port,
+          graphPortId: binding.input,
+        },
+      );
+
+      if (diagnostic !== undefined) {
+        diagnostics.push(diagnostic);
       }
     }
   }
@@ -236,14 +346,33 @@ export function validateGraphJsonV1PortCompatibility(
     const sourcePort = manifests.get(edge.from.nodeId)?.outputs[edge.from.port];
     const targetPort = manifests.get(edge.to.nodeId)?.inputs[edge.to.port];
 
-    if (
-      sourcePort === undefined ||
-      targetPort === undefined ||
-      !isJsonSchemaPortCompatible(sourcePort.schema, targetPort.schema)
-    ) {
-      return false;
+    if (sourcePort === undefined || targetPort === undefined) {
+      diagnostics.push({
+        code: "GRAPH_PORT_COMPATIBILITY_PREREQUISITE_FAILED",
+        message: `Data edge '${edge.id}' contains an unresolved port; 2.6-2.7 must succeed before 2.8.`,
+        edgeId: edge.id,
+      });
+      continue;
+    }
+
+    const diagnostic = compatibilityDiagnostic(
+      classifyJsonSchemaPortCompatibility(sourcePort.schema, targetPort.schema),
+      `Data edge '${edge.id}' from '${edge.from.nodeId}.${edge.from.port}' to '${edge.to.nodeId}.${edge.to.port}'`,
+      { edgeId: edge.id, nodeId: edge.to.nodeId, port: edge.to.port },
+    );
+
+    if (diagnostic !== undefined) {
+      diagnostics.push(diagnostic);
     }
   }
 
-  return true;
+  return { valid: diagnostics.length === 0, diagnostics };
+}
+
+/** Boolean convenience wrapper for the separate 2.8 compatibility stage. */
+export function validateGraphJsonV1PortCompatibility(
+  graph: GraphJsonV1,
+  resolver: NodeManifestResolver,
+): boolean {
+  return checkGraphJsonV1PortCompatibility(graph, resolver).valid;
 }
