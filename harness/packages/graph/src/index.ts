@@ -30,3 +30,5 @@ export * from "./graph-json-v1-canonical.js";
 export * from "./execution-ir-v1.js";
 // 2.21 records domain-separated document/semantic/registry/IR SHA-256 identities plus explicit compiler version and resolved pins; lowering remains 2.22.
 export * from "./compiler-identity-v1.js";
+// 2.22 lowers canonical Graph JSON into indexed DAG dependencies, value/control edges, and initial router/all-active join descriptors.
+export * from "./graph-json-v1-lowering.js";
