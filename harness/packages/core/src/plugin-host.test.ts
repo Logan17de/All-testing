@@ -15,9 +15,13 @@ function makeNode(type: string): NodeDefinition {
       type,
       version: "1",
       title: type,
-      inputSchema: true,
+      inputs: {
+        value: { schema: true },
+      },
+      outputs: {
+        value: { schema: true },
+      },
       configSchema: true,
-      outputSchema: true,
       behavior: {
         primitiveFamily: "pure",
         determinism: "deterministic",
