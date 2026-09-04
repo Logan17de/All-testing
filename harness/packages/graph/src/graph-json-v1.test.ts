@@ -117,8 +117,8 @@ function semanticProjection(graph: GraphJsonV1): GraphSemanticsV1 {
     nodes: graph.nodes,
     edges: graph.edges,
     entrypoints: graph.entrypoints,
-    policies: graph.policies,
-    options: graph.options,
+    ...(graph.policies === undefined ? {} : { policies: graph.policies }),
+    ...(graph.options === undefined ? {} : { options: graph.options }),
   };
 }
 
