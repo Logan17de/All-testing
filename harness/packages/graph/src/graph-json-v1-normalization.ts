@@ -46,6 +46,7 @@ export type GraphNormalizationDiagnosticCode =
 export interface GraphNormalizationDiagnostic {
   readonly code: GraphNormalizationDiagnosticCode;
   readonly message: string;
+  readonly stage: "normalization";
   readonly path: string;
   readonly nodeId?: string;
 }
@@ -106,6 +107,7 @@ export function normalizeGraphJsonV1(
       diagnostics.push({
         code: "GRAPH_NORMALIZATION_RESOLUTION_REQUIRED",
         message: `Node '${node.id}' requires exact node/plugin provenance before normalization.`,
+        stage: "normalization",
         path: `/nodes/${index}`,
         nodeId: node.id,
       });
@@ -116,6 +118,7 @@ export function normalizeGraphJsonV1(
       diagnostics.push({
         code: "GRAPH_NORMALIZATION_NODE_IDENTITY_MISMATCH",
         message: `Node '${node.id}' resolved manifest identity does not match source '${node.type}@${node.version}'.`,
+        stage: "normalization",
         path: `/nodes/${index}`,
         nodeId: node.id,
       });
@@ -128,6 +131,7 @@ export function normalizeGraphJsonV1(
       diagnostics.push({
         code: "GRAPH_NORMALIZATION_PLUGIN_IDENTITY_INVALID",
         message: `Node '${node.id}' resolved from a plugin with an invalid id/version.`,
+        stage: "normalization",
         path: `/nodes/${index}`,
         nodeId: node.id,
       });
@@ -139,6 +143,7 @@ export function normalizeGraphJsonV1(
       diagnostics.push({
         code: "GRAPH_NORMALIZATION_PLUGIN_VERSION_CONFLICT",
         message: `Plugin '${pluginId}' resolved multiple versions ('${previousVersion}' and '${pluginVersion}') in one normalized graph.`,
+        stage: "normalization",
         path: `/nodes/${index}`,
         nodeId: node.id,
       });
