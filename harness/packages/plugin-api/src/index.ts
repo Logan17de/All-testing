@@ -159,6 +159,72 @@ export interface NodeRetryDefaults {
 }
 
 /**
+ * Explicit router control shape. The compiler interprets `entry` as the single
+ * incoming control lane and `branches` as named outgoing activation choices.
+ * How a router selects a branch is node/config-specific and lands later.
+ */
+export interface NodeRouterControlContract {
+  readonly kind: "router";
+  readonly entry: NodePortName;
+  readonly branches: readonly NodePortName[];
+}
+
+/**
+ * Explicit join control shape. V1 reserves only activation-aware `all-active`;
+ * `any`/quorum semantics are intentionally not smuggled into this contract yet.
+ */
+export interface NodeJoinControlContract {
+  readonly kind: "join";
+  readonly inputs: readonly NodePortName[];
+  readonly output: NodePortName;
+  readonly mode: "all-active";
+}
+
+/**
+ * Explicit loop boundary shape only. This does not make cycles executable.
+ * 2.10 still rejects graph SCCs; bounded loop lowering/execution lands later.
+ */
+export interface NodeLoopControlContract {
+  readonly kind: "loop";
+  readonly entry: NodePortName;
+  readonly continue: NodePortName;
+  readonly body: NodePortName;
+  readonly exit: NodePortName;
+}
+
+/**
+ * Explicit durable human-interrupt control shape. `outcomes` are named resume
+ * paths such as approved/rejected; persistence and resume behavior land later.
+ */
+export interface NodeHumanInterruptControlContract {
+  readonly kind: "human-interrupt";
+  readonly entry: NodePortName;
+  readonly outcomes: readonly NodePortName[];
+}
+
+/**
+ * Explicit subgraph call boundary. Graph identity/bindings are invocation config;
+ * this static contract reserves only control entry/exit names for compilation.
+ */
+export interface NodeSubgraphControlContract {
+  readonly kind: "subgraph";
+  readonly entry: NodePortName;
+  readonly exits: readonly NodePortName[];
+}
+
+/**
+ * Compiler-readable structured control contract for node types that own control
+ * semantics. Ordinary nodes omit this and may still participate in unported
+ * ordering-only control edges.
+ */
+export type NodeStructuredControlContract =
+  | NodeRouterControlContract
+  | NodeJoinControlContract
+  | NodeLoopControlContract
+  | NodeHumanInterruptControlContract
+  | NodeSubgraphControlContract;
+
+/**
  * Static scheduler/compiler-facing behavior metadata for one node type.
  *
  * Numeric bounds and cross-field consistency are validated later by the graph
@@ -181,7 +247,8 @@ export interface NodeBehavior {
  *
  * Input/output ports are first-class so graph validation never has to infer a
  * port model from arbitrary object-shaped JSON Schema. Port schemas, config
- * schema, and behavior metadata are all inspectable without executing node code.
+ * schema, behavior metadata, and optional structured-control contract are all
+ * inspectable without executing node code.
  */
 export interface NodeManifest {
   readonly type: NodeType;
@@ -192,6 +259,7 @@ export interface NodeManifest {
   readonly outputs: Readonly<Record<NodePortName, NodeOutputPort>>;
   readonly configSchema: JsonSchema;
   readonly behavior: NodeBehavior;
+  readonly control?: NodeStructuredControlContract;
 }
 
 /** JSON-safe values supplied to one node execution, keyed by input port name. */
