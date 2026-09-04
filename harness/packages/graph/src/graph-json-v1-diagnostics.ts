@@ -65,6 +65,7 @@ export type GraphDiagnosticStage =
 
 /**
  * Stable compiler/editor-facing Graph JSON diagnostic.
+ * This interface is the frozen 2.16 public diagnostic boundary.
  *
  * `path` is a JSON Pointer into Graph JSON source when one precise source
  * location exists. Multi-object findings such as SCCs use related node/edge IDs
