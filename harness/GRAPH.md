@@ -288,9 +288,17 @@ This stage validates manifest promises only. It does not execute retries, genera
 
 The rule is contract-driven, not heuristic: the compiler does not scan strings or ordinary inputs to decide whether something looks secret, and an opaque secret reference may still be supplied to an ordinary non-secret input when a graph author chooses that source form. The stage never resolves a secret provider and never includes literal values or `secretRef` contents in its diagnostics. Required-input/cardinality and unknown-port validation remain owned by 2.7; secret-provider existence, authorization, retrieval, redaction, and runtime use remain later security/runtime concerns.
 
-2.15 is validation only. It does not normalize, redact, encrypt, materialize, or persist secret values. Generalized stable diagnostics with common node/edge/path locations remain 2.16.
+2.15 is validation only. It does not normalize, redact, encrypt, materialize, or persist secret values.
 
-Ajv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
+### Graph JSON v1 structured diagnostics
+
+2.16 introduces the stable compiler/editor-facing `GraphDiagnostic` boundary and `checkGraphJsonV1Diagnostics(value, context)`. Every emitted diagnostic has a Harness-owned `code`, safe `message`, and validation `stage`. When one precise source location exists, `path` is a JSON Pointer into Graph JSON; direct `nodeId`, `edgeId`, `entrypointId`, `graphPortId`, and `port` references are preserved when available. Multi-object findings such as SCCs use `relatedNodeIds`/`relatedEdgeIds` rather than pretending one source path owns the whole error.
+
+Shape validation now normalizes internal Draft 2020-12 engine failures into stable Harness codes such as `GRAPH_SHAPE_REQUIRED_PROPERTY`, `GRAPH_SHAPE_ADDITIONAL_PROPERTY`, and `GRAPH_SHAPE_INVALID_VALUE`; Ajv error objects, keyword names, and params remain private. The 2.6-2.7 semantic stage now also has structured codes for duplicate IDs, unresolved exact manifests/references, unknown ports, missing required inputs, and cardinality excess while preserving the existing boolean API. Existing 2.8-2.15 codes and semantics are not renamed or broadened.
+
+The unified facade short-circuits on shape failure, then on semantic failure, so later passes do not flood callers with derivative prerequisite errors. After those prerequisites succeed, 2.8-2.15 run in frozen order and are normalized into the common location model. Diagnostic ordering is deterministic, secret material is never added to normalized output, and this stage performs no source normalization or IR lowering. Those begin with 2.17.
+
+Ajv error objects are not part of any public contract. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, runtime records, or the Harness diagnostic contract.
 
 ## Graph JSON v1
 

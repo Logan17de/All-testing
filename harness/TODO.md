@@ -76,7 +76,7 @@ Goal: freeze what workflows mean before adding durable execution.
 - [x] 2.13 Add compile-time capability/policy validation.
 - [x] 2.14 Add compile-time side-effect/retry/recovery validation.
 - [x] 2.15 Reject literal secrets where a secret reference is required.
-- [ ] 2.16 Return structured diagnostics with codes plus node/edge/path references.
+- [x] 2.16 Return structured diagnostics with codes plus node/edge/path references.
 - [ ] 2.17 Normalize defaults and pin resolved node/plugin versions.
 - [ ] 2.18 Strip UI-only metadata during compilation.
 - [ ] 2.19 Canonicalize source semantics deterministically.
