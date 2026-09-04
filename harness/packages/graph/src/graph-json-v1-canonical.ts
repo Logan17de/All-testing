@@ -60,7 +60,8 @@ export function stringifyCanonicalJsonV1(value: JsonValue): string {
   }
 
   if (Array.isArray(value)) {
-    return `[${value.map((item) => stringifyCanonicalJsonV1(item)).join(",")}]`;
+    const array = value as readonly JsonValue[];
+    return `[${array.map((item) => stringifyCanonicalJsonV1(item)).join(",")}]`;
   }
 
   const object = value as JsonObject;
@@ -87,7 +88,8 @@ export function canonicalizeJsonValueV1(value: JsonValue): JsonValue {
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => canonicalizeJsonValueV1(item));
+    const array = value as readonly JsonValue[];
+    return array.map((item) => canonicalizeJsonValueV1(item));
   }
 
   const object = value as JsonObject;
