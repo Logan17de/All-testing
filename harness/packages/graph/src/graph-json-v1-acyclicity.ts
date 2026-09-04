@@ -1,8 +1,7 @@
 import type { GraphJsonV1 } from "./graph-json-v1.js";
 
 export type GraphAcyclicityDiagnosticCode =
-  | "GRAPH_ACYCLICITY_PREREQUISITE_FAILED"
-  | "GRAPH_CYCLE_DETECTED";
+  "GRAPH_ACYCLICITY_PREREQUISITE_FAILED" | "GRAPH_CYCLE_DETECTED";
 
 export interface GraphAcyclicityDiagnostic {
   readonly code: GraphAcyclicityDiagnosticCode;
@@ -162,9 +161,7 @@ export function checkGraphJsonV1Acyclicity(graph: GraphJsonV1): GraphAcyclicityR
       }
 
       const nodeId = component[0]!;
-      return graph.edges.some(
-        (edge) => edge.from.nodeId === nodeId && edge.to.nodeId === nodeId,
-      );
+      return graph.edges.some((edge) => edge.from.nodeId === nodeId && edge.to.nodeId === nodeId);
     })
     .map((component) =>
       [...component].sort((left, right) => nodeOrder.get(left)! - nodeOrder.get(right)!),
@@ -174,9 +171,7 @@ export function checkGraphJsonV1Acyclicity(graph: GraphJsonV1): GraphAcyclicityR
   for (const component of cyclicComponents) {
     const componentSet = new Set(component);
     const edgeIds = graph.edges
-      .filter(
-        (edge) => componentSet.has(edge.from.nodeId) && componentSet.has(edge.to.nodeId),
-      )
+      .filter((edge) => componentSet.has(edge.from.nodeId) && componentSet.has(edge.to.nodeId))
       .map((edge) => edge.id);
 
     diagnostics.push({
