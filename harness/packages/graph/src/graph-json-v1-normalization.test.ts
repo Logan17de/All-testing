@@ -137,9 +137,7 @@ describe("Graph JSON v1 normalization", () => {
         pluginVersion: "4.1.0",
       },
     ]);
-    expect(result.normalized?.pluginPins).toEqual([
-      { id: "plugin.shared", version: "4.1.0" },
-    ]);
+    expect(result.normalized?.pluginPins).toEqual([{ id: "plugin.shared", version: "4.1.0" }]);
 
     // Normalization is a pure compiler stage; source/editor state is never rewritten.
     expect(source).toEqual(sourceBefore);
@@ -262,9 +260,7 @@ describe("Graph JSON v1 normalization", () => {
       }),
     );
 
-    expect(invalidPlugin.diagnostics[0]?.code).toBe(
-      "GRAPH_NORMALIZATION_PLUGIN_IDENTITY_INVALID",
-    );
+    expect(invalidPlugin.diagnostics[0]?.code).toBe("GRAPH_NORMALIZATION_PLUGIN_IDENTITY_INVALID");
 
     const conflicting = normalizeGraphJsonV1(
       graph(),

@@ -111,10 +111,7 @@ export function normalizeGraphJsonV1(
       return;
     }
 
-    if (
-      resolution.manifest.type !== node.type ||
-      resolution.manifest.version !== node.version
-    ) {
+    if (resolution.manifest.type !== node.type || resolution.manifest.version !== node.version) {
       diagnostics.push({
         code: "GRAPH_NORMALIZATION_NODE_IDENTITY_MISMATCH",
         message: `Node '${node.id}' resolved manifest identity does not match source '${node.type}@${node.version}'.`,
