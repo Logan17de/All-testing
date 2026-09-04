@@ -117,9 +117,7 @@ describe("Graph JSON v1 secret-only binding validation", () => {
   });
 
   it("rejects forwarding a public graph input into a secret-only input", () => {
-    const graph = secretSinkGraph([
-      { kind: "graph-input", port: "apiKey", input: "public-input" },
-    ]);
+    const graph = secretSinkGraph([{ kind: "graph-input", port: "apiKey", input: "public-input" }]);
 
     expect(validateGraphJsonV1Semantics(graph, resolver)).toBe(true);
     expect(checkGraphJsonV1SecretBindings(graph, resolver).diagnostics).toEqual([

@@ -4,8 +4,7 @@ import type { GraphJsonV1 } from "./graph-json-v1.js";
 import type { NodeManifestResolver } from "./graph-json-v1-semantic-validator.js";
 
 export type GraphSecretBindingDiagnosticCode =
-  | "GRAPH_SECRET_BINDING_PREREQUISITE_FAILED"
-  | "GRAPH_SECRET_REFERENCE_REQUIRED";
+  "GRAPH_SECRET_BINDING_PREREQUISITE_FAILED" | "GRAPH_SECRET_REFERENCE_REQUIRED";
 
 export type GraphSecretBindingSourceKind = "literal" | "graph-input" | "data-edge";
 
