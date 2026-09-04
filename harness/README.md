@@ -93,28 +93,21 @@ The visual/editor representation is source code, not runtime state. The schedule
 
 ## Status
 
-Phase 0 is complete. Phase 1 is in progress on `zet-harness-v1`:
+Phase 0 and Phase 1 are complete. Phase 2 is now in progress on `zet-harness-v1`:
 
 ```text
-1.1 plugin-api package       ✅
-1.2 public primitives        ✅
-1.3 plugin lifecycle         ✅
-1.4 plugin host              ✅
-1.5 typed registry           ✅
-1.6 node contract            ✅
-1.7 node schemas             ✅
-1.8 behavior metadata        ✅
-1.9 static manifest inspect  ✅
-1.10 built-in/external path  ✅
-1.11 lifecycle/unload tests  ✅
-1.12 plugin smoke in CI      ▶ CURRENT
+Phase 1 plugin + node contract  ✅ COMPLETE
+
+2.1 graph workspace             ▶ CURRENT
+2.2 Graph JSON v1               ⏳
+2.3 JSON Schema dialect         ⏳
+2.4+ validator/compiler/IR      ⏳
 ```
 
 Then:
 
 ```text
-plugin/node contract
-→ Graph JSON + compiler + Execution IR
+Graph JSON + compiler + Execution IR
 → in-memory scheduler
 → durable Node + SQLite runtime
 ```
