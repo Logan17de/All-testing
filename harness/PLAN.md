@@ -58,7 +58,8 @@ Phase 2  Graph JSON + compiler + IR        🚧 WE ARE HERE
            ├─ 2.10 arbitrary cycle/SCC rejection      ✅
            ├─ 2.11 structured control contracts       ✅
            ├─ 2.12 compiler-visible loop bounds       ✅
-           └─ 2.13 capability/policy validation        ▶ CURRENT
+           ├─ 2.13 capability/policy validation        ✅
+           └─ 2.14 side-effect/retry/recovery validation ▶ CURRENT
 Phase 3  In-memory DAG scheduler           ⏳
 Phase 4  Runtime daemon + SQLite           ⏳
 Phase 5  Effects + permissions + humans    ⏳
@@ -76,7 +77,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 |---|---|---|
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
-| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.13 current** |
+| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.14 current** |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ⏳ Planned |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
@@ -290,7 +291,7 @@ DAG
 + subgraph
 ```
 
-No arbitrary visual cycles initially. Every executable loop needs compiler-visible hard bounds. In Graph JSON v1, a node resolved to a structured loop contract must carry a per-invocation top-level `config.maxIterations` positive safe integer. This reserves a deterministic hard ceiling for later lowering/execution without weakening current SCC rejection; graph-wide resource-policy interaction remains a separate compile-time concern.
+No arbitrary visual cycles initially. Every executable loop needs compiler-visible hard bounds. In Graph JSON v1, a node resolved to a structured loop contract must carry a per-invocation top-level `config.maxIterations` positive safe integer. This reserves a deterministic hard ceiling for later lowering/execution without weakening current SCC rejection. Capability/policy validation is a separate compile-time stage: node manifest requirements plus graph-required capability requests must be present in external compile authority, optional requests are opportunistic, and graph deny can only reduce authority. A loop bound greater than graph `maxNodeExecutions` is rejected as a statically known policy contradiction.
 
 Deterministic acceptance property:
 
@@ -383,4 +384,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 2 / Item 2.13 — Add compile-time capability/policy validation.**
+> **Phase 2 / Item 2.14 — Add compile-time side-effect/retry/recovery validation.**

@@ -264,7 +264,15 @@ This stage is reservation/validation only: it does not choose router branches, e
 
 2.12 is a separate static stage. Every graph node whose resolved manifest declares `control.kind === "loop"` must carry a top-level `config.maxIterations` value. The value is per node invocation and must be a positive JavaScript safe integer. Missing bounds fail as `GRAPH_LOOP_BOUND_REQUIRED`; malformed bounds fail as `GRAPH_LOOP_BOUND_INVALID`. Unresolved node manifests fail the stage prerequisite explicitly.
 
-The `maxIterations` key has Harness loop meaning only for nodes resolved to a structured loop contract; ordinary node configuration may use the same text without becoming a loop. The fixed top-level location keeps the future compiler deterministic and avoids JSONPath/dynamic-expression inference. 2.12 does not execute loops, interpret stop conditions, lower loop regions into IR, or compare the local bound with graph resource limits. A valid bound still does not legalize a cycle: 2.10 continues to reject every SCC/self-loop until executable loop lowering lands later. Capability/resource policy semantics begin in 2.13; secret-only enforcement and generalized stable diagnostics remain later passes.
+The `maxIterations` key has Harness loop meaning only for nodes resolved to a structured loop contract; ordinary node configuration may use the same text without becoming a loop. The fixed top-level location keeps the future compiler deterministic and avoids JSONPath/dynamic-expression inference. 2.12 does not execute loops, interpret stop conditions, lower loop regions into IR, or compare the local bound with graph resource limits. A valid bound still does not legalize a cycle: 2.10 continues to reject every SCC/self-loop until executable loop lowering lands later.
+
+### Graph JSON v1 capability/policy validation
+
+2.13 is a separate compile-time stage with explicit external authority input. Hard capability demand is the union of graph `capabilities.required` and every resolved node manifest's `behavior.requiredCapabilities`. Graph `capabilities.optional` is opportunistic and does not fail compilation merely because a grant is absent. Graph `capabilities.deny` is a self-restriction only: it can remove authority but can never add it. Duplicate entries inside a capability bucket and capabilities declared across multiple graph intent buckets are rejected rather than normalized silently.
+
+Effective compile-time authority is requested hard/optional capability intent intersected with external grants, minus graph self-denials. A graph-required or node-required capability that is absent externally fails compilation; a self-denied hard requirement also fails. Unrequested external grants do not become graph effective capabilities merely because the compiler context has them. The host/runtime may always impose stricter policy later.
+
+2.13 also performs the first deliberately narrow resource-policy cross-check promised by 2.12: when `policies.maxNodeExecutions` exists, a valid structured-loop `config.maxIterations` greater than that ceiling is rejected because the graph already contradicts its own hard execution budget. No scheduler accounting, wall-time prediction, or parallelism simulation is attempted here. Side-effect/retry/recovery consistency remains 2.14; secret-only enforcement remains 2.15; generalized stable diagnostics remain 2.16.
 
 Ajv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
 
@@ -360,16 +368,17 @@ interface GraphCapabilityIntentV1 {
 Semantics:
 
 ```text
-graph required/optional requests
-        ∩
-user/project/runtime grants
-        −
-graph self-deny
-        ↓
-effective authority
+graph required + node manifest hard requirements
+                + graph optional requests
+                          ∩
+              external compile grants
+                          −
+                 graph self-deny
+                          ↓
+                 effective authority
 ```
 
-`required` means compilation/execution must fail if the external authority is unavailable. `optional` may be used only when externally granted. `deny` is a graph self-restriction and can only reduce authority.
+Graph `required` means compilation must fail if the external authority is unavailable. Node manifest `requiredCapabilities` are hard requirements even if the graph omits them. Graph `optional` may be used only when externally granted. Graph `deny` is a self-restriction and can only reduce authority; denying a hard node/graph requirement makes the graph invalid.
 
 There is deliberately no graph-level `allow` field that grants power.
 
