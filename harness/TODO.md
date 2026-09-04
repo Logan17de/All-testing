@@ -12,7 +12,7 @@ We implement this list in order. Do not jump ahead unless an earlier item is blo
 - [x] 0.6 Add `.gitignore` rules for local DB, runtime state, logs, and secrets.
 - [x] 0.7 Add `/api/health`.
 - [x] 0.8 Add basic startup test.
-- [ ] 0.9 Fix the root typecheck so each workspace owns its own TypeScript configuration.
+- [x] 0.9 Fix the root typecheck so each workspace owns its own TypeScript configuration.
 - [ ] 0.10 Commit `package-lock.json` and add a Node version pin.
 - [ ] 0.11 Add CI for install, typecheck, lint, and tests.
 - [ ] 0.12 Add `data/.gitkeep` with the matching `.gitignore` negation, plus `tests/`.
@@ -212,4 +212,4 @@ Only after the core loop is stable:
 
 ## Next action
 
-**0.9 — Fix the root typecheck.**
+**0.10 — Commit `package-lock.json` and add a Node version pin.**
