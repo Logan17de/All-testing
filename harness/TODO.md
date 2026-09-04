@@ -6,7 +6,7 @@ We implement this list in order. Do not jump ahead unless an earlier item is blo
 
 - [x] 0.1 Create `harness/package.json` and workspace layout.
 - [x] 0.2 Add TypeScript, linting, formatting, and test configuration.
-- [ ] 0.3 Create `apps/web` Next.js app.
+- [x] 0.3 Create `apps/web` Next.js app.
 - [ ] 0.4 Create `packages/core`, `packages/db`, `packages/models`, `packages/tools`, and `packages/shared`.
 - [ ] 0.5 Add `.env.example` with placeholders only.
 - [ ] 0.6 Add `.gitignore` rules for local DB, runtime state, logs, and secrets.
@@ -203,4 +203,4 @@ Only after the core loop is stable:
 
 ## Next action
 
-**0.3 — Create `apps/web` Next.js app.**
+**0.4 — Create the core package workspaces.**
