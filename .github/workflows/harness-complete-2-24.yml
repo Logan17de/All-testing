@@ -1,0 +1,97 @@
+name: Harness complete 2.24 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-24.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Freeze 2.24 and advance 2.25
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              "harness/TODO.md": [
+                  (
+                      "- [ ] 2.24 Add invalid-graph golden diagnostic tests.",
+                      "- [x] 2.24 Add invalid-graph golden diagnostic tests.",
+                  ),
+              ],
+              "harness/README.md": [
+                  (
+                      "2.24 golden diagnostic tests          ▶ CURRENT\n2.25 compiler stress tests            ⏳",
+                      "2.24 golden diagnostic tests          ✅\n2.25 compiler stress tests            ▶ CURRENT",
+                  ),
+                  (
+                      "`harness.compiler/v1` remains the compiler behavior identity because 2.22 is its first lowering implementation, not a semantic change after v1 was established.",
+                      "`harness.compiler/v1` remains the compiler behavior identity because 2.22 is its first lowering implementation, not a semantic change after v1 was established. 2.24 now freezes representative invalid-graph output in `graph-json-v1-diagnostics.golden.test.ts`: exact full public diagnostics are asserted for shape short-circuit, semantic short-circuit, and a compiler-facing graph that simultaneously produces a cycle, unavailable required capability, and secret-literal violation. The golden suite locks codes, messages, stages, JSON Pointer paths, related SCC node/edge references, cross-stage ordering, deterministic byte output, and the guarantee that secret literal material never appears in diagnostics. No production validator behavior changed in 2.24.",
+                  ),
+              ],
+              "harness/PLAN.md": [
+                  (
+                      "           └─ 2.24 golden diagnostic tests                           ▶ CURRENT",
+                      "           ├─ 2.24 golden diagnostic tests                           ✅\n           └─ 2.25 generated-graph compiler stress tests                  ▶ CURRENT",
+                  ),
+                  (
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.24 current** |",
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.25 current** |",
+                  ),
+                  (
+                      "> **Phase 2 / Item 2.24 — Add invalid-graph golden diagnostic tests.**",
+                      "> **Phase 2 / Item 2.25 — Add generated-graph compiler stress tests.**",
+                  ),
+              ],
+              "harness/GRAPH.md": [
+                  (
+                      "The unified facade short-circuits on shape failure, then on semantic failure, so later passes do not flood callers with derivative prerequisite errors. After those prerequisites succeed, 2.8-2.15 run in frozen order and are normalized into the common location model. Diagnostic ordering is deterministic, secret material is never added to normalized output, and this stage performs no source normalization or IR lowering. Those begin with 2.17.",
+                      "The unified facade short-circuits on shape failure, then on semantic failure, so later passes do not flood callers with derivative prerequisite errors. After those prerequisites succeed, 2.8-2.15 run in frozen order and are normalized into the common location model. Diagnostic ordering is deterministic, secret material is never added to normalized output, and this stage performs no source normalization or IR lowering. Those begin with 2.17.\n\n2.24 freezes this public diagnostic behavior with exact golden invalid-graph tests rather than introducing another diagnostic layer. `graph-json-v1-diagnostics.golden.test.ts` asserts the complete diagnostic objects for an unsupported shape property, a duplicate-node semantic failure, and a compiler-facing graph containing an SCC cycle plus unavailable graph-required capability and a literal source targeting a secret-only input. This locks shape/semantic short-circuit behavior, later-stage ordering (`acyclicity` before `capability-policy` before `secret-bindings` for that fixture), stable messages/codes, JSON Pointer locations, SCC related-node/edge sets, byte-for-byte repeatability, and secret non-leakage. 2.24 required no production validator changes; future changes to this frozen public diagnostic surface must be deliberate rather than silently rewriting expected output.",
+                  ),
+              ],
+          }
+
+          for filename, edits in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"missing expected text in {filename}: {old[:180]}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+      - name: Format tracker docs
+        working-directory: harness
+        run: npx prettier --write TODO.md README.md PLAN.md GRAPH.md
+
+      - name: Commit tracker freeze and remove helper
+        run: |
+          rm .github/workflows/harness-complete-2-24.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/GRAPH.md .github/workflows/harness-complete-2-24.yml
+          git commit -m "docs(harness): freeze 2.24 and advance 2.25"
+          git push origin HEAD:zet-harness-v1
