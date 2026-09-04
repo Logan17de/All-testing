@@ -89,7 +89,8 @@ function clonePluginPins(
  *
  * SHA-256 runs through Web Crypto, keeping this package free of a Node-only crypto
  * import while remaining available in the Node 24 runtime and future editor-side
- * verification contexts.
+ * verification contexts. 2.23 locks exact end-to-end v1 digest vectors over
+ * these domains; future byte changes must therefore be deliberate contract work.
  */
 export async function recordGraphCompilerIdentityV1(
   input: GraphCompilerIdentityInputV1,
