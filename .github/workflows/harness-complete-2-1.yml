@@ -1,0 +1,52 @@
+name: Harness complete 2.1 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-1.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  advance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+      - name: Advance 2.1 to 2.2
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              Path("harness/TODO.md"): [
+                  ('- [ ] 2.1 Create a lightweight `packages/graph` workspace for Graph source, compiler, and IR modules.', '- [x] 2.1 Create a lightweight `packages/graph` workspace for Graph source, compiler, and IR modules.'),
+                  ('**2.1 — Create a lightweight `packages/graph` workspace for Graph source, compiler, and IR modules.**', '**2.2 — Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.**'),
+              ],
+              Path("harness/PLAN.md"): [
+                  ('           └─ 2.1 graph workspace               ▶ CURRENT', '           ├─ 2.1 graph workspace               ✅\n           └─ 2.2 Graph JSON v1                  ▶ CURRENT'),
+                  ('| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.1 current** |', '| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.2 current** |'),
+                  ('> **Phase 2 / Item 2.1 — Create a lightweight `packages/graph` workspace for Graph source, compiler, and IR modules.**', '> **Phase 2 / Item 2.2 — Define Graph JSON v1: graph metadata, nodes, ports/bindings, edges, policies, options, editor-only metadata.**'),
+              ],
+          }
+
+          for path, pairs in replacements.items():
+              text = path.read_text(encoding="utf-8")
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f"Expected text not found in {path}: {old}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding="utf-8", newline="\n")
+      - name: Commit tracker changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/PLAN.md
+          git commit -m "docs(harness): complete graph workspace milestone"
+          git pull --rebase origin zet-harness-v1
+          git push origin HEAD:zet-harness-v1
