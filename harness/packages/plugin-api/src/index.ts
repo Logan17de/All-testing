@@ -89,6 +89,33 @@ export interface PluginManifest {
 /** Stable globally-namespaced node type, for example `builtin.transform.json`. */
 export type NodeType = string;
 
+/** Stable semantic port name used by Graph JSON and node executors. */
+export type NodePortName = string;
+
+/**
+ * One compiler-readable node input port.
+ *
+ * `multiple` controls connection/binding cardinality: false/omitted accepts at
+ * most one source, while true allows multiple sources. The compiler defines
+ * deterministic aggregation rules when multi-source execution lands.
+ *
+ * `secret` marks a secret-only input. Graph validation must reject literals,
+ * public graph inputs, and node data edges for that port; only an opaque secret
+ * reference may bind it. Secret material itself never belongs in Graph JSON.
+ */
+export interface NodeInputPort {
+  readonly schema: JsonSchema;
+  readonly required?: boolean;
+  readonly multiple?: boolean;
+  readonly secret?: boolean;
+}
+
+/** One compiler-readable node output port. */
+export interface NodeOutputPort {
+  readonly schema: JsonSchema;
+  readonly required?: boolean;
+}
+
 /** Small scheduler/compiler-facing primitive families. */
 export type NodePrimitiveFamily = "pure" | "effect" | "control" | "interrupt";
 
@@ -144,27 +171,28 @@ export interface NodeBehavior {
 /**
  * Static metadata for one versioned node type.
  *
- * Schemas and behavior metadata are always present so the compiler/editor can
- * inspect the node contract without executing its implementation.
+ * Input/output ports are first-class so graph validation never has to infer a
+ * port model from arbitrary object-shaped JSON Schema. Port schemas, config
+ * schema, and behavior metadata are all inspectable without executing node code.
  */
 export interface NodeManifest {
   readonly type: NodeType;
   readonly version: Version;
   readonly title: string;
   readonly description?: string;
-  readonly inputSchema: JsonSchema;
+  readonly inputs: Readonly<Record<NodePortName, NodeInputPort>>;
+  readonly outputs: Readonly<Record<NodePortName, NodeOutputPort>>;
   readonly configSchema: JsonSchema;
-  readonly outputSchema: JsonSchema;
   readonly behavior: NodeBehavior;
 }
 
-/** JSON-safe values supplied to one node execution. */
+/** JSON-safe values supplied to one node execution, keyed by input port name. */
 export interface NodeExecutionRequest {
   readonly inputs: JsonObject;
   readonly config: JsonObject;
 }
 
-/** JSON-safe result produced by one node execution. */
+/** JSON-safe result produced by one node execution, keyed by output port name. */
 export interface NodeExecutionResult {
   readonly outputs: JsonObject;
 }
