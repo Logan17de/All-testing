@@ -1,0 +1,97 @@
+name: Harness complete 2.16 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-16.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Freeze 2.16 and advance 2.17
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              "harness/TODO.md": [
+                  (
+                      "- [ ] 2.16 Return structured diagnostics with codes plus node/edge/path references.",
+                      "- [x] 2.16 Return structured diagnostics with codes plus node/edge/path references.",
+                  ),
+              ],
+              "harness/README.md": [
+                  (
+                      "2.16 structured diagnostics         ▶ CURRENT\n2.17+ compiler/IR                    ⏳",
+                      "2.16 structured diagnostics         ✅\n2.17 normalization/version pins       ▶ CURRENT\n2.18+ compiler/IR                     ⏳",
+                  ),
+                  (
+                      "2.15 separately enforces secret-only input sources: an input declared `secret: true` may receive only an opaque `secret` binding; literal values, public graph inputs, and node data edges are rejected. The pass never scans ordinary values to guess secrets, never resolves secret references, and never echoes literal values or secret refs in diagnostics. Required/cardinality rules remain 2.7, while provider existence/authorization/resolution remain runtime concerns.",
+                      "2.15 separately enforces secret-only input sources: an input declared `secret: true` may receive only an opaque `secret` binding; literal values, public graph inputs, and node data edges are rejected. The pass never scans ordinary values to guess secrets, never resolves secret references, and never echoes literal values or secret refs in diagnostics. Required/cardinality rules remain 2.7, while provider existence/authorization/resolution remain runtime concerns. 2.16 adds one stable compiler/editor diagnostic facade over the frozen validation stack. `checkGraphJsonV1Diagnostics` returns Harness-owned codes, safe messages, stage names, JSON Pointer source paths when one precise location exists, direct node/edge/entrypoint/graph-port references, and related node/edge sets for multi-object findings such as SCCs. Shape/Ajv failures are normalized before exposure, 2.6-2.7 now have structured semantic diagnostics, existing 2.8-2.15 diagnostic codes remain unchanged, and shape/semantic prerequisite failures short-circuit derivative stages to avoid diagnostic cascades.",
+                  ),
+              ],
+              "harness/PLAN.md": [
+                  (
+                      "           └─ 2.16 structured diagnostics                  ▶ CURRENT",
+                      "           ├─ 2.16 structured diagnostics                  ✅\n           └─ 2.17 normalization/version pins                 ▶ CURRENT",
+                  ),
+                  (
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.16 current** |",
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.17 current** |",
+                  ),
+                  (
+                      "> **Phase 2 / Item 2.16 — Return structured diagnostics with codes plus node/edge/path references.**",
+                      "> **Phase 2 / Item 2.17 — Normalize defaults and pin resolved node/plugin versions.**",
+                  ),
+              ],
+              "harness/GRAPH.md": [
+                  (
+                      "2.15 is validation only. It does not normalize, redact, encrypt, materialize, or persist secret values. Generalized stable diagnostics with common node/edge/path locations remain 2.16.\n\nAjv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.",
+                      "2.15 is validation only. It does not normalize, redact, encrypt, materialize, or persist secret values.\n\n### Graph JSON v1 structured diagnostics\n\n2.16 introduces the stable compiler/editor-facing `GraphDiagnostic` boundary and `checkGraphJsonV1Diagnostics(value, context)`. Every emitted diagnostic has a Harness-owned `code`, safe `message`, and validation `stage`. When one precise source location exists, `path` is a JSON Pointer into Graph JSON; direct `nodeId`, `edgeId`, `entrypointId`, `graphPortId`, and `port` references are preserved when available. Multi-object findings such as SCCs use `relatedNodeIds`/`relatedEdgeIds` rather than pretending one source path owns the whole error.\n\nShape validation now normalizes internal Draft 2020-12 engine failures into stable Harness codes such as `GRAPH_SHAPE_REQUIRED_PROPERTY`, `GRAPH_SHAPE_ADDITIONAL_PROPERTY`, and `GRAPH_SHAPE_INVALID_VALUE`; Ajv error objects, keyword names, and params remain private. The 2.6-2.7 semantic stage now also has structured codes for duplicate IDs, unresolved exact manifests/references, unknown ports, missing required inputs, and cardinality excess while preserving the existing boolean API. Existing 2.8-2.15 codes and semantics are not renamed or broadened.\n\nThe unified facade short-circuits on shape failure, then on semantic failure, so later passes do not flood callers with derivative prerequisite errors. After those prerequisites succeed, 2.8-2.15 run in frozen order and are normalized into the common location model. Diagnostic ordering is deterministic, secret material is never added to normalized output, and this stage performs no source normalization or IR lowering. Those begin with 2.17.\n\nAjv error objects are not part of any public contract. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, runtime records, or the Harness diagnostic contract.",
+                  ),
+              ],
+          }
+
+          for filename, edits in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"missing expected text in {filename}: {old[:180]}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+      - name: Format tracker docs
+        working-directory: harness
+        run: npx prettier --write TODO.md README.md PLAN.md GRAPH.md
+
+      - name: Commit tracker freeze and remove helper
+        run: |
+          rm .github/workflows/harness-complete-2-16.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/GRAPH.md .github/workflows/harness-complete-2-16.yml
+          git commit -m "docs(harness): freeze 2.16 and advance 2.17"
+          git push origin HEAD:zet-harness-v1
