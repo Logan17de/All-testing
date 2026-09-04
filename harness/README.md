@@ -98,8 +98,8 @@ Phase 0 and Phase 1 are complete. Phase 2 is now in progress on `zet-harness-v1`
 ```text
 Phase 1 plugin + node contract  ✅ COMPLETE
 
-2.1 graph workspace             ▶ CURRENT
-2.2 Graph JSON v1               ⏳
+2.1 graph workspace             ✅
+2.2 Graph JSON v1               ▶ CURRENT
 2.3 JSON Schema dialect         ⏳
 2.4+ validator/compiler/IR      ⏳
 ```
