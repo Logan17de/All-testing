@@ -236,7 +236,13 @@ This pass intentionally does **not** reject duplicate IDs, unresolved node refer
 
 For each manifest input, 2.7 counts all non-edge bindings plus incoming data edges as input sources. `required: true` requires at least one source; ports without `multiple: true` reject more than one source. Multiple-input ports may accept more than one source. The validator is read-only and never normalizes or rewrites Graph JSON.
 
-The resolver remains a small structural `NodeManifestResolver` interface rather than a dependency on `packages/core`, so the graph/compiler package stays registry-implementation-neutral. Schema/type compatibility is deliberately reserved for 2.8; structured control-port meaning, topology/liveness, cycles, policies, secret-only enforcement, and stable diagnostics remain later passes.
+The resolver remains a small structural `NodeManifestResolver` interface rather than a dependency on `packages/core`, so the graph/compiler package stays registry-implementation-neutral.
+
+### Graph JSON v1 port compatibility
+
+2.8 is a separate compiler-facing stage/API and is not merged into the 2.6–2.7 semantic validator. Its v1 rules are intentionally closed: exact schema equality, an impossible (`false`) source, a universal target, the same explicitly declared primitive type into an unconstrained target, and `integer` → `number`. Anything requiring JSON-Schema implication reasoning — including `enum`, numeric/string constraints, `allOf`, `$ref`, or constrained targets — is rejected as `GRAPH_PORT_COMPATIBILITY_UNSUPPORTED` unless the schemas are exactly equal. Unknown compatibility is never silently accepted.
+
+An impossible (`false`) source is mathematically compatible with any target, but that says nothing about whether the producer can ever yield a live value. Reachability/liveness owns that question in 2.9; compatibility must not hide or absorb it. Structured control-port meaning, cycles, policies, secret-only enforcement, and generalized stable diagnostics remain later passes.
 
 Ajv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
 
