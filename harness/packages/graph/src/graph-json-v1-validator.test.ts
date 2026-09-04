@@ -74,7 +74,8 @@ describe("Graph JSON v1 shape validation", () => {
 
   it("rejects the wrong source-format version and missing required top-level fields", () => {
     const wrongVersion = { ...(validGraph() as Record<string, unknown>), schemaVersion: 2 };
-    const { nodes: _nodes, ...missingNodes } = validGraph() as Record<string, unknown>;
+    const missingNodes = { ...(validGraph() as Record<string, unknown>) };
+    Reflect.deleteProperty(missingNodes, "nodes");
 
     expect(validateGraphJsonV1Shape(wrongVersion)).toBe(false);
     expect(validateGraphJsonV1Shape(missingNodes)).toBe(false);
