@@ -201,6 +201,31 @@ Examples:
 
 This boundary keeps diagnostics explainable, the compiler deterministic, and the default dependency/runtime surface small.
 
+### Ajv boundary decision
+
+Zet Harness v1 uses **Ajv 8.20.0** as the internal Draft 2020-12 engine for graph-package shape/value validation.
+
+The dependency boundary is intentionally narrow:
+
+```text
+@zet-harness/plugin-api
+  exposes JsonSchema only
+
+@zet-harness/graph
+  owns Ajv internally
+  ↓
+  shape/value validation
+  ↓
+  Harness diagnostics
+
+scheduler/runtime/port compatibility
+  do not depend on Ajv
+```
+
+The internal engine is created with strict schema checking, all-errors collection, and format assertions disabled. Draft 2020-12 treats formats as annotations unless an assertion vocabulary is deliberately enabled, so v1 does not add `ajv-formats` without a concrete product need.
+
+Ajv error objects are not part of any public contract. Shape validation will translate them into Harness-owned diagnostics when item 2.5 lands. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
+
 ## Graph JSON v1
 
 `@zet-harness/graph` defines the portable source contract. The implementation lives in `packages/graph/src/graph-json-v1.ts` and is re-exported from the package entrypoint.
