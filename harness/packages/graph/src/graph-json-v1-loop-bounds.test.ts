@@ -166,12 +166,9 @@ describe("Graph JSON v1 compiler-visible loop bounds", () => {
   });
 
   it("does not absorb 2.13 graph resource-policy validation", () => {
-    const value = graph(
-      [node("loop", "loop", { maxIterations: 5 })],
-      [],
-      [],
-      { maxNodeExecutions: 1 },
-    );
+    const value = graph([node("loop", "loop", { maxIterations: 5 })], [], [], {
+      maxNodeExecutions: 1,
+    });
 
     expect(validateGraphJsonV1LoopBounds(value, resolver)).toBe(true);
   });

@@ -13,9 +13,7 @@ import type { NodeManifestResolver } from "./graph-json-v1-semantic-validator.js
 export const GRAPH_LOOP_MAX_ITERATIONS_CONFIG_KEY = "maxIterations" as const;
 
 export type GraphLoopBoundDiagnosticCode =
-  | "GRAPH_LOOP_BOUND_PREREQUISITE_FAILED"
-  | "GRAPH_LOOP_BOUND_REQUIRED"
-  | "GRAPH_LOOP_BOUND_INVALID";
+  "GRAPH_LOOP_BOUND_PREREQUISITE_FAILED" | "GRAPH_LOOP_BOUND_REQUIRED" | "GRAPH_LOOP_BOUND_INVALID";
 
 export interface GraphLoopBoundDiagnostic {
   readonly code: GraphLoopBoundDiagnosticCode;
