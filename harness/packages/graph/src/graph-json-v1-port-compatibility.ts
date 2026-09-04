@@ -40,13 +40,17 @@ const NON_CONSTRAINING_TARGET_KEYS = new Set([
   "writeOnly",
 ]);
 
+function isJsonArray(value: JsonValue): value is readonly JsonValue[] {
+  return Array.isArray(value);
+}
+
 function jsonValuesExactlyEqual(left: JsonValue, right: JsonValue): boolean {
   if (left === right) {
     return true;
   }
 
-  if (Array.isArray(left) || Array.isArray(right)) {
-    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+  if (isJsonArray(left) || isJsonArray(right)) {
+    if (!isJsonArray(left) || !isJsonArray(right) || left.length !== right.length) {
       return false;
     }
 
@@ -57,8 +61,8 @@ function jsonValuesExactlyEqual(left: JsonValue, right: JsonValue): boolean {
     return false;
   }
 
-  const leftObject = left as JsonObject;
-  const rightObject = right as JsonObject;
+  const leftObject: JsonObject = left;
+  const rightObject: JsonObject = right;
   const leftKeys = Object.keys(leftObject).sort();
   const rightKeys = Object.keys(rightObject).sort();
 
