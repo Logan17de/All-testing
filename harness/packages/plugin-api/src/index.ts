@@ -19,6 +19,15 @@ export interface SchemaReference {
   readonly $ref: string;
 }
 
+/**
+ * Dependency-free public JSON Schema document shape.
+ *
+ * JSON Schema permits an object schema or the boolean schemas `true`/`false`.
+ * The exact dialect/version is frozen with Graph JSON in Phase 2; this type is
+ * intentionally structural so plugins do not depend on a validator package.
+ */
+export type JsonSchema = JsonObject | boolean;
+
 /** Version identifiers stay strings so plugins are not forced into one scheme. */
 export type Version = string;
 
@@ -105,16 +114,21 @@ export interface HarnessPlugin {
 export type NodeType = string;
 
 /**
- * Static identity/display metadata for one versioned node type.
+ * Static metadata for one versioned node type.
  *
- * Schemas, behavior metadata, effects, recovery policy, execution mode, and
- * capabilities are layered onto this manifest by the next contract steps.
+ * Input/config/output schemas are always present so the compiler/editor can
+ * inspect a node contract without executing its implementation. Behavior,
+ * effects, recovery policy, execution mode, and capabilities are layered on by
+ * the next contract step.
  */
 export interface NodeManifest {
   readonly type: NodeType;
   readonly version: Version;
   readonly title: string;
   readonly description?: string;
+  readonly inputSchema: JsonSchema;
+  readonly configSchema: JsonSchema;
+  readonly outputSchema: JsonSchema;
 }
 
 /** JSON-safe values supplied to one node execution. */
