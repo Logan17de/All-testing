@@ -11,9 +11,18 @@ We implement this list in order. Do not jump ahead unless an earlier item is blo
 - [x] 0.5 Add `.env.example` with placeholders only.
 - [x] 0.6 Add `.gitignore` rules for local DB, runtime state, logs, and secrets.
 - [x] 0.7 Add `/api/health`.
-- [ ] 0.8 Add basic startup test.
+- [x] 0.8 Add basic startup test.
+- [ ] 0.9 Fix the root typecheck so each workspace owns its own TypeScript configuration.
+- [ ] 0.10 Commit `package-lock.json` and add a Node version pin.
+- [ ] 0.11 Add CI for install, typecheck, lint, and tests.
+- [ ] 0.12 Add `data/.gitkeep` with the matching `.gitignore` negation, plus `tests/`.
+- [ ] 0.13 Add Next/React lint rules and move TypeScript linting to type-checked rules.
+- [ ] 0.14 Add a project `LICENSE`.
+- [ ] 0.15 Wire one internal package into `apps/web` and add `transpilePackages` to prove the workspace graph.
+- [ ] 0.16 Remove or relocate the unrelated physical-safety `deep-research-report.md`.
+- [ ] 0.17 Extend `/api/health` with runtime/database checks once those components exist; this item is deferred until the required runtime/database decisions are implemented.
 
-**Checkpoint:** `npm install && npm run dev` starts successfully.
+**Checkpoint:** clean install → typecheck → lint → tests → startup smoke test all pass.
 
 ---
 
@@ -203,4 +212,4 @@ Only after the core loop is stable:
 
 ## Next action
 
-**0.8 — Add basic startup test.**
+**0.9 — Fix the root typecheck.**
