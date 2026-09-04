@@ -56,7 +56,7 @@ The kernel owns only lifecycle/registration/configuration/security primitives. P
 - UI contributions
 - external workers/event sources
 
-A small public `@zet-harness/plugin-api` package will keep third-party plugins away from private core internals.
+A small public `@zet-harness/plugin-api` package keeps third-party plugins away from private core internals.
 
 Trusted in-process plugins stay extremely cheap. A truly isolated plugin mode can be added later for untrusted/community extensions without forcing every plugin into a subprocess today.
 
@@ -93,11 +93,20 @@ The visual/editor representation is source code, not runtime state. The schedule
 
 ## Status
 
-Phase 0 foundation is nearly closed on `zet-harness-v1`. The next engineering order is:
+Phase 0 is complete. Phase 1 is in progress on `zet-harness-v1`:
 
 ```text
-license + workspace proof
-→ plugin/node contract
+1.1 plugin-api package   ✅
+1.2 public primitives    ✅
+1.3 plugin lifecycle     ✅
+1.4 plugin host          ✅
+1.5 typed registry       ▶ CURRENT
+```
+
+Then:
+
+```text
+plugin/node contract
 → Graph JSON + compiler + Execution IR
 → in-memory scheduler
 → durable Node + SQLite runtime
