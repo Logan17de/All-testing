@@ -8,5 +8,5 @@ export * from "./graph-json-v1-port-compatibility.js";
 export * from "./graph-json-v1-liveness.js";
 // 2.10 rejects every executable SCC/self-loop; 2.11 does not grant loop exceptions.
 export * from "./graph-json-v1-acyclicity.js";
-// 2.11 reserves/validates structured control names only; no runtime behavior or IR lowering lands here.
+// 2.11 reserves/validates static structured control ports only; execution and IR lowering remain future stages.
 export * from "./graph-json-v1-structured-control.js";
