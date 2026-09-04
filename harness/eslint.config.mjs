@@ -16,6 +16,16 @@ export default tseslint.config(
     ...js.configs.recommended,
     files: ["**/*.js", "**/*.mjs", "**/*.cjs"],
   },
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        fetch: "readonly",
+        console: "readonly",
+      },
+    },
+  },
   ...tseslint.configs.recommended.map((config) => ({
     ...config,
     files: typedFiles,
