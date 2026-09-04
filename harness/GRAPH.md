@@ -14,11 +14,11 @@ The user edits a graph. The harness validates and compiles that graph into a sma
 ```text
 Graph editor
     ↓
-Draft graph document
+Graph JSON source
     ↓ validate
 Semantic graph revision
     ↓ compile
-Execution plan / IR
+Execution IR
     ↓
 Harness scheduler
     ├─ model plugin
@@ -29,44 +29,43 @@ Harness scheduler
 
 ## Three graph representations
 
-### 1. Draft document
+### 1. Source/editor document
 
-UI/editor state. It may contain:
+Portable Graph JSON plus optional editor-only state. It may contain:
 
 - node positions
 - zoom/viewport
-- comments
+- comments/annotations
 - collapsed panels
-- temporary invalid wiring
 - editor-only metadata
 
 Changing layout must not change runtime semantics.
 
 ### 2. Semantic graph revision
 
-Immutable, portable execution definition.
+Immutable, portable execution definition produced after validation/normalization.
 
-Store it as versioned canonical JSON. It contains only execution-relevant information:
+It contains only execution-relevant information:
 
-- nodes
-- typed ports
+- pinned node types/versions
+- public graph inputs/outputs
+- node configuration
+- literal/graph-input/secret bindings
 - data edges
 - control edges
-- node configuration
-- required capabilities
-- graph policies
-- entrypoints / outputs
+- graph policies/options
+- entrypoints
 
-### 3. Compiled execution plan
+### 3. Compiled Execution IR
 
-Small normalized IR used by the scheduler. It resolves:
+Small normalized IR used by the scheduler. It eventually resolves:
 
 - port bindings
-- executor IDs
+- executor identities
 - branch transitions
-- loop boundaries
+- structured control regions
 - joins
-- retry / timeout policy
+- retry/timeout policy
 - required plugin capabilities
 
 The compiler output is runtime data, not an editor format.
@@ -76,56 +75,122 @@ The compiler output is runtime data, not an editor format.
 Do not make one arrow mean two things.
 
 - **Data edge**: moves a typed value from an output port to an input port.
-- **Control edge**: determines which node may execute next.
+- **Control edge**: determines scheduling/control flow and carries no value.
 
-This makes conditionals, loops, joins, retries and debugging much easier to reason about.
-
-## Initial node language
-
-The first graph language should be deliberately small:
-
-1. Input
-2. Transform
-3. Model Call
-4. Conditional
-5. Loop
-6. Join
-7. Tool Call
-8. Subgraph
-9. Output
-
-No unrestricted Code node in the first version.
+Node-to-node values are expressed only with data edges. Node input `bindings` are reserved for literals, public graph inputs, and secret references. This prevents two competing representations of the same dependency.
 
 ## Plugin-first node model
 
-Graph nodes are another plugin surface.
+Graph nodes resolve against the universal public `NodeManifest`/`NodeDefinition` contract from `@zet-harness/plugin-api`.
 
-A plugin may register a `GraphNodeType` describing:
-
-```ts
-interface GraphNodeType {
-  type: string;
-  version: number;
-  title: string;
-  inputs: PortDefinition[];
-  outputs: PortDefinition[];
-  configSchema: JsonSchema;
-  requiredCapabilities?: string[];
-  executor: string;
-}
-```
-
-The core graph/compiler package does not import provider or tool implementations. It only resolves registered node types/executors through public registries.
+The graph package stores only a pinned node `type` + `version` and source configuration/bindings. It does not import provider/tool implementations.
 
 Examples:
 
-- OpenAI-compatible plugin registers a model-call executor/provider capability.
-- native-tools plugin registers tool-call capabilities.
-- ComfyUI plugin can register image/video generation nodes later.
-- Blender plugin can register render/import/export nodes later.
-- an MCP bridge can expose selected MCP tools as graph-callable nodes.
+- an OpenAI-compatible plugin can register model-call nodes;
+- native tools can register filesystem/shell/Git nodes;
+- ComfyUI can register image/video generation nodes later;
+- Blender can register render/import/export nodes later;
+- an MCP bridge can expose selected tools as graph-callable nodes later.
 
-Disabled plugins contribute no active executors.
+Disabled plugins contribute no active definitions/executors.
+
+## Graph JSON v1
+
+`@zet-harness/graph` defines the portable source contract. The top-level shape is:
+
+```json
+{
+  "schemaVersion": 1,
+  "graphId": "example",
+  "revisionId": "rev-001",
+  "metadata": {},
+  "inputs": [],
+  "outputs": [],
+  "nodes": [],
+  "edges": [],
+  "entrypoints": [],
+  "policies": {},
+  "options": {},
+  "editor": {}
+}
+```
+
+### Nodes
+
+Every node invocation pins the plugin-defined identity it was authored against:
+
+```json
+{
+  "id": "summarize",
+  "type": "provider.model.summarize",
+  "version": "1.2.0",
+  "config": {},
+  "bindings": []
+}
+```
+
+Node versions are never implicit in Graph JSON v1.
+
+### Bindings
+
+Non-edge node inputs use explicit tagged bindings:
+
+```text
+literal      → JSON value embedded in the graph
+graph-input  → public graph input
+secret       → opaque secret reference only
+```
+
+Secret material itself must never be embedded in the graph source.
+
+### Edges
+
+Edges are tagged and semantically separate:
+
+```json
+{
+  "id": "data-a-b",
+  "kind": "data",
+  "from": { "nodeId": "a", "port": "result" },
+  "to": { "nodeId": "b", "port": "input" }
+}
+```
+
+```json
+{
+  "id": "control-a-b",
+  "kind": "control",
+  "from": { "nodeId": "a", "port": "success" },
+  "to": { "nodeId": "b" }
+}
+```
+
+Named control ports are reserved for later structured router/join/loop/human/subgraph semantics. Graph JSON v1 does not grant models arbitrary jump-to-node behavior.
+
+### Policies and options
+
+Graph-local policies may carry hard execution limits such as:
+
+- maximum node executions;
+- maximum parallelism;
+- maximum wall time;
+- capability allow/deny constraints.
+
+The host/runtime may always impose stricter limits.
+
+The initial options surface contains only a default entrypoint selection. Additional execution semantics should be added deliberately, not as an open bag of runtime flags.
+
+### Editor-only metadata
+
+All authoring/layout state lives under the top-level `editor` bucket:
+
+- viewport;
+- node positions/collapse state;
+- annotations;
+- optional JSON editor data.
+
+The compiler must discard this entire bucket before creating immutable execution semantics. React Flow objects are never persisted directly as the public graph contract.
 
 ## Graph editor
 
@@ -135,51 +200,24 @@ Important boundary:
 
 > React Flow handles are UI objects. Harness ports are semantic objects.
 
-React Flow must never become the persisted graph contract or execution engine.
-
 To protect the lightweight base install:
 
 - keep React Flow in the web/editor package only;
 - lazy-load the graph editor route;
 - the headless runtime must not depend on React Flow or DOM packages;
-- a user who never opens/installs the visual editor pays no runtime cost in the harness daemon.
-
-## Persistence
-
-Canonical JSON is the public graph format.
-
-Suggested minimal shape:
-
-```json
-{
-  "schemaVersion": 1,
-  "graphId": "example",
-  "revisionId": "...",
-  "nodes": [],
-  "edges": [],
-  "entrypoints": [],
-  "outputs": [],
-  "policies": {
-    "maxNodeExecutions": 100,
-    "maxParallelism": 4,
-    "maxWallTimeMs": 300000
-  }
-}
-```
-
-The database stores drafts and immutable revisions, but saved graph meaning must not depend on a third-party framework's internal object model.
+- users who never open the visual editor pay no runtime cost in the daemon.
 
 ## Deterministic scheduler boundary
 
-A Conditional node evaluates a harness-owned predicate/result and selects a declared edge.
+A Conditional/router node eventually evaluates a harness-owned or schema-constrained result and selects only a declared control edge.
 
-A model-driven router is allowed only as an explicit model node with schema-constrained output, e.g.:
+A model-driven router may produce something like:
 
 ```json
 { "route": "research" }
 ```
 
-The harness validates that value against the allowed routes and then selects the edge. The model never receives permission to jump to arbitrary node IDs.
+The harness validates that value against declared routes and chooses the matching edge. The model never receives permission to jump to arbitrary node IDs.
 
 ## Execution and debugging
 
@@ -200,11 +238,7 @@ Every node execution should eventually expose:
 
 Graph runs use the same durable event stream as ordinary agent runs.
 
-## What we deliberately do not adopt from the research baseline
-
-The research report recommends a production-heavy stack including FastAPI/Python, PostgreSQL, Temporal, WebSockets, Yjs and container/microVM infrastructure.
-
-Those are useful references, not our baseline.
+## Lightweight boundary
 
 Zet Harness v1 stays:
 
@@ -213,24 +247,19 @@ Zet Harness v1 stays:
 - HTTP + SSE
 - one lightweight runtime daemon
 - optional Next.js web UI
-- in-process trusted plugins
+- in-process trusted plugins by default
 
-Add Temporal/Postgres/Yjs/isolated workers only if concrete usage requires them.
+Add heavier infrastructure only when concrete usage requires it.
 
-## Implementation timing
-
-Do **not** build the visual editor before the plugin host and deterministic run engine are stable.
-
-Order:
+## Implementation order
 
 ```text
-plugin kernel
-→ persistence
-→ model/tool registries
-→ deterministic agent/run engine
-→ graph schema/compiler
-→ graph executor adapter
-→ React Flow editor
+plugin + node contract
+→ Graph JSON source contract
+→ semantic validator + compiler + Execution IR
+→ in-memory scheduler
+→ durable runtime
+→ visual editor
 ```
 
-This keeps graphical authoring as a powerful front-end to the harness rather than a second runtime competing with it.
+This keeps graphical authoring as a front-end to one deterministic harness runtime rather than creating a second execution engine.
