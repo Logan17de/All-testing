@@ -1,0 +1,47 @@
+name: Harness format fix
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-format-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        working-directory: harness
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install exact tree
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Format
+        working-directory: harness
+        run: npm run format
+
+      - name: Commit formatter output
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/apps/web/tsconfig.json harness/eslint.config.mjs harness/scripts/startup-smoke.mjs harness/tsconfig.json
+          git diff --cached --quiet && exit 0
+          git commit -m "style(harness): apply Prettier to scaffold"
+          git push origin HEAD:zet-harness-v1
