@@ -258,7 +258,13 @@ An impossible (`false`) source is mathematically compatible with any target, but
 
 `checkGraphJsonV1StructuredControl(graph, resolver)` validates those static declarations and their use by control edges/entrypoints. Structured endpoints require explicit declared control ports. Ordinary nodes may still use unported control edges for generic ordering/activation, but arbitrary named control ports on ordinary nodes are rejected. Structured control nodes use primitive family `control`, except human interrupts which use `interrupt`.
 
-This stage is reservation/validation only: it does not choose router branches, execute joins, run loops, suspend/resume humans, invoke subgraphs, or lower structured control into IR. A loop contract does not make a graph cycle legal; 2.10 continues to reject SCCs/self-loops. Compiler-visible bounds for executable loops are a separate 2.12 concern. Policies, secret-only enforcement, and generalized stable diagnostics also remain later passes.
+This stage is reservation/validation only: it does not choose router branches, execute joins, run loops, suspend/resume humans, invoke subgraphs, or lower structured control into IR. A loop contract does not make a graph cycle legal; 2.10 continues to reject SCCs/self-loops.
+
+### Graph JSON v1 compiler-visible loop bounds
+
+2.12 is a separate static stage. Every graph node whose resolved manifest declares `control.kind === "loop"` must carry a top-level `config.maxIterations` value. The value is per node invocation and must be a positive JavaScript safe integer. Missing bounds fail as `GRAPH_LOOP_BOUND_REQUIRED`; malformed bounds fail as `GRAPH_LOOP_BOUND_INVALID`. Unresolved node manifests fail the stage prerequisite explicitly.
+
+The `maxIterations` key has Harness loop meaning only for nodes resolved to a structured loop contract; ordinary node configuration may use the same text without becoming a loop. The fixed top-level location keeps the future compiler deterministic and avoids JSONPath/dynamic-expression inference. 2.12 does not execute loops, interpret stop conditions, lower loop regions into IR, or compare the local bound with graph resource limits. A valid bound still does not legalize a cycle: 2.10 continues to reject every SCC/self-loop until executable loop lowering lands later. Capability/resource policy semantics begin in 2.13; secret-only enforcement and generalized stable diagnostics remain later passes.
 
 Ajv error objects are not part of any public contract. Stable Harness-owned diagnostics are introduced in item 2.16. Replacing Ajv later must not require changing Graph JSON, plugin manifests, compiler semantics, scheduler behavior, or runtime records.
 

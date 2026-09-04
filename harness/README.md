@@ -109,8 +109,9 @@ Phase 1 plugin + node contract  ✅ COMPLETE
 2.9 reachability/liveness        ✅
 2.10 cycle/SCC rejection         ✅
 2.11 structured control contracts ✅
-2.12 compiler-visible loop bounds ▶ CURRENT
-2.13+ compiler/IR                ⏳
+2.12 compiler-visible loop bounds ✅
+2.13 capability/policy validation ▶ CURRENT
+2.14+ compiler/IR                ⏳
 ```
 
 The Graph JSON v1 freeze now includes:
@@ -129,7 +130,7 @@ Ajv is confined to `@zet-harness/graph` as an internal Draft 2020-12 shape/value
 
 `GRAPH_JSON_V1_SCHEMA` plus `validateGraphJsonV1Shape(value)` form the 2.5 outer gate: they accept `unknown` and establish only Graph JSON structure/local constraints. Semantic meaning and stable Harness diagnostics remain separate later passes.
 
-The 2.6–2.7 semantic pass uses a registry-neutral `NodeManifestResolver`: semantic IDs are unique only within their own namespaces, every graph node resolves an exact pinned `type@version`, static node/port and graph-input references must exist, and required/single-vs-multiple input cardinality is enforced across bindings plus data edges. The pass is read-only and remains independent of private core registry implementations. 2.8 remains a separate compiler-facing compatibility stage: exact schemas, universal targets, same primitive types, impossible sources, and integer→number are the only accepted cases. Unsupported inference is rejected with an explicit compatibility diagnostic rather than guessed. 2.9 separately owns potential reachability/liveness, including impossible live sources. 2.10 separately rejects every executable SCC/self-loop across data and control edges. 2.11 reserves explicit manifest-level structured-control contracts for router, all-active join, loop, human interrupt, and subgraph, and validates named control ports without adding runtime behavior or IR lowering. Loop contracts do not override 2.10 cycle rejection. Compiler-visible executable loop bounds are 2.12.
+The 2.6–2.7 semantic pass uses a registry-neutral `NodeManifestResolver`: semantic IDs are unique only within their own namespaces, every graph node resolves an exact pinned `type@version`, static node/port and graph-input references must exist, and required/single-vs-multiple input cardinality is enforced across bindings plus data edges. The pass is read-only and remains independent of private core registry implementations. 2.8 remains a separate compiler-facing compatibility stage: exact schemas, universal targets, same primitive types, impossible sources, and integer→number are the only accepted cases. Unsupported inference is rejected with an explicit compatibility diagnostic rather than guessed. 2.9 separately owns potential reachability/liveness, including impossible live sources. 2.10 separately rejects every executable SCC/self-loop across data and control edges. 2.11 reserves explicit manifest-level structured-control contracts for router, all-active join, loop, human interrupt, and subgraph, and validates named control ports without adding runtime behavior or IR lowering. Loop contracts do not override 2.10 cycle rejection. 2.12 requires every structured loop invocation to carry a compiler-visible `config.maxIterations` positive safe integer. The bound is per invocation, does not make cycles executable, and does not absorb graph resource-policy checks; those begin in 2.13.
 
 Validation ownership is permanently separated:
 
