@@ -15,7 +15,8 @@ export interface GraphEffectRecoveryDiagnostic {
   readonly code: GraphEffectRecoveryDiagnosticCode;
   readonly message: string;
   readonly nodeId: string;
-  readonly field?: "primitiveFamily" | "effect" | "idempotency" | "recovery" | "executionMode" | "retry";
+  readonly field?:
+    "primitiveFamily" | "effect" | "idempotency" | "recovery" | "executionMode" | "retry";
 }
 
 export interface GraphEffectRecoveryResult {

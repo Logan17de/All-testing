@@ -160,7 +160,9 @@ describe("Graph JSON v1 side-effect/retry/recovery validation", () => {
   });
 
   it("does not let deterministic output make an unknown external write safe to retry", () => {
-    expect(checkGraphJsonV1EffectRecovery(graph("write-unknown-retry"), resolver).diagnostics).toEqual([
+    expect(
+      checkGraphJsonV1EffectRecovery(graph("write-unknown-retry"), resolver).diagnostics,
+    ).toEqual([
       expect.objectContaining({
         code: "GRAPH_EFFECT_RETRY_UNSAFE",
         nodeId: "node-1",
@@ -170,7 +172,9 @@ describe("Graph JSON v1 side-effect/retry/recovery validation", () => {
   });
 
   it("rejects automatic rerun recovery for unknown external writes", () => {
-    expect(checkGraphJsonV1EffectRecovery(graph("write-unknown-rerun"), resolver).diagnostics).toEqual([
+    expect(
+      checkGraphJsonV1EffectRecovery(graph("write-unknown-rerun"), resolver).diagnostics,
+    ).toEqual([
       expect.objectContaining({
         code: "GRAPH_EFFECT_RECOVERY_INVALID",
         nodeId: "node-1",
@@ -192,7 +196,9 @@ describe("Graph JSON v1 side-effect/retry/recovery validation", () => {
   });
 
   it("requires no-effect nodes to use not-applicable idempotency", () => {
-    expect(checkGraphJsonV1EffectRecovery(graph("pure-bad-idempotency"), resolver).diagnostics).toEqual([
+    expect(
+      checkGraphJsonV1EffectRecovery(graph("pure-bad-idempotency"), resolver).diagnostics,
+    ).toEqual([
       expect.objectContaining({
         code: "GRAPH_EFFECT_IDEMPOTENCY_INVALID",
         nodeId: "node-1",
@@ -217,18 +223,20 @@ describe("Graph JSON v1 side-effect/retry/recovery validation", () => {
   });
 
   it("rejects recovery and retry metadata on compile-time nodes with no executor", () => {
-    expect(checkGraphJsonV1EffectRecovery(graph("compile-only-bad"), resolver).diagnostics).toEqual([
-      expect.objectContaining({
-        code: "GRAPH_EFFECT_RECOVERY_INVALID",
-        nodeId: "node-1",
-        field: "recovery",
-      }),
-      expect.objectContaining({
-        code: "GRAPH_EFFECT_RETRY_INVALID",
-        nodeId: "node-1",
-        field: "retry",
-      }),
-    ]);
+    expect(checkGraphJsonV1EffectRecovery(graph("compile-only-bad"), resolver).diagnostics).toEqual(
+      [
+        expect.objectContaining({
+          code: "GRAPH_EFFECT_RECOVERY_INVALID",
+          nodeId: "node-1",
+          field: "recovery",
+        }),
+        expect.objectContaining({
+          code: "GRAPH_EFFECT_RETRY_INVALID",
+          nodeId: "node-1",
+          field: "retry",
+        }),
+      ],
+    );
   });
 
   it("validates retry numeric bounds without normalizing them", () => {
