@@ -69,6 +69,22 @@ describe("NodeCatalog", () => {
     expect(catalog.size).toBe(2);
   });
 
+  it("keeps plugin provenance separate from direct low-level registrations", () => {
+    const catalog = new NodeCatalog();
+    const direct = makeDefinition("test.direct", "1", () => undefined);
+    const owned = makeDefinition("test.owned", "3", () => undefined);
+
+    catalog.register(direct);
+    catalog.register(owned, { id: "plugin.test", version: "9.2.0" });
+
+    expect(catalog.getManifest("test.direct", "1")).toBe(direct.manifest);
+    expect(catalog.getResolution("test.direct", "1")).toBeUndefined();
+    expect(catalog.getResolution("test.owned", "3")).toEqual({
+      manifest: owned.manifest,
+      plugin: { id: "plugin.test", version: "9.2.0" },
+    });
+  });
+
   it("unregisters through the registry disposer without invoking executors", () => {
     let executions = 0;
     const catalog = new NodeCatalog();
@@ -78,6 +94,7 @@ describe("NodeCatalog", () => {
 
     expect(catalog.has("test.remove", "1")).toBe(false);
     expect(catalog.getManifest("test.remove", "1")).toBeUndefined();
+    expect(catalog.getResolution("test.remove", "1")).toBeUndefined();
     expect(executions).toBe(0);
   });
 });
