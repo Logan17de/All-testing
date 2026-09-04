@@ -12,6 +12,7 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
+    "test:startup": "node scripts/startup-smoke.mjs",
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
