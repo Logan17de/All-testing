@@ -73,13 +73,7 @@ describe("RunReadiness", () => {
 
   it("decrements exact predecessor pairs and promotes targets only at zero", () => {
     const readiness = new RunReadiness(
-      ir([
-        op("root", []),
-        op("left", [0]),
-        op("right", [0]),
-        op("join", [1, 2]),
-        op("other", []),
-      ]),
+      ir([op("root", []), op("left", [0]), op("right", [0]), op("join", [1, 2]), op("other", [])]),
     );
 
     expect(readiness.getDependents(0)).toEqual([1, 2]);
