@@ -38,9 +38,7 @@ export class RunReadiness {
     const dependents = Array.from({ length: ir.ops.length }, () => [] as number[]);
 
     this.ops = ir.ops.map((_, op) => createRunOpState(op));
-    this.dependencies = Object.freeze(
-      ir.ops.map((op) => Object.freeze([...op.dependencies])),
-    );
+    this.dependencies = Object.freeze(ir.ops.map((op) => Object.freeze([...op.dependencies])));
     this.remainingDependencies = ir.ops.map((op) => op.dependencies.length);
     this.releasedDependencies = ir.ops.map(() => new Set<number>());
 
@@ -55,9 +53,7 @@ export class RunReadiness {
       }
     });
 
-    this.dependents = Object.freeze(
-      dependents.map((targets) => Object.freeze([...targets])),
-    );
+    this.dependents = Object.freeze(dependents.map((targets) => Object.freeze([...targets])));
 
     for (let op = 0; op < this.ops.length; op += 1) {
       if (this.remainingDependencies[op] === 0) {
