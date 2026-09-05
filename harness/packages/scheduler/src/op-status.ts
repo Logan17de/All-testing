@@ -1,4 +1,4 @@
-export const RUN_OP_STATUSES = [
+export const RUN_OP_STATUSES = Object.freeze([
   "pending",
   "ready",
   "running",
@@ -8,28 +8,36 @@ export const RUN_OP_STATUSES = [
   "retry-wait",
   "failed",
   "cancelled",
-] as const;
+] as const);
 
 export type RunOpStatus = (typeof RUN_OP_STATUSES)[number];
 
-export const RUN_OP_TERMINAL_STATUSES = [
+export const RUN_OP_TERMINAL_STATUSES = Object.freeze([
   "completed",
   "skipped",
   "failed",
   "cancelled",
-] as const satisfies readonly RunOpStatus[];
+] as const satisfies readonly RunOpStatus[]);
 
 const RUN_OP_TRANSITIONS = {
-  pending: ["ready", "skipped", "cancelled"],
-  ready: ["running", "skipped", "cancelled"],
-  running: ["completed", "skipped", "waiting", "retry-wait", "failed", "cancelled"],
-  completed: [],
-  skipped: [],
-  waiting: ["ready", "cancelled"],
-  "retry-wait": ["ready", "cancelled"],
-  failed: [],
-  cancelled: [],
+  pending: Object.freeze(["ready", "skipped", "cancelled"] as const),
+  ready: Object.freeze(["running", "skipped", "cancelled"] as const),
+  running: Object.freeze([
+    "completed",
+    "skipped",
+    "waiting",
+    "retry-wait",
+    "failed",
+    "cancelled",
+  ] as const),
+  completed: Object.freeze([] as const),
+  skipped: Object.freeze([] as const),
+  waiting: Object.freeze(["ready", "cancelled"] as const),
+  "retry-wait": Object.freeze(["ready", "cancelled"] as const),
+  failed: Object.freeze([] as const),
+  cancelled: Object.freeze([] as const),
 } as const satisfies Readonly<Record<RunOpStatus, readonly RunOpStatus[]>>;
+Object.freeze(RUN_OP_TRANSITIONS);
 
 export interface RunOpState {
   /** Zero-based Execution IR op index. */
