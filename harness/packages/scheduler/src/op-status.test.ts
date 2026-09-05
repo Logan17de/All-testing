@@ -46,15 +46,12 @@ describe("run-local op status state machine", () => {
     expect(Object.isFrozen(state)).toBe(true);
   });
 
-  it.each([
-    -1,
-    1.5,
-    Number.NaN,
-    Number.POSITIVE_INFINITY,
-    Number.MAX_SAFE_INTEGER + 1,
-  ])("rejects invalid op index %s", (op) => {
-    expect(() => createRunOpState(op)).toThrow(RangeError);
-  });
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid op index %s",
+    (op) => {
+      expect(() => createRunOpState(op)).toThrow(RangeError);
+    },
+  );
 
   it("locks every legal and illegal status transition", () => {
     for (const from of RUN_OP_STATUSES) {
