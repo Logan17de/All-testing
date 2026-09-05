@@ -350,6 +350,14 @@ Lowering copies the already-validated runtime material from the exact resolved m
 
 2.20 deliberately contains no document hash, semantic hash, registry hash, compiler version, IR hash, or provenance pins; 2.21 owns those identities. 2.22 now owns the basic Graph-to-IR DAG/router/join transformation.
 
+### Generated-graph compiler stress boundary
+
+2.25 closes Phase 2 with deterministic stress tests over the entire frozen compiler pipeline rather than adding another compiler stage. `graph-json-v1-compiler.stress.test.ts` generates seeded valid DAGs with a guaranteed data chain plus extra forward-only data/control edges, public graph inputs, ordered literal/graph-input/opaque-secret bindings on ordinary ports, multiple graph outputs, policies, and editor metadata. The 8/32/96/192-node family is compiled twice from cloned source and must produce byte-identical canonical semantics, immutable Execution IR, and compiler identity.
+
+A separate 256-node fixture shuffles identity-addressed source collections before recompilation. Its normalized saved-document order changes `documentHash`, while canonical semantic JSON, `semanticHash`, `registryHash`, `irHash`, and the full Execution IR remain identical. The largest fixture compiles 512 ops with mixed data/control dependencies and asserts every lowered dependency is unique, numerically sorted, and topologically earlier than its target; every op-output source also points backward in the DAG. There are deliberately no wall-clock thresholds, so the suite tests correctness/scale invariants rather than runner speed.
+
+2.25 required no production compiler changes. With its Ubuntu and Windows CI pass, the Phase 2 checkpoint is frozen: validated Graph JSON plus the same registry/compiler deterministically produces the same canonical Execution IR and identity, while invalid source fails before execution through the stable diagnostic boundary. Phase 3 now owns in-memory execution semantics.
+
 ## Graph JSON v1
 
 `@zet-harness/graph` defines the portable source contract. The implementation lives in `packages/graph/src/graph-json-v1.ts` and is re-exported from the package entrypoint.

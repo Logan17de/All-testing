@@ -45,7 +45,7 @@ Phase 1  Plugin API + universal node      ✅ COMPLETE
            ├─ 1.10 built-in/external parity    ✅
            ├─ 1.11 lifecycle/unload tests      ✅
            └─ 1.12 plugin smoke in CI          ✅
-Phase 2  Graph JSON + compiler + IR        🚧 WE ARE HERE
+Phase 2  Graph JSON + compiler + IR        ✅ COMPLETE
            ├─ 2.1 graph workspace               ✅
            ├─ 2.2 Graph JSON v1                  ✅
            ├─ 2.3 JSON Schema Draft 2020-12         ✅
@@ -70,8 +70,9 @@ Phase 2  Graph JSON + compiler + IR        🚧 WE ARE HERE
            ├─ 2.22 DAG/router/join lowering                         ✅
            ├─ 2.23 canonical hash tests                              ✅
            ├─ 2.24 golden diagnostic tests                           ✅
-           └─ 2.25 generated-graph compiler stress tests                  ▶ CURRENT
-Phase 3  In-memory DAG scheduler           ⏳
+           └─ 2.25 generated-graph compiler stress tests                  ✅
+Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE
+           └─ 3.1 op status state machine                              ▶ CURRENT
 Phase 4  Runtime daemon + SQLite           ⏳
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
@@ -88,8 +89,8 @@ Phase 11 Packaging + optional scale-out    ⏳
 |---|---|---|
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
-| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.25 current** |
-| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ⏳ Planned |
+| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
+| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.1 current** |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
@@ -306,6 +307,8 @@ No arbitrary visual cycles initially. Every executable loop needs compiler-visib
 
 Source normalization begins only after those validation stages succeed. 2.17 materializes the closed Graph JSON v1 defaults (`required: false`, empty bindings/capability buckets/options), verifies exact resolved node identity, and records the active plugin id/version that registered each node. Plugin provenance is host registry metadata, not authority authored into Graph JSON. JSON Schema `default` annotations do not mutate executable config. 2.17 does not strip editor metadata or reorder source collections; those remain 2.18 and 2.19 respectively. 2.18 removes only the top-level Graph JSON `editor` bucket from compiler-facing source; human metadata, document identity, normalized fields, resolved pins, and source ordering remain intact. The stripping stage is pure and does not recursively delete config keys named `editor`. 2.19 projects the exact executable `GraphSemanticsV1` domain and canonicalizes it deterministically. Identity-addressed graph collections are sorted by stable id and capability buckets lexically; arbitrary JSON arrays and node binding order remain significant. Canonical JSON sorts object keys using lexical JavaScript string comparison while preserving array order and ECMAScript JSON primitive encoding. Graph/revision/human/editor identity and registry provenance remain outside the canonical semantic JSON. Resolved pins are sorted separately for later registry/compiler identity. No digest is computed in 2.19. 2.20 defines `harness.ir/v1` as compact immutable executable-plan state: op, graph-input, and entrypoint array positions are authoritative index domains; internal node/input references become numeric indexes; runtime-needed config/value sources/static behavior/policies remain; control edges and structured-control contracts have indexed/compact IR shapes ready for later lowering; compiler candidates are range-checked then structured-cloned and deeply frozen. Source schemas/metadata, capability grants, hash/compiler identity, and provenance pins stay outside this 2.20 core. No Graph-to-IR lowering happens here: 2.22 owns DAG dependencies plus router/join lowering. 2.21 records the compiler provenance/content identities with domain-separated SHA-256: exact normalized authoring document, canonical executable semantics, resolved node/plugin registry pins, and Execution IR each have independent hashes; compiler version is explicitly `harness.compiler/v1`; exact node/plugin pins are carried beside the hashes; and the implementation uses Web Crypto rather than adding a Node-only crypto import. Compiler version is not folded into the content hashes, preserving `semanticHash + registryHash + compilerVersion` as the deterministic compile identity. 2.23 now locks exact end-to-end canonical hash vectors for `harness.compiler/v1`. The fixture runs the real canonicalizer and 2.22 lowerer before recording identity, asserts fixed document/semantic/registry/IR SHA-256 outputs, recompiles cloned input to identical canonical IR and hashes, and verifies editor-only changes remain outside semantic/registry/IR identity. No production hash or lowering semantics changed in 2.23. 2.22 now deterministically lowers canonical Graph semantics into `harness.ir/v1`: canonical array order becomes the op/input/entrypoint index domains; data and control edges both produce predecessor dependencies; data edges also become resolved op-output value sources; duplicate predecessors are removed and sorted numerically; binding sequence is preserved before incoming canonical edge-id order; control edges retain named structured ports; router and all-active join manifests become IR control descriptors; and runtime config/behavior/policies flow into the immutable IR. Resolver provenance must still match the exact 2.17/2.19 node/plugin pins or lowering fails as a compiler invariant. Loop, human-interrupt, and subgraph execution remains deferred. This is the first lowering semantics under `harness.compiler/v1`, so no compiler-version bump is required.
 
+2.25 closes the Phase 2 compiler checkpoint with deterministic generated-graph stress coverage. Seeded DAG families exercise the complete validation/normalization/canonicalization/lowering/identity path, repeated compilation, source-collection permutation invariance, dependency/index invariants, and a 512-op mixed data/control graph without adding timing-based assertions or production semantics.
+
 Deterministic acceptance property:
 
 ```text
@@ -397,4 +400,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 2 / Item 2.25 — Add generated-graph compiler stress tests.**
+> **Phase 3 / Item 3.1 — Add the run-local op status state machine.**
