@@ -1,0 +1,44 @@
+name: Harness sync 3.1 scheduler
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-sync-3-1.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Sync workspace lockfile
+        working-directory: harness
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Format 3.1 files
+        working-directory: harness
+        run: npx prettier --write packages/scheduler/package.json packages/scheduler/tsconfig.json packages/scheduler/src/*.ts package-lock.json
+
+      - name: Commit sync and remove helper
+        run: |
+          rm .github/workflows/harness-sync-3-1.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/package-lock.json harness/packages/scheduler .github/workflows/harness-sync-3-1.yml
+          git commit -m "chore(harness): sync 3.1 scheduler workspace"
+          git push origin HEAD:zet-harness-v1
