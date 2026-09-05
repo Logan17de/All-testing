@@ -10,5 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src --max-warnings=0",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@zet-harness/graph": "0.0.0"
   }
 }
