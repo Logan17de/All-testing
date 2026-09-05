@@ -74,7 +74,8 @@ Phase 2  Graph JSON + compiler + IR        ✅ COMPLETE
 Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE
            ├─ 3.1 op status state machine                              ✅
            ├─ 3.2 readiness queue + dependency counters                ✅
-           └─ 3.3 bounded global/per-run concurrency                   ▶ CURRENT
+           ├─ 3.3 bounded global/per-run concurrency                   ✅
+           └─ 3.4 concurrent DAG branches                              ▶ CURRENT
 Phase 4  Runtime daemon + SQLite           ⏳
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
@@ -92,7 +93,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
-| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.3 current** |
+| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.4 current** |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
@@ -402,4 +403,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 3 / Item 3.3 — Add bounded global/per-run concurrency using native Promises/semaphores.**
+> **Phase 3 / Item 3.4 — Execute independent DAG branches concurrently.**
