@@ -1,0 +1,44 @@
+name: Harness format 3.2
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-format-3-2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Format 3.2 source
+        working-directory: harness
+        run: npx prettier --write packages/scheduler/src/run-readiness.ts
+
+      - name: Commit formatting and remove helper
+        run: |
+          rm .github/workflows/harness-format-3-2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/packages/scheduler/src/run-readiness.ts .github/workflows/harness-format-3-2.yml
+          git commit -m "style(harness): format final 3.2 readiness"
+          git push origin HEAD:zet-harness-v1
