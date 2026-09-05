@@ -53,7 +53,6 @@ describe("RunReadiness", () => {
       ],
       remainingDependencies: [0, 1, 0, 2],
       readyQueue: [0, 2],
-      releasedDependencySources: [false, false, false, false],
     });
     expect(readiness.readyCount).toBe(2);
     expect(readiness.peekReadyOp()).toBe(0);
@@ -72,7 +71,7 @@ describe("RunReadiness", () => {
     expect(readiness.readyCount).toBe(0);
   });
 
-  it("decrements only reverse dependents and promotes targets exactly at zero", () => {
+  it("decrements exact predecessor pairs and promotes targets only at zero", () => {
     const readiness = new RunReadiness(
       ir([
         op("root", []),
@@ -83,61 +82,82 @@ describe("RunReadiness", () => {
       ]),
     );
 
-    expect(readiness.releaseDependencySource(0)).toEqual([1, 2]);
+    expect(readiness.getDependents(0)).toEqual([1, 2]);
+    expect(readiness.releaseDependency(0, 1)).toBe(true);
     expect(readiness.getRemainingDependencyCount(1)).toBe(0);
-    expect(readiness.getRemainingDependencyCount(2)).toBe(0);
-    expect(readiness.getRemainingDependencyCount(3)).toBe(2);
+    expect(readiness.getRemainingDependencyCount(2)).toBe(1);
     expect(readiness.getOpState(1).status).toBe("ready");
+    expect(readiness.getOpState(2).status).toBe("pending");
+
+    expect(readiness.releaseDependency(0, 2)).toBe(true);
+    expect(readiness.getRemainingDependencyCount(2)).toBe(0);
     expect(readiness.getOpState(2).status).toBe("ready");
 
-    expect(readiness.releaseDependencySource(1)).toEqual([]);
+    expect(readiness.releaseDependency(1, 3)).toBe(false);
     expect(readiness.getRemainingDependencyCount(3)).toBe(1);
     expect(readiness.getOpState(3).status).toBe("pending");
 
-    expect(readiness.releaseDependencySource(2)).toEqual([3]);
+    expect(readiness.releaseDependency(2, 3)).toBe(true);
     expect(readiness.getRemainingDependencyCount(3)).toBe(0);
     expect(readiness.getOpState(3).status).toBe("ready");
   });
 
-  it("preserves FIFO order when newly-ready ops are appended behind existing ready work", () => {
+  it("allows one source to release selected targets without waking every dependent", () => {
+    const readiness = new RunReadiness(
+      ir([op("router", []), op("branch-a", [0]), op("branch-b", [0]), op("other", [])]),
+    );
+
+    expect(readiness.getDependents(0)).toEqual([1, 2]);
+    expect(readiness.releaseDependency(0, 2)).toBe(true);
+    expect(readiness.getOpState(2).status).toBe("ready");
+    expect(readiness.getOpState(1).status).toBe("pending");
+    expect(readiness.getRemainingDependencyCount(1)).toBe(1);
+    expect(readiness.isDependencyReleased(0, 2)).toBe(true);
+    expect(readiness.isDependencyReleased(0, 1)).toBe(false);
+  });
+
+  it("preserves FIFO order when newly-ready ops are appended behind existing work", () => {
     const readiness = new RunReadiness(
       ir([op("root", []), op("left", [0]), op("right", [0]), op("independent", [])]),
     );
 
     expect(readiness.getReadyQueue()).toEqual([0, 3]);
-    expect(readiness.releaseDependencySource(0)).toEqual([1, 2]);
+    expect(readiness.releaseDependency(0, 1)).toBe(true);
+    expect(readiness.releaseDependency(0, 2)).toBe(true);
     expect(readiness.getReadyQueue()).toEqual([0, 3, 1, 2]);
   });
 
-  it("rejects duplicate dependency-source release before counters can underflow", () => {
+  it("rejects duplicate pair release before a dependency counter can underflow", () => {
     const readiness = new RunReadiness(ir([op("root", []), op("child", [0])]));
 
-    readiness.releaseDependencySource(0);
-    expect(() => readiness.releaseDependencySource(0)).toThrow(
-      "Run op 0 dependency source was already released.",
+    expect(readiness.releaseDependency(0, 1)).toBe(true);
+    expect(() => readiness.releaseDependency(0, 1)).toThrow(
+      "Run dependency 0 -> 1 was already released.",
     );
     expect(readiness.getRemainingDependencyCount(1)).toBe(0);
   });
 
-  it("tracks sources with no dependents exactly once", () => {
-    const readiness = new RunReadiness(ir([op("single", [])]));
+  it("rejects release of a source-target pair absent from Execution IR", () => {
+    const readiness = new RunReadiness(ir([op("root", []), op("child", [0]), op("other", [])]));
 
-    expect(readiness.releaseDependencySource(0)).toEqual([]);
-    expect(readiness.isDependencySourceReleased(0)).toBe(true);
-    expect(() => readiness.releaseDependencySource(0)).toThrow(TypeError);
+    expect(() => readiness.releaseDependency(2, 1)).toThrow(
+      "Run op 1 does not depend on source op 2.",
+    );
+    expect(readiness.getRemainingDependencyCount(1)).toBe(1);
   });
 
-  it("returns runtime-frozen snapshots and queue copies without exposing internal arrays", () => {
+  it("returns frozen reverse-dependent and snapshot views without exposing storage", () => {
     const readiness = new RunReadiness(ir([op("a", []), op("b", [0])]));
+    const dependents = readiness.getDependents(0);
     const queue = readiness.getReadyQueue();
     const snapshot = readiness.snapshot();
 
+    expect(Object.isFrozen(dependents)).toBe(true);
     expect(Object.isFrozen(queue)).toBe(true);
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.ops)).toBe(true);
     expect(Object.isFrozen(snapshot.remainingDependencies)).toBe(true);
     expect(Object.isFrozen(snapshot.readyQueue)).toBe(true);
-    expect(Object.isFrozen(snapshot.releasedDependencySources)).toBe(true);
     expect(snapshot.readyQueue).not.toBe(readiness.getReadyQueue());
   });
 
@@ -148,7 +168,9 @@ describe("RunReadiness", () => {
 
       expect(() => readiness.getOpState(index)).toThrow(RangeError);
       expect(() => readiness.getRemainingDependencyCount(index)).toThrow(RangeError);
-      expect(() => readiness.releaseDependencySource(index)).toThrow(RangeError);
+      expect(() => readiness.getDependents(index)).toThrow(RangeError);
+      expect(() => readiness.releaseDependency(index, 1)).toThrow(RangeError);
+      expect(() => readiness.releaseDependency(0, index)).toThrow(RangeError);
     },
   );
 
@@ -164,7 +186,6 @@ describe("RunReadiness", () => {
       ops: [],
       remainingDependencies: [],
       readyQueue: [],
-      releasedDependencySources: [],
     });
   });
 });
