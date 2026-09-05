@@ -6,7 +6,6 @@ export interface RunReadinessSnapshot {
   readonly ops: readonly RunOpState[];
   readonly remainingDependencies: readonly number[];
   readonly readyQueue: readonly number[];
-  readonly releasedDependencySources: readonly boolean[];
 }
 
 function assertOpIndex(op: number, opCount: number): void {
@@ -23,14 +22,16 @@ function frozenCopy<T>(items: readonly T[]): readonly T[] {
  * Run-local readiness bookkeeping over immutable Execution IR dependencies.
  *
  * 3.2 owns only deterministic FIFO readiness plus dependency counters. The
- * caller decides when one source op's outgoing dependencies are satisfied;
+ * caller decides when one specific source→target dependency is satisfied;
  * completion/failure/skip/control-edge semantics are later Phase-3 concerns.
  */
 export class RunReadiness {
   private readonly ops: RunOpState[];
+  private readonly dependencies: readonly (readonly number[])[];
   private readonly remainingDependencies: number[];
   private readonly dependents: readonly (readonly number[])[];
-  private readonly releasedDependencySources: boolean[];
+  private readonly releasedDependencies: ReadonlySet<number>[];
+  private readonly mutableReleasedDependencies: Set<number>[];
   private readonly readyQueue: number[] = [];
   private readyHead = 0;
 
@@ -38,8 +39,12 @@ export class RunReadiness {
     const dependents = Array.from({ length: ir.ops.length }, () => [] as number[]);
 
     this.ops = ir.ops.map((_, op) => createRunOpState(op));
+    this.dependencies = Object.freeze(
+      ir.ops.map((op) => Object.freeze([...op.dependencies]) as readonly number[]),
+    );
     this.remainingDependencies = ir.ops.map((op) => op.dependencies.length);
-    this.releasedDependencySources = ir.ops.map(() => false);
+    this.mutableReleasedDependencies = ir.ops.map(() => new Set<number>());
+    this.releasedDependencies = this.mutableReleasedDependencies;
 
     ir.ops.forEach((op, targetOp) => {
       for (const dependencyOp of op.dependencies) {
@@ -89,9 +94,15 @@ export class RunReadiness {
     return remaining;
   }
 
-  isDependencySourceReleased(op: number): boolean {
-    assertOpIndex(op, this.ops.length);
-    return this.releasedDependencySources[op] === true;
+  getDependents(sourceOp: number): readonly number[] {
+    assertOpIndex(sourceOp, this.ops.length);
+    return this.dependents[sourceOp] ?? Object.freeze([] as number[]);
+  }
+
+  isDependencyReleased(sourceOp: number, targetOp: number): boolean {
+    assertOpIndex(sourceOp, this.ops.length);
+    assertOpIndex(targetOp, this.ops.length);
+    return this.releasedDependencies[targetOp]?.has(sourceOp) === true;
   }
 
   peekReadyOp(): number | undefined {
@@ -124,36 +135,47 @@ export class RunReadiness {
   }
 
   /**
-   * Mark one source op's outgoing dependency conditions as satisfied exactly once.
-   * Returns the target op indexes that became newly ready, in deterministic op order.
+   * Satisfy one exact Execution-IR predecessor relation exactly once.
+   * Returns true only when this release makes the target newly ready.
    */
-  releaseDependencySource(sourceOp: number): readonly number[] {
+  releaseDependency(sourceOp: number, targetOp: number): boolean {
     assertOpIndex(sourceOp, this.ops.length);
+    assertOpIndex(targetOp, this.ops.length);
 
-    if (this.releasedDependencySources[sourceOp] === true) {
-      throw new TypeError(`Run op ${String(sourceOp)} dependency source was already released.`);
-    }
-    this.releasedDependencySources[sourceOp] = true;
-
-    const newlyReady: number[] = [];
-    for (const targetOp of this.dependents[sourceOp] ?? []) {
-      const remaining = this.remainingDependencies[targetOp];
-      if (remaining === undefined || remaining <= 0) {
-        throw new TypeError(
-          `Run op ${String(targetOp)} dependency counter would underflow from source ${String(sourceOp)}.`,
-        );
-      }
-
-      const nextRemaining = remaining - 1;
-      this.remainingDependencies[targetOp] = nextRemaining;
-
-      if (nextRemaining === 0 && this.ops[targetOp]?.status === "pending") {
-        this.markReady(targetOp);
-        newlyReady.push(targetOp);
-      }
+    const dependencies = this.dependencies[targetOp];
+    if (dependencies === undefined || !dependencies.includes(sourceOp)) {
+      throw new TypeError(
+        `Run op ${String(targetOp)} does not depend on source op ${String(sourceOp)}.`,
+      );
     }
 
-    return Object.freeze(newlyReady);
+    const released = this.mutableReleasedDependencies[targetOp];
+    if (released === undefined) {
+      throw new RangeError(`Run op index ${String(targetOp)} is unavailable.`);
+    }
+    if (released.has(sourceOp)) {
+      throw new TypeError(
+        `Run dependency ${String(sourceOp)} -> ${String(targetOp)} was already released.`,
+      );
+    }
+
+    const remaining = this.remainingDependencies[targetOp];
+    if (remaining === undefined || remaining <= 0) {
+      throw new TypeError(
+        `Run op ${String(targetOp)} dependency counter would underflow from source ${String(sourceOp)}.`,
+      );
+    }
+
+    released.add(sourceOp);
+    const nextRemaining = remaining - 1;
+    this.remainingDependencies[targetOp] = nextRemaining;
+
+    if (nextRemaining === 0 && this.ops[targetOp]?.status === "pending") {
+      this.markReady(targetOp);
+      return true;
+    }
+
+    return false;
   }
 
   snapshot(): RunReadinessSnapshot {
@@ -161,7 +183,6 @@ export class RunReadiness {
       ops: frozenCopy(this.ops),
       remainingDependencies: frozenCopy(this.remainingDependencies),
       readyQueue: this.getReadyQueue(),
-      releasedDependencySources: frozenCopy(this.releasedDependencySources),
     });
   }
 
