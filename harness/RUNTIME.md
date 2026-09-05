@@ -92,7 +92,9 @@ pending → ready → running
    └→ cancelled
 ```
 
-`completed`, `skipped`, `failed`, and `cancelled` are terminal. Self-transitions and phase-skipping transitions are rejected. The exported status arrays, transition tables, and produced state objects are runtime-frozen so plugin/consumer code cannot mutate scheduler invariants. Readiness and dependency counters land in 3.2; later Phase-3 items decide when legal transitions occur.
+`completed`, `skipped`, `failed`, and `cancelled` are terminal. Self-transitions and phase-skipping transitions are rejected. The exported status arrays, transition tables, and produced state objects are runtime-frozen so plugin/consumer code cannot mutate scheduler invariants.
+
+Item 3.2 adds run-local readiness bookkeeping directly over immutable Execution IR predecessor indexes. Ops with zero predecessors become `ready` immediately in ascending op-index order and enter a deterministic FIFO queue. Every other op starts with a remaining-dependency counter equal to its IR predecessor count, plus a reverse-dependent index used for targeted release. A dependency is released as one exact `(sourceOp, targetOp)` relation; duplicate or non-existent pair releases are rejected before counters can underflow. When a release moves a target counter to zero, that target transitions `pending → ready` and is appended to the FIFO queue. This pair-specific boundary is intentional for upcoming router semantics: a router can eventually release only selected branch targets rather than waking every dependent. Dequeue removes one FIFO-ready reservation but leaves its state `ready`; 3.3 owns concurrency admission and the later `ready → running` dispatch transition. 3.2 does not decide which completion/skip/control outcomes satisfy dependencies, and it adds no concurrency, executor calls, retry timers, cancellation signals, or persistence.
 
 ## Plugin relationship
 

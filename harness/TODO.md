@@ -96,7 +96,7 @@ Goal: freeze what workflows mean before adding durable execution.
 Goal: prove execution semantics without persistence hiding scheduler bugs.
 
 - [x] 3.1 Add run-local op status state machine: pending/ready/running/completed/skipped/waiting/retry-wait/failed/cancelled.
-- [ ] 3.2 Add readiness queue and dependency counters.
+- [x] 3.2 Add readiness queue and dependency counters.
 - [ ] 3.3 Add bounded global/per-run concurrency using native Promises/semaphores.
 - [ ] 3.4 Execute independent DAG branches concurrently.
 - [ ] 3.5 Add router branch activation.
