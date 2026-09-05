@@ -97,7 +97,8 @@ function generateGraph(nodeCount: number, seed: number): GraphJsonV1 {
 
   const rng = createRng(seed);
   const nodes: GraphNodeV1[] = [];
-  const editorNodes: Record<string, { position: { x: number; y: number }; collapsed?: boolean }> = {};
+  const editorNodes: Record<string, { position: { x: number; y: number }; collapsed?: boolean }> =
+    {};
 
   for (let index = 0; index < nodeCount; index += 1) {
     const id = nodeId(index);
@@ -179,7 +180,9 @@ function generateGraph(nodeCount: number, seed: number): GraphJsonV1 {
     }
   }
 
-  const outputNodeIndexes = [...new Set([nodeCount - 1, Math.floor(nodeCount / 2), Math.floor(nodeCount / 4)])];
+  const outputNodeIndexes = [
+    ...new Set([nodeCount - 1, Math.floor(nodeCount / 2), Math.floor(nodeCount / 4)]),
+  ];
 
   return {
     schemaVersion: GRAPH_JSON_VERSION,
@@ -238,12 +241,16 @@ async function compileGraph(graph: GraphJsonV1) {
     capabilityAuthority: { granted: [] },
   });
   if (!diagnostics.valid) {
-    throw new Error(`generated graph failed validation: ${JSON.stringify(diagnostics.diagnostics)}`);
+    throw new Error(
+      `generated graph failed validation: ${JSON.stringify(diagnostics.diagnostics)}`,
+    );
   }
 
   const normalization = normalizeGraphJsonV1(graph, resolver);
   if (!normalization.valid || normalization.normalized === undefined) {
-    throw new Error(`generated graph failed normalization: ${JSON.stringify(normalization.diagnostics)}`);
+    throw new Error(
+      `generated graph failed normalization: ${JSON.stringify(normalization.diagnostics)}`,
+    );
   }
 
   const compilerSource = stripGraphJsonV1UiMetadata(normalization.normalized);
@@ -306,7 +313,9 @@ describe("Graph JSON v1 generated compiler stress", () => {
     expect(reordered.identity.semanticHash).toBe(original.identity.semanticHash);
     expect(reordered.identity.registryHash).toBe(original.identity.registryHash);
     expect(reordered.identity.irHash).toBe(original.identity.irHash);
-    expect(reordered.canonical.canonicalSemanticsJson).toBe(original.canonical.canonicalSemanticsJson);
+    expect(reordered.canonical.canonicalSemanticsJson).toBe(
+      original.canonical.canonicalSemanticsJson,
+    );
     expect(reordered.ir).toEqual(original.ir);
     expectTopologicalIr(reordered.ir);
   });
