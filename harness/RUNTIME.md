@@ -74,6 +74,26 @@ Start with:
 
 No distributed scheduler is required.
 
+## Scheduler state contract
+
+The framework-free in-memory scheduler lives in its own `@zet-harness/scheduler` workspace. Item 3.1 freezes only the run-local op state machine; it does not yet implement a queue or executor loop. Each op is identified by its zero-based Execution IR index and begins `pending`.
+
+```text
+pending → ready → running
+   │         │       ├→ completed
+   │         │       ├→ skipped
+   │         │       ├→ waiting → ready
+   │         │       ├→ retry-wait → ready
+   │         │       ├→ failed
+   │         │       └→ cancelled
+   │         ├→ skipped
+   │         └→ cancelled
+   ├→ skipped
+   └→ cancelled
+```
+
+`completed`, `skipped`, `failed`, and `cancelled` are terminal. Self-transitions and phase-skipping transitions are rejected. The exported status arrays, transition tables, and produced state objects are runtime-frozen so plugin/consumer code cannot mutate scheduler invariants. Readiness and dependency counters land in 3.2; later Phase-3 items decide when legal transitions occur.
+
 ## Plugin relationship
 
 The daemon is also the plugin host.

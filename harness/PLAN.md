@@ -72,7 +72,8 @@ Phase 2  Graph JSON + compiler + IR        ✅ COMPLETE
            ├─ 2.24 golden diagnostic tests                           ✅
            └─ 2.25 generated-graph compiler stress tests                  ✅
 Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE
-           └─ 3.1 op status state machine                              ▶ CURRENT
+           ├─ 3.1 op status state machine                              ✅
+           └─ 3.2 readiness queue + dependency counters                ▶ CURRENT
 Phase 4  Runtime daemon + SQLite           ⏳
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
@@ -90,7 +91,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
-| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.1 current** |
+| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.2 current** |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
@@ -400,4 +401,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 3 / Item 3.1 — Add the run-local op status state machine.**
+> **Phase 3 / Item 3.2 — Add the readiness queue and dependency counters.**
