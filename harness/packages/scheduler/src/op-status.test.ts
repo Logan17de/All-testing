@@ -37,6 +37,8 @@ describe("run-local op status state machine", () => {
       "cancelled",
     ]);
     expect(new Set(RUN_OP_STATUSES).size).toBe(RUN_OP_STATUSES.length);
+    expect(Object.isFrozen(RUN_OP_STATUSES)).toBe(true);
+    expect(Object.isFrozen(RUN_OP_TERMINAL_STATUSES)).toBe(true);
   });
 
   it("creates every op in immutable pending state", () => {
@@ -55,7 +57,9 @@ describe("run-local op status state machine", () => {
 
   it("locks every legal and illegal status transition", () => {
     for (const from of RUN_OP_STATUSES) {
-      expect(getAllowedRunOpTransitions(from)).toEqual(allowedTransitions[from]);
+      const transitions = getAllowedRunOpTransitions(from);
+      expect(transitions).toEqual(allowedTransitions[from]);
+      expect(Object.isFrozen(transitions)).toBe(true);
 
       for (const to of RUN_OP_STATUSES) {
         expect(canTransitionRunOpStatus(from, to)).toBe(allowedTransitions[from].includes(to));
