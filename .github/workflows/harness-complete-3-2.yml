@@ -1,0 +1,97 @@
+name: Harness complete 3.2 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-3-2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Freeze 3.2 and advance 3.3
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              "harness/TODO.md": [
+                  (
+                      "- [ ] 3.2 Add readiness queue and dependency counters.",
+                      "- [x] 3.2 Add readiness queue and dependency counters.",
+                  ),
+              ],
+              "harness/README.md": [
+                  (
+                      "3.2 readiness queue + dependency counters ▶ CURRENT",
+                      "3.2 readiness queue + dependency counters ✅\n3.3 bounded global/per-run concurrency   ▶ CURRENT",
+                  ),
+                  (
+                      "Phase 3 now has an explicit `@zet-harness/scheduler` workspace. Item 3.1 freezes the run-local op status vocabulary and legal transition contract without adding scheduling behavior: every op starts `pending`; `pending` may become `ready`, `skipped`, or `cancelled`; `ready` may become `running`, `skipped`, or `cancelled`; `running` may become `completed`, `skipped`, `waiting`, `retry-wait`, `failed`, or `cancelled`; `waiting` and `retry-wait` may return to `ready` or be cancelled`; and `completed`, `skipped`, `failed`, and `cancelled` are terminal. Status arrays, transition tables, and returned op-state objects are runtime-frozen. The transition helpers are pure and carry only the zero-based Execution IR op index plus status. Readiness/dependency accounting begins in 3.2; branch activation, retry timers, cancellation signals, executor dispatch, and persistence remain later items.",
+                      "Phase 3 now has an explicit `@zet-harness/scheduler` workspace. Item 3.1 freezes the run-local op status vocabulary and legal transition contract without adding scheduling behavior: every op starts `pending`; `pending` may become `ready`, `skipped`, or `cancelled`; `ready` may become `running`, `skipped`, or `cancelled`; `running` may become `completed`, `skipped`, `waiting`, `retry-wait`, `failed`, or `cancelled`; `waiting` and `retry-wait` may return to `ready` or be cancelled; and `completed`, `skipped`, `failed`, and `cancelled` are terminal. Status arrays, transition tables, and returned op-state objects are runtime-frozen. The transition helpers are pure and carry only the zero-based Execution IR op index plus status.\n\nItem 3.2 adds `RunReadiness` over immutable Execution IR dependencies. Zero-dependency ops transition from `pending` to `ready` in ascending op-index order and enter a deterministic FIFO queue. Each op carries a remaining-predecessor counter plus a frozen reverse-dependent index. Dependency release is deliberately pair-specific (`sourceOp → targetOp`) and idempotence-checked rather than source-wide: releasing one predecessor decrements only that exact target, and the target becomes `ready` exactly when its counter reaches zero. This preserves the future router boundary because one branch can be released without waking every dependent of the router. Queue dequeue reserves a ready op without transitioning it to `running`; 3.3 owns concurrency admission/dispatch. Completion, skip, control activation, failure propagation, retry timing, cancellation, and persistence remain later Phase-3/runtime concerns. The scheduler imports Execution IR only as a type/development dependency, keeping compiler/Ajv packages out of its runtime dependency chain.",
+                  ),
+              ],
+              "harness/PLAN.md": [
+                  (
+                      "Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE\n           ├─ 3.1 op status state machine                              ✅\n           └─ 3.2 readiness queue + dependency counters                ▶ CURRENT",
+                      "Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE\n           ├─ 3.1 op status state machine                              ✅\n           ├─ 3.2 readiness queue + dependency counters                ✅\n           └─ 3.3 bounded global/per-run concurrency                   ▶ CURRENT",
+                  ),
+                  (
+                      "| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.2 current** |",
+                      "| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.3 current** |",
+                  ),
+                  (
+                      "> **Phase 3 / Item 3.2 — Add the readiness queue and dependency counters.**",
+                      "> **Phase 3 / Item 3.3 — Add bounded global/per-run concurrency using native Promises/semaphores.**",
+                  ),
+              ],
+              "harness/RUNTIME.md": [
+                  (
+                      "`completed`, `skipped`, `failed`, and `cancelled` are terminal. Self-transitions and phase-skipping transitions are rejected. The exported status arrays, transition tables, and produced state objects are runtime-frozen so plugin/consumer code cannot mutate scheduler invariants. Readiness and dependency counters land in 3.2; later Phase-3 items decide when legal transitions occur.",
+                      "`completed`, `skipped`, `failed`, and `cancelled` are terminal. Self-transitions and phase-skipping transitions are rejected. The exported status arrays, transition tables, and produced state objects are runtime-frozen so plugin/consumer code cannot mutate scheduler invariants.\n\nItem 3.2 adds run-local readiness bookkeeping directly over immutable Execution IR predecessor indexes. Ops with zero predecessors become `ready` immediately in ascending op-index order and enter a deterministic FIFO queue. Every other op starts with a remaining-dependency counter equal to its IR predecessor count, plus a reverse-dependent index used for targeted release. A dependency is released as one exact `(sourceOp, targetOp)` relation; duplicate or non-existent pair releases are rejected before counters can underflow. When a release moves a target counter to zero, that target transitions `pending → ready` and is appended to the FIFO queue. This pair-specific boundary is intentional for upcoming router semantics: a router can eventually release only selected branch targets rather than waking every dependent. Dequeue removes one FIFO-ready reservation but leaves its state `ready`; 3.3 owns concurrency admission and the later `ready → running` dispatch transition. 3.2 does not decide which completion/skip/control outcomes satisfy dependencies, and it adds no concurrency, executor calls, retry timers, cancellation signals, or persistence.",
+                  ),
+              ],
+          }
+
+          for filename, edits in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"missing expected text in {filename}: {old[:180]}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+      - name: Format tracker docs
+        working-directory: harness
+        run: npx prettier --write TODO.md README.md PLAN.md RUNTIME.md
+
+      - name: Commit tracker freeze and remove helper
+        run: |
+          rm .github/workflows/harness-complete-3-2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/RUNTIME.md .github/workflows/harness-complete-3-2.yml
+          git commit -m "docs(harness): freeze 3.2 and advance 3.3"
+          git push origin HEAD:zet-harness-v1
