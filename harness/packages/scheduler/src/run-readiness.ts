@@ -30,8 +30,7 @@ export class RunReadiness {
   private readonly dependencies: readonly (readonly number[])[];
   private readonly remainingDependencies: number[];
   private readonly dependents: readonly (readonly number[])[];
-  private readonly releasedDependencies: ReadonlySet<number>[];
-  private readonly mutableReleasedDependencies: Set<number>[];
+  private readonly releasedDependencies: Set<number>[];
   private readonly readyQueue: number[] = [];
   private readyHead = 0;
 
@@ -43,13 +42,16 @@ export class RunReadiness {
       ir.ops.map((op) => Object.freeze([...op.dependencies]) as readonly number[]),
     );
     this.remainingDependencies = ir.ops.map((op) => op.dependencies.length);
-    this.mutableReleasedDependencies = ir.ops.map(() => new Set<number>());
-    this.releasedDependencies = this.mutableReleasedDependencies;
+    this.releasedDependencies = ir.ops.map(() => new Set<number>());
 
     ir.ops.forEach((op, targetOp) => {
       for (const dependencyOp of op.dependencies) {
         assertOpIndex(dependencyOp, ir.ops.length);
-        dependents[dependencyOp]?.push(targetOp);
+        const targets = dependents[dependencyOp];
+        if (targets === undefined) {
+          throw new TypeError(`Dependency source op ${String(dependencyOp)} is unavailable.`);
+        }
+        targets.push(targetOp);
       }
     });
 
@@ -96,13 +98,21 @@ export class RunReadiness {
 
   getDependents(sourceOp: number): readonly number[] {
     assertOpIndex(sourceOp, this.ops.length);
-    return this.dependents[sourceOp] ?? Object.freeze([] as number[]);
+    const targets = this.dependents[sourceOp];
+    if (targets === undefined) {
+      throw new RangeError(`Run op index ${String(sourceOp)} is unavailable.`);
+    }
+    return targets;
   }
 
   isDependencyReleased(sourceOp: number, targetOp: number): boolean {
     assertOpIndex(sourceOp, this.ops.length);
     assertOpIndex(targetOp, this.ops.length);
-    return this.releasedDependencies[targetOp]?.has(sourceOp) === true;
+    const released = this.releasedDependencies[targetOp];
+    if (released === undefined) {
+      throw new RangeError(`Run op index ${String(targetOp)} is unavailable.`);
+    }
+    return released.has(sourceOp);
   }
 
   peekReadyOp(): number | undefined {
@@ -149,7 +159,7 @@ export class RunReadiness {
       );
     }
 
-    const released = this.mutableReleasedDependencies[targetOp];
+    const released = this.releasedDependencies[targetOp];
     if (released === undefined) {
       throw new RangeError(`Run op index ${String(targetOp)} is unavailable.`);
     }
