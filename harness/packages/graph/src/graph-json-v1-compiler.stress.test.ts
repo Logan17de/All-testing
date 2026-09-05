@@ -279,6 +279,7 @@ function expectTopologicalIr(ir: Awaited<ReturnType<typeof compileGraph>>["ir"])
   });
 }
 
+// 2.25 is stress coverage only; it defines no new production compiler semantics.
 describe("Graph JSON v1 generated compiler stress", () => {
   it("recompiles deterministic generated DAG families to identical canonical IR and identity", async () => {
     const cases = [
