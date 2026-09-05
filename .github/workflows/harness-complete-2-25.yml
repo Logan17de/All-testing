@@ -1,0 +1,109 @@
+name: Harness complete 2.25 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-2-25.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Freeze 2.25, complete Phase 2, and advance 3.1
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              "harness/TODO.md": [
+                  (
+                      "- [ ] 2.25 Add generated-graph compiler stress tests.",
+                      "- [x] 2.25 Add generated-graph compiler stress tests.",
+                  ),
+              ],
+              "harness/README.md": [
+                  (
+                      "Phase 0 and Phase 1 are complete. Phase 2 is now in progress on `zet-harness-v1`:",
+                      "Phases 0-2 are complete. Phase 3 is now current on `zet-harness-v1`:",
+                  ),
+                  (
+                      "2.24 golden diagnostic tests          ✅\n2.25 compiler stress tests            ▶ CURRENT",
+                      "2.24 golden diagnostic tests          ✅\n2.25 compiler stress tests            ✅\n\nPhase 2 graph + compiler + IR          ✅ COMPLETE\n3.1 op status state machine            ▶ CURRENT",
+                  ),
+                  (
+                      "No production validator behavior changed in 2.24.",
+                      "No production validator behavior changed in 2.24. 2.25 closes Phase 2 with deterministic generated-graph compiler stress coverage in `graph-json-v1-compiler.stress.test.ts`: seeded 8/32/96/192-node DAG families are recompiled to identical canonical semantics, immutable IR, and compiler identity; a 256-node graph is source-permuted to prove document identity changes while semantic/registry/IR identity remains stable; and a 512-op DAG with mixed data/control dependencies proves topological index validity without recursion failures. The generated fixtures also exercise graph inputs, literals, opaque secret references on ordinary inputs, policies, editor metadata, dependency deduplication, and the complete validation → normalization → UI strip → canonicalization → lowering → identity pipeline. The stress suite uses no timing thresholds and adds no production compiler semantics.",
+                  ),
+              ],
+              "harness/PLAN.md": [
+                  (
+                      "Phase 2  Graph JSON + compiler + IR        🚧 WE ARE HERE",
+                      "Phase 2  Graph JSON + compiler + IR        ✅ COMPLETE",
+                  ),
+                  (
+                      "           └─ 2.25 generated-graph compiler stress tests                  ▶ CURRENT\nPhase 3  In-memory DAG scheduler           ⏳",
+                      "           └─ 2.25 generated-graph compiler stress tests                  ✅\nPhase 3  In-memory DAG scheduler           🚧 WE ARE HERE\n           └─ 3.1 op status state machine                              ▶ CURRENT",
+                  ),
+                  (
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | 🚧 In progress — **2.25 current** |\n| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ⏳ Planned |",
+                      "| **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |\n| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.1 current** |",
+                  ),
+                  (
+                      "Deterministic acceptance property:",
+                      "2.25 closes the Phase 2 compiler checkpoint with deterministic generated-graph stress coverage. Seeded DAG families exercise the complete validation/normalization/canonicalization/lowering/identity path, repeated compilation, source-collection permutation invariance, dependency/index invariants, and a 512-op mixed data/control graph without adding timing-based assertions or production semantics.\n\nDeterministic acceptance property:",
+                  ),
+                  (
+                      "> **Phase 2 / Item 2.25 — Add generated-graph compiler stress tests.**",
+                      "> **Phase 3 / Item 3.1 — Add the run-local op status state machine.**",
+                  ),
+              ],
+              "harness/GRAPH.md": [
+                  (
+                      "2.20 deliberately contains no document hash, semantic hash, registry hash, compiler version, IR hash, or provenance pins; 2.21 owns those identities. 2.22 now owns the basic Graph-to-IR DAG/router/join transformation.\n\n## Graph JSON v1",
+                      "2.20 deliberately contains no document hash, semantic hash, registry hash, compiler version, IR hash, or provenance pins; 2.21 owns those identities. 2.22 now owns the basic Graph-to-IR DAG/router/join transformation.\n\n### Generated-graph compiler stress boundary\n\n2.25 closes Phase 2 with deterministic stress tests over the entire frozen compiler pipeline rather than adding another compiler stage. `graph-json-v1-compiler.stress.test.ts` generates seeded valid DAGs with a guaranteed data chain plus extra forward-only data/control edges, public graph inputs, ordered literal/graph-input/opaque-secret bindings on ordinary ports, multiple graph outputs, policies, and editor metadata. The 8/32/96/192-node family is compiled twice from cloned source and must produce byte-identical canonical semantics, immutable Execution IR, and compiler identity.\n\nA separate 256-node fixture shuffles identity-addressed source collections before recompilation. Its normalized saved-document order changes `documentHash`, while canonical semantic JSON, `semanticHash`, `registryHash`, `irHash`, and the full Execution IR remain identical. The largest fixture compiles 512 ops with mixed data/control dependencies and asserts every lowered dependency is unique, numerically sorted, and topologically earlier than its target; every op-output source also points backward in the DAG. There are deliberately no wall-clock thresholds, so the suite tests correctness/scale invariants rather than runner speed.\n\n2.25 required no production compiler changes. With its Ubuntu and Windows CI pass, the Phase 2 checkpoint is frozen: validated Graph JSON plus the same registry/compiler deterministically produces the same canonical Execution IR and identity, while invalid source fails before execution through the stable diagnostic boundary. Phase 3 now owns in-memory execution semantics.\n\n## Graph JSON v1",
+                  ),
+              ],
+          }
+
+          for filename, edits in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"missing expected text in {filename}: {old[:180]}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+      - name: Format tracker docs
+        working-directory: harness
+        run: npx prettier --write TODO.md README.md PLAN.md GRAPH.md
+
+      - name: Commit tracker freeze and remove helper
+        run: |
+          rm .github/workflows/harness-complete-2-25.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/GRAPH.md .github/workflows/harness-complete-2-25.yml
+          git commit -m "docs(harness): complete Phase 2 and advance 3.1"
+          git push origin HEAD:zet-harness-v1
