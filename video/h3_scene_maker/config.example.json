@@ -1,5 +1,6 @@
 {
   "comfy_base_url": "http://127.0.0.1:8188",
+  "comfy_output_root": "/content/ComfyUI/output",
   "workflow_path": "workflows/h3_api.json",
   "output_dir": "runs",
   "clip_seconds": 8,
@@ -11,9 +12,11 @@
     "average": 0.82
   },
   "llm": {
-    "base_url": "https://api.openai.com/v1",
-    "api_key_env": "OPENAI_API_KEY",
-    "model": "gpt-5.6"
+    "base_url": "https://YOUR_LLM_ENDPOINT/v1",
+    "endpoint": "/chat/completions",
+    "api_key_env": "LLM_API_KEY",
+    "model": "YOUR_MULTIMODAL_MODEL",
+    "timeout_seconds": 180
   },
   "workflow_bindings": {
     "prompt": {"node_id": "PROMPT_NODE_ID", "input": "text"},
