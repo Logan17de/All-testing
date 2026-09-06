@@ -1,0 +1,27 @@
+{
+  "title": "Rainy Tokyo Encounter",
+  "target_minutes": 30,
+  "style": "cinematic live-action drama, grounded acting, realistic lighting, stable camera geography",
+  "story": "Aiko leaves work in the rain, discovers that her friend has disappeared, follows a trail through Tokyo, finds her at a closed rooftop cafe, and the two resolve a misunderstanding before sunrise.",
+  "characters": [
+    {
+      "id": "aiko",
+      "name": "Aiko",
+      "description": "Main character. Preserve her exact identity from the supplied references.",
+      "reference_images": ["references/aiko_front.png", "references/aiko_full.png"]
+    },
+    {
+      "id": "friend",
+      "name": "Mina",
+      "description": "Aiko's friend. Preserve her exact identity from the supplied references.",
+      "reference_images": ["references/mina_front.png"]
+    }
+  ],
+  "environment_references": ["references/tokyo_street.png"],
+  "hard_rules": [
+    "Do not change character wardrobe unless the story explicitly causes the change.",
+    "Do not teleport characters or props between clips.",
+    "Maintain screen direction across continuous shots unless a motivated camera move crosses the axis.",
+    "Every new clip must begin from the accepted physical/action state of the previous clip."
+  ]
+}
