@@ -1,0 +1,23 @@
+{
+  "comfy_base_url": "http://127.0.0.1:8188",
+  "workflow_path": "workflows/h3_api.json",
+  "output_dir": "runs",
+  "clip_seconds": 8,
+  "frames_per_review_second": 1,
+  "max_retries": 3,
+  "review_thresholds": {
+    "identity": 0.88,
+    "seam_continuity": 0.80,
+    "average": 0.82
+  },
+  "llm": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "model": "gpt-5.6"
+  },
+  "workflow_bindings": {
+    "prompt": {"node_id": "PROMPT_NODE_ID", "input": "text"},
+    "seed": {"node_id": "SEED_NODE_ID", "input": "seed"},
+    "output_prefix": {"node_id": "SAVE_NODE_ID", "input": "filename_prefix"}
+  }
+}
