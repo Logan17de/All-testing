@@ -1,6 +1,11 @@
 import type { ExecutionIrV1 } from "@zet-harness/graph";
 
-import { createRunOpState, transitionRunOpState, type RunOpState } from "./op-status.js";
+import {
+  createRunOpState,
+  isTerminalRunOpStatus,
+  transitionRunOpState,
+  type RunOpState,
+} from "./op-status.js";
 
 export interface RunReadinessSnapshot {
   readonly ops: readonly RunOpState[];
@@ -185,6 +190,34 @@ export class RunReadiness {
     const next = transitionRunOpState(current, "skipped");
     this.ops[op] = next;
     return next;
+  }
+
+  /**
+   * Terminalize every unfinished op for run-level cancellation.
+   *
+   * Completed/skipped/failed/cancelled work remains untouched. Pending, ready,
+   * reserved-ready, running, waiting, and retry-wait work becomes cancelled.
+   * Dependency counters remain historical scheduler state; cancellation never
+   * pretends that a predecessor completed successfully.
+   */
+  cancelNonTerminalOps(): readonly number[] {
+    const cancelled: number[] = [];
+
+    for (let op = 0; op < this.ops.length; op += 1) {
+      const current = this.ops[op];
+      if (current === undefined || isTerminalRunOpStatus(current.status)) {
+        continue;
+      }
+
+      this.ops[op] = transitionRunOpState(current, "cancelled");
+      cancelled.push(op);
+    }
+
+    this.readyQueue.length = 0;
+    this.readyHead = 0;
+    this.reservedReadyOps.clear();
+
+    return Object.freeze(cancelled);
   }
 
   /** Return the current FIFO queue without exposing mutable scheduler storage. */
