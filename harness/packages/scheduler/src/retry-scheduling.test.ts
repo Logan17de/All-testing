@@ -130,10 +130,7 @@ describe("bounded retry scheduling", () => {
   it("releases concurrency during retry wait so unrelated ready work can run", async () => {
     vi.useFakeTimers();
     const plan = ir(
-      [
-        op("retrying", [], { retry: { maxAttempts: 2, backoffMs: 100 } }),
-        op("independent", []),
-      ],
+      [op("retrying", [], { retry: { maxAttempts: 2, backoffMs: 100 } }), op("independent", [])],
       1,
     );
     const scheduler = new SchedulerConcurrency(1);
