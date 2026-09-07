@@ -167,9 +167,13 @@ function scheduleTimeout(timeoutMs: number, onTimeout: () => void): () => void {
   };
 }
 
-/** Wait for a scheduler delay, resolving early and cleaning the timer on run cancellation. */
-function waitForDelay(delayMs: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) {
+function anySignalAborted(signals: readonly AbortSignal[]): boolean {
+  return signals.some((signal) => signal.aborted);
+}
+
+/** Wait for a scheduler delay, resolving early when any stop signal aborts. */
+function waitForDelay(delayMs: number, signals: readonly AbortSignal[]): Promise<void> {
+  if (delayMs === 0 || anySignalAborted(signals)) {
     return Promise.resolve();
   }
 
@@ -183,22 +187,29 @@ function waitForDelay(delayMs: number, signal: AbortSignal): Promise<void> {
       }
       settled = true;
       cancelTimer();
-      signal.removeEventListener("abort", finish);
+      for (const signal of signals) {
+        signal.removeEventListener("abort", finish);
+      }
       resolve();
     };
 
     cancelTimer = scheduleTimeout(delayMs, finish);
-    signal.addEventListener("abort", finish, { once: true });
+    for (const signal of signals) {
+      signal.addEventListener("abort", finish, { once: true });
+    }
 
-    if (signal.aborted) {
+    if (anySignalAborted(signals)) {
       finish();
     }
   });
 }
 
-/** Wait for an attempt's underlying executor to settle, or stop waiting if the run is cancelled. */
-function waitForSettlementOrAbort(settlement: Promise<void>, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) {
+/** Wait for an attempt's underlying executor to settle, or any stop signal to abort. */
+function waitForSettlementOrAbort(
+  settlement: Promise<void>,
+  signals: readonly AbortSignal[],
+): Promise<void> {
+  if (anySignalAborted(signals)) {
     return Promise.resolve();
   }
 
@@ -210,14 +221,18 @@ function waitForSettlementOrAbort(settlement: Promise<void>, signal: AbortSignal
         return;
       }
       settled = true;
-      signal.removeEventListener("abort", finish);
+      for (const signal of signals) {
+        signal.removeEventListener("abort", finish);
+      }
       resolve();
     };
 
-    signal.addEventListener("abort", finish, { once: true });
+    for (const signal of signals) {
+      signal.addEventListener("abort", finish, { once: true });
+    }
     void settlement.then(finish, finish);
 
-    if (signal.aborted) {
+    if (anySignalAborted(signals)) {
       finish();
     }
   });
@@ -232,6 +247,10 @@ function waitForSettlementOrAbort(settlement: Promise<void>, signal: AbortSignal
  * running -> retry-wait -> ready, retry wait releases concurrency, and downstream
  * dependencies are released only after eventual completion.
  *
+ * Retry waits are liveness tasks, not active execution tasks. They keep the run
+ * alive while backoff is pending but never block dispatch of unrelated ready work.
+ * Zero-delay retries use an immediate Promise path rather than a timer.
+ *
  * Backoff/jitter are runtime hooks rather than hidden randomness. By default the
  * scheduler waits the IR `backoffMs` value unchanged. Hook outputs are validated
  * as non-negative safe-integer milliseconds so tests and future runtimes can
@@ -245,7 +264,9 @@ function waitForSettlementOrAbort(settlement: Promise<void>, signal: AbortSignal
 export class PlainDagRun {
   private readonly readiness: RunReadiness;
   private readonly abortController = new AbortController();
+  private readonly retryWaitStopController = new AbortController();
   private readonly activeTasks = new Set<Promise<void>>();
+  private readonly retryWaitTasks = new Set<Promise<void>>();
   private readonly attempts: number[];
   private started = false;
   private settled = false;
@@ -298,11 +319,12 @@ export class PlainDagRun {
     while (true) {
       this.dispatchAvailableReadyOps();
 
-      if (this.activeTasks.size === 0) {
+      const livenessTasks = [...this.activeTasks, ...this.retryWaitTasks];
+      if (livenessTasks.length === 0) {
         break;
       }
 
-      await Promise.race(this.activeTasks);
+      await Promise.race(livenessTasks);
     }
 
     this.settled = true;
@@ -462,18 +484,7 @@ export class PlainDagRun {
         permit?.release();
         permit = undefined;
 
-        const waits: Promise<void>[] = [waitForDelay(retryDelayMs, this.signal)];
-        if (priorAttemptSettlement !== undefined) {
-          waits.push(waitForSettlementOrAbort(priorAttemptSettlement, this.signal));
-        }
-        await Promise.all(waits);
-
-        if (this.signal.aborted || this.hasFailure) {
-          return;
-        }
-        if (this.readiness.getOpState(op).status === "retry-wait") {
-          this.readiness.readyRetryOp(op);
-        }
+        this.scheduleRetryWait(op, retryDelayMs, priorAttemptSettlement);
         return;
       }
 
@@ -483,6 +494,38 @@ export class PlainDagRun {
       this.recordFailure(error);
     } finally {
       permit?.release();
+    }
+  }
+
+  private scheduleRetryWait(
+    op: number,
+    retryDelayMs: number,
+    priorAttemptSettlement: Promise<void> | undefined,
+  ): void {
+    const task = this.waitForRetry(op, retryDelayMs, priorAttemptSettlement);
+    this.retryWaitTasks.add(task);
+    void task.finally(() => {
+      this.retryWaitTasks.delete(task);
+    });
+  }
+
+  private async waitForRetry(
+    op: number,
+    retryDelayMs: number,
+    priorAttemptSettlement: Promise<void> | undefined,
+  ): Promise<void> {
+    const stopSignals = [this.signal, this.retryWaitStopController.signal] as const;
+    const waits: Promise<void>[] = [waitForDelay(retryDelayMs, stopSignals)];
+    if (priorAttemptSettlement !== undefined) {
+      waits.push(waitForSettlementOrAbort(priorAttemptSettlement, stopSignals));
+    }
+    await Promise.all(waits);
+
+    if (this.signal.aborted || this.hasFailure || this.retryWaitStopController.signal.aborted) {
+      return;
+    }
+    if (this.readiness.getOpState(op).status === "retry-wait") {
+      this.readiness.readyRetryOp(op);
     }
   }
 
@@ -534,6 +577,7 @@ export class PlainDagRun {
     if (!this.hasFailure) {
       this.hasFailure = true;
       this.firstFailure = error;
+      this.retryWaitStopController.abort(error);
     }
   }
 }
