@@ -2,7 +2,9 @@ import { RuntimeDaemon } from "./runtime-daemon.js";
 
 const configuredPort = process.env.ZET_RUNTIME_PORT;
 const runtimePort = configuredPort === undefined ? undefined : Number(configuredPort);
-const daemon = new RuntimeDaemon(runtimePort === undefined ? undefined : { api: { port: runtimePort } });
+const daemon = new RuntimeDaemon(
+  runtimePort === undefined ? undefined : { api: { port: runtimePort } },
+);
 
 let stopRequested = false;
 
