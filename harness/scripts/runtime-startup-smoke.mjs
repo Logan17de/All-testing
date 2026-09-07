@@ -55,7 +55,9 @@ async function waitForReady() {
     await sleep(20);
   }
 
-  throw new Error(`Zet Harness runtime did not become ready within ${startupTimeoutMs}ms.\n${output}`);
+  throw new Error(
+    `Zet Harness runtime did not become ready within ${startupTimeoutMs}ms.\n${output}`,
+  );
 }
 
 try {
