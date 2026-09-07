@@ -1,7 +1,4 @@
-import {
-  RuntimeEventStream,
-  type RuntimeStreamEvent,
-} from "./runtime-event-stream.js";
+import { RuntimeEventStream, type RuntimeStreamEvent } from "./runtime-event-stream.js";
 import {
   RuntimeHttpServer,
   type RuntimeHttpServerOptions,
