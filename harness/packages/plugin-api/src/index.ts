@@ -169,16 +169,33 @@ export interface NodeRouterControlContract {
   readonly branches: readonly NodePortName[];
 }
 
-/**
- * Explicit join control shape. V1 reserves only activation-aware `all-active`;
- * `any`/quorum semantics are intentionally not smuggled into this contract yet.
- */
-export interface NodeJoinControlContract {
+interface NodeJoinControlContractBase {
   readonly kind: "join";
   readonly inputs: readonly NodePortName[];
   readonly output: NodePortName;
+}
+
+/** Wait until every activated input lane has terminated; skipped lanes do not block. */
+export interface NodeAllActiveJoinControlContract extends NodeJoinControlContractBase {
   readonly mode: "all-active";
 }
+
+/** Release after the first completed activated input lane. */
+export interface NodeAnyJoinControlContract extends NodeJoinControlContractBase {
+  readonly mode: "any";
+}
+
+/** Release after `quorum` distinct input lanes have completed. */
+export interface NodeQuorumJoinControlContract extends NodeJoinControlContractBase {
+  readonly mode: "quorum";
+  readonly quorum: number;
+}
+
+/** Explicit activation-aware join policy carried by the resolved node manifest. */
+export type NodeJoinControlContract =
+  | NodeAllActiveJoinControlContract
+  | NodeAnyJoinControlContract
+  | NodeQuorumJoinControlContract;
 
 /**
  * Explicit loop boundary shape only. This does not make cycles executable.
