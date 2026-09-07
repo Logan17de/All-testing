@@ -71,7 +71,7 @@ Phase 2  Graph JSON + compiler + IR        ✅ COMPLETE
            ├─ 2.23 canonical hash tests                              ✅
            ├─ 2.24 golden diagnostic tests                           ✅
            └─ 2.25 generated-graph compiler stress tests                  ✅
-Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE
+Phase 3  In-memory DAG scheduler           ✅ COMPLETE
            ├─ 3.1 op status state machine                              ✅
            ├─ 3.2 readiness queue + dependency counters                ✅
            ├─ 3.3 bounded global/per-run concurrency                   ✅
@@ -88,8 +88,9 @@ Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE
            ├─ 3.14 transient vs durable runtime events                 ✅
            ├─ 3.15 deterministic mock nodes/executors                  ✅
            ├─ 3.16 offline scheduler scenario tests                    ✅
-           └─ 3.17 scheduler stress/race tests                         ▶ CURRENT
-Phase 4  Runtime daemon + SQLite           ⏳
+           └─ 3.17 scheduler stress/race tests                         ✅
+Phase 4  Runtime daemon + SQLite           🚧 WE ARE HERE
+           └─ 4.1 long-lived Node runtime process                     ▶ CURRENT
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
 Phase 7  Visual graph + inspector          ⏳  ← Harness v0.1 boundary
@@ -106,8 +107,8 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
-| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.17 current** |
-| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
+| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ✅ Complete |
+| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.1 current** |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ⏳ **v0.1 finish line** |
@@ -361,6 +362,8 @@ Phase 3 deterministic scheduler fixtures live behind the explicit `@zet-harness/
 
 Phase 3 offline scheduler scenarios compose those deterministic fixtures with the real scheduler primitives rather than introducing a separate acceptance runtime. Plain DAG coverage proves strict chain ordering, concurrent fan-out/fan-in, timeout isolation, bounded retry before downstream release, cooperative cancellation, and fail-fast propagation. Structured-control coverage composes `RunRouterActivation`, `RunControlEdges`, `RunJoinActivation`, and `RunReadiness` to prove selected-branch activation, inactive-path skipping, and an activation-aware `all-active` join. The suite uses no database, model provider, wall-clock sleeps, or random behavior; timeout timing is controlled with fake timers and concurrency is controlled by manual gates.
 
+Phase 3 closes with deterministic stress/race coverage over the real scheduler: a 256-op seeded DAG verifies exactly-once scheduler admission under bounded concurrency, a 64-op retry storm verifies shared retry ceilings under pressure, 120 semaphore waiters exercise FIFO order while many are aborted, saturated cancellation proves queued permits are released, and two simultaneous runs prove the global ceiling remains hard across run boundaries. The suite also exposed and fixed a fail-fast admission race: when a run-local limit exceeded the global limit, siblings already queued for global capacity could start after another op had failed. `PlainDagRun` now owns a separate internal work-stop signal that aborts not-yet-admitted concurrency waits and retry waits on the first terminal scheduler failure without aborting the public run cancellation signal. Already executing in-process work remains cooperative and may settle normally. This preserves the failure/cancellation boundary while preventing post-failure admission.
+
 Side effects are explicit. The contract distinguishes determinism, effect class, idempotency, retry defaults, and recovery policy. Compile-time validation keeps determinism separate from repeat safety: a deterministic external write is not automatically safe to retry, while a nondeterministic external read may still be side-effect-idempotent. Unknown-idempotency external writes cannot declare automatic retry beyond one attempt or automatic rerun recovery; idempotent/idempotency-key writes may declare controlled retries. Reconcile recovery is reserved for external writes, and compile-time/control nodes without executors cannot carry runtime retry/recovery defaults. Never claim exactly-once execution for arbitrary third-party effects. Secret-only inputs are also compile-time constrained: only opaque secret-reference bindings may target `secret: true`; literals, public graph inputs, and node data edges are rejected without inspecting or echoing secret material. Secret-provider resolution and authorization remain runtime concerns.
 
 Keep three concepts separate:
@@ -426,4 +429,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 3 / Item 3.17 — Add scheduler stress/race tests.**
+> **Phase 4 / Item 4.1 — Create `apps/runtime` as a long-lived Node process.**
