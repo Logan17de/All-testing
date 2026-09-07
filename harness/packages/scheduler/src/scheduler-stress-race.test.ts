@@ -61,7 +61,7 @@ describe("scheduler stress and race coverage", () => {
     let maxActive = 0;
 
     const run = new PlainDagRun(plan, scheduler.createRun(plan), async ({ op }) => {
-      invocationCounts[op] += 1;
+      invocationCounts[op] = (invocationCounts[op] ?? 0) + 1;
       active += 1;
       maxActive = Math.max(maxActive, active);
       try {
@@ -103,7 +103,7 @@ describe("scheduler stress and race coverage", () => {
       plan,
       scheduler.createRun(plan),
       async ({ op, attempt }) => {
-        invocationCounts[op] += 1;
+        invocationCounts[op] = (invocationCounts[op] ?? 0) + 1;
         active += 1;
         maxActive = Math.max(maxActive, active);
         try {
