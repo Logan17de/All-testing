@@ -172,6 +172,7 @@ describe("RuntimeHttpServer", () => {
     const reader = requireReader(response);
 
     expect(server.snapshot().eventClients).toBe(1);
+    await readUntil(reader, ": connected");
     await server.stop();
 
     const result = await reader.read();
