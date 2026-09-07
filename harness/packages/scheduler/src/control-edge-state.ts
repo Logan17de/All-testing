@@ -71,8 +71,8 @@ function freezeIndexLists(items: readonly number[][]): readonly (readonly number
  * - completed: the edge was active and its source-side obligation finished.
  *
  * Only unresolved→active|skipped and active→completed are legal. `skipped` and
- * `completed` are terminal. This layer records control truth only; activation-aware
- * join readiness is owned by 3.7 and no op dependency counter is mutated here.
+ * `completed` are terminal. This layer records control truth only; 3.7 consumes
+ * that truth for activation-aware joins while dependency counters stay in readiness.
  */
 export class RunControlEdges {
   private readonly states: RunControlEdgeState[];
