@@ -100,7 +100,7 @@ Goal: prove execution semantics without persistence hiding scheduler bugs.
 - [x] 3.3 Add bounded global/per-run concurrency using native Promises/semaphores.
 - [x] 3.4 Execute independent DAG branches concurrently.
 - [x] 3.5 Add router branch activation.
-- [ ] 3.6 Add control-edge runtime states: unresolved/active/skipped/completed.
+- [x] 3.6 Add control-edge runtime states: unresolved/active/skipped/completed.
 - [ ] 3.7 Add activation-aware `all-active` joins.
 - [ ] 3.8 Add explicit `any`/quorum semantics only after `all-active` is solid.
 - [ ] 3.9 Add run cancellation with `AbortController`/`AbortSignal`.
