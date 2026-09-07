@@ -15,7 +15,7 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: harness-ci-${{ github.workflow }}-${{ github.ref }}
@@ -46,22 +46,6 @@ jobs:
 
       - name: Pin npm
         run: npm install --global npm@12.0.2 --no-audit --no-fund
-
-      - name: Sync workspace lockfile
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-
-      - name: Commit synchronized lockfile
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          git add package-lock.json
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore(runtime): sync workspace lockfile"
-          git push origin HEAD:zet-harness-v1
 
       - name: Clean install
         run: npm ci --no-audit --no-fund
