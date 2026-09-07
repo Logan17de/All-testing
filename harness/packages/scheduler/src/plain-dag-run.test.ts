@@ -30,10 +30,7 @@ function op(
   };
 }
 
-function ir(
-  ops: readonly ExecutionIrOpV1[],
-  maxParallelism?: number,
-): ExecutionIrV1 {
+function ir(ops: readonly ExecutionIrOpV1[], maxParallelism?: number): ExecutionIrV1 {
   return {
     format: "harness.ir/v1",
     graphInputs: [],
@@ -58,10 +55,7 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 
 describe("PlainDagRun", () => {
   it("executes independent fan-out branches concurrently and waits for both before fan-in", async () => {
-    const plan = ir(
-      [op("root", []), op("left", [0]), op("right", [0]), op("join", [1, 2])],
-      2,
-    );
+    const plan = ir([op("root", []), op("left", [0]), op("right", [0]), op("join", [1, 2])], 2);
     const scheduler = new SchedulerConcurrency(4);
     const branchGate = deferred();
     const bothBranchesStarted = deferred();

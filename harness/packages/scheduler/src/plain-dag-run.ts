@@ -1,10 +1,6 @@
 import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 
-import type {
-  ConcurrencyPermit,
-  RunConcurrency,
-  RunConcurrencySnapshot,
-} from "./concurrency.js";
+import type { ConcurrencyPermit, RunConcurrency, RunConcurrencySnapshot } from "./concurrency.js";
 import { RunReadiness, type RunReadinessSnapshot } from "./run-readiness.js";
 
 export interface PlainDagOpExecution {
@@ -20,9 +16,7 @@ export interface PlainDagOpExecution {
  * timeout, retry, or cancellation semantics. Later runtime layers can adapt this
  * boundary to concrete node executors while the scheduler owns ordering only.
  */
-export type PlainDagOpExecutor = (
-  execution: PlainDagOpExecution,
-) => void | Promise<void>;
+export type PlainDagOpExecutor = (execution: PlainDagOpExecution) => void | Promise<void>;
 
 export interface PlainDagRunSnapshot {
   readonly started: boolean;
