@@ -15,7 +15,7 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: harness-ci-${{ github.workflow }}-${{ github.ref }}
@@ -38,56 +38,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Close 4.1 roadmap
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path, old, new):
-              file = Path(path)
-              text = file.read_text(encoding="utf-8")
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"Expected one match in {path}, found {count}: {old!r}")
-              file.write_text(text.replace(old, new), encoding="utf-8")
-
-          replace_once(
-              "TODO.md",
-              "- [ ] 4.1 Create `apps/runtime` as a long-lived Node process.",
-              "- [x] 4.1 Create `apps/runtime` as a long-lived Node process.",
-          )
-          replace_once(
-              "TODO.md",
-              "**4.1 — Create `apps/runtime` as a long-lived Node process.**",
-              "**4.2 — Bind the local API to loopback by default using built-in `node:http` where practical.**",
-          )
-          replace_once(
-              "PLAN.md",
-              "Phase 4  Runtime daemon + SQLite           🚧 WE ARE HERE\n           └─ 4.1 long-lived Node runtime process                     ▶ CURRENT",
-              "Phase 4  Runtime daemon + SQLite           🚧 WE ARE HERE\n           ├─ 4.1 long-lived Node runtime process                     ✅\n           └─ 4.2 loopback node:http API                              ▶ CURRENT",
-          )
-          replace_once(
-              "PLAN.md",
-              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.1 current** |",
-              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.2 current** |",
-          )
-          replace_once(
-              "PLAN.md",
-              "> **Phase 4 / Item 4.1 — Create `apps/runtime` as a long-lived Node process.**",
-              "> **Phase 4 / Item 4.2 — Bind the local API to loopback by default using built-in `node:http` where practical.**",
-          )
-          PY
-          git add TODO.md PLAN.md
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "docs: complete runtime process foundation"
-          git push origin HEAD:zet-harness-v1
 
       - name: Setup Node
         uses: actions/setup-node@v4
