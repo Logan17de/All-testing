@@ -97,6 +97,27 @@ function resolver(pluginVersion = "3"): NodeResolutionResolver {
   };
 }
 
+function resolverWithJoin(control: NodeStructuredControlContract): NodeResolutionResolver {
+  if (control.kind !== "join") {
+    throw new TypeError("Expected a join control contract.");
+  }
+
+  const base = resolver();
+  const joinManifest = manifest("join", { behavior: controlBehavior, control });
+  return {
+    getManifest(type, version) {
+      return type === "join" && version === "1"
+        ? joinManifest
+        : base.getManifest(type, version);
+    },
+    getResolution(type, version) {
+      return type === "join" && version === "1"
+        ? { manifest: joinManifest, plugin: { id: "test.plugin", version: "3" } }
+        : base.getResolution(type, version);
+    },
+  };
+}
+
 function compilerSource(): GraphCompilerSourceV1 {
   const nodePins = [
     "route",
@@ -318,6 +339,42 @@ describe("Graph JSON v1 -> Execution IR v1 lowering", () => {
       { from: { op: 4 }, to: { op: 2, port: "right" } },
       { from: { op: 2, port: "out" }, to: { op: 1 } },
     ]);
+  });
+
+  it("lowers any and quorum join policy without changing Graph JSON", () => {
+    const anyIr = lowerCanonicalGraphJsonV1ToExecutionIr(
+      canonicalSource(),
+      resolverWithJoin({
+        kind: "join",
+        inputs: ["left", "right"],
+        output: "out",
+        mode: "any",
+      }),
+    );
+    const quorumIr = lowerCanonicalGraphJsonV1ToExecutionIr(
+      canonicalSource(),
+      resolverWithJoin({
+        kind: "join",
+        inputs: ["left", "right"],
+        output: "out",
+        mode: "quorum",
+        quorum: 2,
+      }),
+    );
+
+    expect(anyIr.ops[2]?.control).toEqual({
+      kind: "join",
+      inputs: ["left", "right"],
+      output: "out",
+      mode: "any",
+    });
+    expect(quorumIr.ops[2]?.control).toEqual({
+      kind: "join",
+      inputs: ["left", "right"],
+      output: "out",
+      mode: "quorum",
+      quorum: 2,
+    });
   });
 
   it("copies graph runtime policy intent without embedding external grants", () => {
