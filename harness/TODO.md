@@ -110,7 +110,7 @@ Goal: prove execution semantics without persistence hiding scheduler bugs.
 - [x] 3.13 Add small typed runtime event emitter.
 - [x] 3.14 Separate transient stream events from events intended for durable storage.
 - [x] 3.15 Add deterministic mock nodes/executors.
-- [ ] 3.16 Add offline scheduler tests for chain, fan-out/fan-in, router/join, timeout, retry, cancellation, and failure propagation.
+- [x] 3.16 Add offline scheduler tests for chain, fan-out/fan-in, router/join, timeout, retry, cancellation, and failure propagation.
 - [ ] 3.17 Add scheduler stress/race tests.
 
 **Checkpoint:** deterministic mock graphs execute correctly and concurrently entirely in memory with no database or model dependency.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**3.16 — Add offline scheduler tests for chain, fan-out/fan-in, router/join, timeout, retry, cancellation, and failure propagation.**
+**3.17 — Add scheduler stress/race tests.**
