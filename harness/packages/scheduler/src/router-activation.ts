@@ -1,6 +1,6 @@
 import type { ExecutionIrRouterControlV1, ExecutionIrV1 } from "@zet-harness/graph";
 
-import { RunReadiness } from "./run-readiness.js";
+import type { RunReadiness } from "./run-readiness.js";
 
 export interface RouterBranchActivation {
   readonly routerOp: number;
