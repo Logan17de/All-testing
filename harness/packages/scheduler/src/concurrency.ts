@@ -25,8 +25,15 @@ function assertPositiveSafeInteger(label: string, value: number): void {
   }
 }
 
-function abortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? new Error("Concurrency acquisition aborted.");
+function abortReason(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) {
+    return signal.reason;
+  }
+
+  return new Error(
+    signal.reason === undefined ? "Concurrency acquisition aborted." : String(signal.reason),
+    { cause: signal.reason },
+  );
 }
 
 /**
