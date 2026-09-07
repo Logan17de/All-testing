@@ -54,8 +54,7 @@ export function isDurableRuntimeEvent<TEvent extends ClassifiedRuntimeEventLike>
  * anything. Phase 4 owns the durable journal and SSE transport details.
  */
 export class RuntimeEventChannels<TEvent extends ClassifiedRuntimeEventLike> {
-  private readonly transientEmitter =
-    new TypedRuntimeEventEmitter<TransientRuntimeEvent<TEvent>>();
+  private readonly transientEmitter = new TypedRuntimeEventEmitter<TransientRuntimeEvent<TEvent>>();
   private readonly durableEmitter = new TypedRuntimeEventEmitter<DurableRuntimeEvent<TEvent>>();
 
   onTransient<TType extends RuntimeEventType<TransientRuntimeEvent<TEvent>>>(
