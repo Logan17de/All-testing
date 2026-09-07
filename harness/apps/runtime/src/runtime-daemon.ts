@@ -44,9 +44,7 @@ export class RuntimeDaemon {
   private stopPromise: Promise<boolean> | undefined;
 
   constructor(options: RuntimeDaemonOptions = {}) {
-    this.database = new SqliteDatabase(
-      options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH },
-    );
+    this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
     this.httpServer = new RuntimeHttpServer(options.api, this.eventStream);
 
     let resolveStopped!: () => void;
