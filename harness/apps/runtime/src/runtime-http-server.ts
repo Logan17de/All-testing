@@ -1,5 +1,4 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 
 export const DEFAULT_RUNTIME_HOST = "127.0.0.1";
 export const DEFAULT_RUNTIME_PORT = 3211;
@@ -125,7 +124,7 @@ export class RuntimeHttpServer {
       throw new TypeError("Runtime HTTP server did not expose a TCP listening address.");
     }
 
-    this.boundPort = (address as AddressInfo).port;
+    this.boundPort = address.port;
     this.state = "listening";
     return true;
   }
