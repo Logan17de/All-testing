@@ -309,6 +309,11 @@ function waitForSettlementOrAbort(
  * as non-negative safe-integer milliseconds so tests and future runtimes can
  * inject deterministic exponential/jitter strategies without changing IR v1.
  *
+ * 3.17 fail-fast uses a separate internal work-stop signal. The first terminal
+ * scheduler failure aborts pending concurrency admissions and retry waits without
+ * aborting the public run signal or relabeling the run as user-cancelled. Work
+ * already executing remains cooperative and may settle normally.
+ *
  * In-process JavaScript cannot be forcibly preempted. If a timed-out executor
  * ignores its signal, its permit remains charged until the underlying Promise
  * settles. A retry never becomes ready before that prior attempt settles, so two
@@ -317,7 +322,7 @@ function waitForSettlementOrAbort(
 export class PlainDagRun {
   private readonly readiness: RunReadiness;
   private readonly abortController = new AbortController();
-  private readonly retryWaitStopController = new AbortController();
+  private readonly workStopController = new AbortController();
   private readonly activeTasks = new Set<Promise<void>>();
   private readonly retryWaitTasks = new Set<Promise<void>>();
   private readonly attempts: number[];
@@ -363,6 +368,7 @@ export class PlainDagRun {
 
     this.readiness.cancelNonTerminalOps();
     this.abortController.abort(reason);
+    this.workStopController.abort(reason);
     return true;
   }
 
@@ -430,8 +436,8 @@ export class PlainDagRun {
     let priorAttemptSettlement: Promise<void> | undefined;
 
     try {
-      permit = await this.concurrency.acquire(this.signal);
-      if (this.signal.aborted) {
+      permit = await this.concurrency.acquire(this.workStopController.signal);
+      if (this.signal.aborted || this.hasFailure || this.workStopController.signal.aborted) {
         return;
       }
 
@@ -536,8 +542,15 @@ export class PlainDagRun {
         return;
       }
 
-      const operation = this.ir.ops[op];
       const current = this.readiness.getOpState(op);
+      if (this.hasFailure && this.workStopController.signal.aborted) {
+        if (current.status === "running") {
+          this.readiness.failRunningOp(op);
+        }
+        return;
+      }
+
+      const operation = this.ir.ops[op];
       const failedAttempt = this.attempts[op] ?? 0;
       const attemptBudgetUsed = this.attemptBudgetUsed[op] ?? 0;
       const maxAttempts = operation?.behavior.retry?.maxAttempts ?? 1;
@@ -608,14 +621,14 @@ export class PlainDagRun {
     retryDelayMs: number,
     priorAttemptSettlement: Promise<void> | undefined,
   ): Promise<void> {
-    const stopSignals = [this.signal, this.retryWaitStopController.signal] as const;
+    const stopSignals = [this.signal, this.workStopController.signal] as const;
     const waits: Promise<void>[] = [waitForDelay(retryDelayMs, stopSignals)];
     if (priorAttemptSettlement !== undefined) {
       waits.push(waitForSettlementOrAbort(priorAttemptSettlement, stopSignals));
     }
     await Promise.all(waits);
 
-    if (this.signal.aborted || this.hasFailure || this.retryWaitStopController.signal.aborted) {
+    if (this.signal.aborted || this.hasFailure || this.workStopController.signal.aborted) {
       return;
     }
     if (this.readiness.getOpState(op).status === "retry-wait") {
@@ -742,7 +755,7 @@ export class PlainDagRun {
     if (!this.hasFailure) {
       this.hasFailure = true;
       this.firstFailure = error;
-      this.retryWaitStopController.abort(error);
+      this.workStopController.abort(error);
     }
   }
 }
