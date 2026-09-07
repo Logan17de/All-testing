@@ -129,7 +129,8 @@ Phase 2 graph + compiler + IR          ✅ COMPLETE
 3.2 readiness queue + dependency counters ✅
 3.3 bounded global/per-run concurrency   ✅
 3.4 concurrent DAG branches              ✅
-3.5 router branch activation             ▶ CURRENT
+3.5 router branch activation             ✅
+3.6 control-edge runtime states           ▶ CURRENT
 ```
 
 The Graph JSON v1 freeze now includes:
@@ -157,6 +158,8 @@ Item 3.2 adds `RunReadiness` over immutable Execution IR dependencies. Zero-depe
 Item 3.3 adds native-Promise concurrency admission without starting the executor loop. `AsyncSemaphore` is a FIFO bounded semaphore with runtime-frozen permits/snapshots and duplicate-release protection. `SchedulerConcurrency` owns one runtime-global semaphore; every `RunConcurrency` owns an independent per-run semaphore derived from compiled `policies.maxParallelism`, inheriting the global limit when that policy is omitted. A run acquires its local permit before the global permit so work already blocked by its own run ceiling cannot hoard global slots. Combined release returns the global slot first, then the run-local slot. Separate runs therefore share one hard global ceiling while preserving independent local queues. 3.3 adds no timeout, abort-aware waiter removal, retries, executor calls, or DAG dispatch loop; cancellation-aware waits remain 3.9 and actual concurrent branch execution begins in 3.4.
 
 Item 3.4 adds the first one-shot in-memory execution loop as `PlainDagRun`. It supports only the ordinary executable DAG subset: structured-control descriptors and `executionMode: none` are rejected rather than accidentally treated as normal fan-out. FIFO-ready reservations acquire the 3.3 run/global permit before `ready → running`; successful execution transitions to `completed`, then releases every ordinary predecessor pair so newly-unblocked work enters the readiness queue. Independent ready branches are dispatched concurrently up to the compiled per-run/global ceilings, while fan-in remains blocked until every predecessor completes. Ready reservations are tracked explicitly so an op cannot be double-dispatched. Executor failure marks only the active op `failed`, releases no downstream dependency, stops new dispatch, lets already-admitted peers settle, and rejects with the original error; downstream failure propagation remains later coverage. The executor callback is adapter-neutral and returns no runtime values yet, preserving later model/tool/value-materialization ownership. Router activation begins in 3.5; control-edge states, joins, cancellation, timeout, retry, events, and persistence remain later items.
+
+Item 3.5 adds run-local router selection as `RunRouterActivation` without prematurely introducing control-edge state. A scheduler-owned router must be a dequeued ready reservation with `executionMode: none`; selecting one declared branch transitions the router `ready → running → completed` without consuming an executor/concurrency permit, then releases only the deduplicated router→target dependency pairs wired from that selected output port. Unselected branches are not released and therefore stay blocked until 3.6 can represent explicit skipped edge outcomes. One selected branch is recorded per router in deterministic frozen snapshots. Undeclared branches, repeat selection, non-router activation, malformed/unported router wiring, and missing IR dependency links fail before dependency counters can be corrupted. Branch choice itself is supplied by the caller/runtime adapter; scheduler code does not inspect node values or invent routing policy. 3.6 now owns `unresolved/active/skipped/completed` control-edge runtime state.
 
 Validation ownership is permanently separated:
 
