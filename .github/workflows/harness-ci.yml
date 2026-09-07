@@ -15,7 +15,7 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: harness-ci-${{ github.workflow }}-${{ github.ref }}
@@ -38,69 +38,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Close 4.4 roadmap
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace_once(text: str, old: str, new: str, label: str) -> str:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"Expected exactly one {label} match, found {count}")
-              return text.replace(old, new, 1)
-
-          todo_path = Path("TODO.md")
-          todo = todo_path.read_text(encoding="utf-8")
-          todo = replace_once(
-              todo,
-              "- [ ] 4.4 Add SQLite through Node 24 `node:sqlite`; no ORM initially.",
-              "- [x] 4.4 Add SQLite through Node 24 `node:sqlite`; no ORM initially.",
-              "TODO 4.4 checkbox",
-          )
-          todo = replace_once(
-              todo,
-              "**4.4 — Add SQLite through Node 24 `node:sqlite`; no ORM initially.**",
-              "**4.5 — Add a tiny ordered SQL migration runner + `schema_migrations`.**",
-              "TODO next action",
-          )
-          todo_path.write_text(todo, encoding="utf-8")
-
-          plan_path = Path("PLAN.md")
-          plan = plan_path.read_text(encoding="utf-8")
-          plan = replace_once(
-              plan,
-              "           └─ 4.4 node:sqlite database foundation                     ▶ CURRENT",
-              "           ├─ 4.4 node:sqlite database foundation                     ✅\n           └─ 4.5 ordered SQL migration runner                        ▶ CURRENT",
-              "PLAN phase tree",
-          )
-          plan = replace_once(
-              plan,
-              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.4 current** |",
-              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.5 current** |",
-              "PLAN phase map",
-          )
-          old_runtime = "Phase 4 runtime ownership now has a real process and transport boundary. `apps/runtime` is a dependency-light long-lived Node process with explicit lifecycle and clean shutdown behavior. Its built-in `node:http` listener binds `127.0.0.1` by default, does not report `running`/ready until `listen()` succeeds, and exposes `GET /api/health` plus `GET /api/events`. The SSE transport uses a bounded in-memory replay stream with process-local monotonic IDs, live fan-out, `?cursor=N` and `Last-Event-ID` reconnect semantics, explicit `400` malformed-cursor and `409` unavailable-cursor responses, and clean client teardown during daemon shutdown. Cursorless clients begin live from the current stream head. These IDs and replay buffers are intentionally non-durable and reset with the process; SQLite-backed durable event identity, authentication/origin policy, and database health remain later Phase 4 responsibilities."
-          new_runtime = old_runtime + " `@zet-harness/db` now provides the direct Node 24 `DatabaseSync` boundary with no ORM: it owns only open/close lifecycle, supports in-memory and file-backed paths, creates parent directories when needed, and exposes the live native connection only while open. The runtime opens SQLite before binding/announcing readiness and closes it after SSE/HTTP transport shutdown; failed HTTP startup closes the database again. The default file is `data/zet-harness.sqlite`, with `ZET_RUNTIME_DB_PATH` available for explicit override. Foreign-key enforcement is deliberately disabled in 4.4 despite Node's default so 4.6 remains the single owner of foreign-key/WAL policy. No migration tables, application schema, WAL mode, or durable event tables are introduced yet."
-          plan = replace_once(plan, old_runtime, new_runtime, "PLAN runtime/database note")
-          plan = replace_once(
-              plan,
-              "> **Phase 4 / Item 4.4 — Add SQLite through Node 24 `node:sqlite`; no ORM initially.**",
-              "> **Phase 4 / Item 4.5 — Add a tiny ordered SQL migration runner + `schema_migrations`.**",
-              "PLAN next action",
-          )
-          plan_path.write_text(plan, encoding="utf-8")
-          PY
-
-          if ! git diff --quiet -- TODO.md PLAN.md; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add TODO.md PLAN.md
-            git commit -m "docs: complete sqlite database foundation"
-            git push origin HEAD:zet-harness-v1
-          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
