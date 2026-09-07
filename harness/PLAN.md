@@ -91,7 +91,8 @@ Phase 3  In-memory DAG scheduler           ✅ COMPLETE
            └─ 3.17 scheduler stress/race tests                         ✅
 Phase 4  Runtime daemon + SQLite           🚧 WE ARE HERE
            ├─ 4.1 long-lived Node runtime process                     ✅
-           └─ 4.2 loopback node:http API                              ▶ CURRENT
+           ├─ 4.2 loopback node:http API                              ✅
+           └─ 4.3 SSE reconnect/cursor support                        ▶ CURRENT
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
 Phase 7  Visual graph + inspector          ⏳  ← Harness v0.1 boundary
@@ -109,7 +110,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ✅ Complete |
-| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.2 current** |
+| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.3 current** |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ⏳ **v0.1 finish line** |
@@ -359,6 +360,8 @@ Phase 3 retry scheduling is scheduler-owned and bounded: failed attempts move th
 
 Phase 3 runtime event transport is a tiny dependency-free synchronous typed emitter. It accepts discriminated event unions, supports type-narrowed listeners plus catch-all listeners, invokes matching subscriptions in global registration order, returns idempotent unsubscribe handles, and snapshots subscriptions at the start of each emit so listener mutation affects only later events. Listener errors are intentionally not swallowed. Runtime events that participate in the 3.14 routing contract carry an explicit `persistence: "transient" | "durable"` classification. `RuntimeEventChannels` exposes disjoint typed transient and durable listener APIs; a persistence consumer can subscribe only to durable event types, while token/progress-style transient events cannot enter that channel accidentally at the type level. The marker expresses retention intent only: `durable` means eligible for the later journal, not already persisted. The router does not serialize, sequence, replay, buffer, retain, write SQLite, or define SSE behavior; those remain Phase 4 responsibilities.
 
+Phase 4 runtime ownership now has a real process and transport boundary. `apps/runtime` is a dependency-light long-lived Node process with explicit lifecycle and clean shutdown behavior. Its first event-loop owner is the built-in `node:http` listener: the runtime binds `127.0.0.1` by default, does not report `running`/ready until `listen()` has actually succeeded, exposes only the small `GET /api/health` surface for now, and keeps bind failures out of the ready state. Tests use port `0` for collision-free ephemeral listeners, while the normal default remains a fixed local port. SSE streaming, durable event cursors, authentication/origin policy, and database health are intentionally separate later items.
+
 Phase 3 deterministic scheduler fixtures live behind the explicit `@zet-harness/scheduler/testing` subpath rather than the production scheduler export. Scheduler-level mock nodes are deterministic Execution IR ops, preserving the compiler/plugin boundary instead of inventing fake `NodeDefinition` semantics. The testing surface supplies minimal IR/op builders, clock-free manual gates, and a `DeterministicPlainDagExecutor` scripted by stable `sourceNodeId` and one-based scheduler attempt. It records frozen ordered invocation/trace snapshots, exposes actual/max concurrent mock executions, can complete/fail/wait on a gate/wait cooperatively for abort, and can report adapter-internal retries through the real shared retry budget. Unscripted nodes complete immediately; explicitly scripted nodes fail loudly if execution reaches an unconfigured attempt. These fixtures are infrastructure for 3.16/3.17, not the scenario/stress coverage itself.
 
 Phase 3 offline scheduler scenarios compose those deterministic fixtures with the real scheduler primitives rather than introducing a separate acceptance runtime. Plain DAG coverage proves strict chain ordering, concurrent fan-out/fan-in, timeout isolation, bounded retry before downstream release, cooperative cancellation, and fail-fast propagation. Structured-control coverage composes `RunRouterActivation`, `RunControlEdges`, `RunJoinActivation`, and `RunReadiness` to prove selected-branch activation, inactive-path skipping, and an activation-aware `all-active` join. The suite uses no database, model provider, wall-clock sleeps, or random behavior; timeout timing is controlled with fake timers and concurrency is controlled by manual gates.
@@ -430,4 +433,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 4 / Item 4.2 — Bind the local API to loopback by default using built-in `node:http` where practical.**
+> **Phase 4 / Item 4.3 — Add SSE event streaming with reconnect cursor/`Last-Event-ID` support.**
