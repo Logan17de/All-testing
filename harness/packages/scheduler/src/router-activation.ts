@@ -65,7 +65,9 @@ export class RunRouterActivation {
       throw new TypeError("Router activation readiness does not match the Execution IR op count.");
     }
     if (!controlEdges.isForIr(ir)) {
-      throw new TypeError("Router activation control-edge state does not belong to this Execution IR.");
+      throw new TypeError(
+        "Router activation control-edge state does not belong to this Execution IR.",
+      );
     }
 
     ir.ops.forEach((operation, routerOp) => {
@@ -156,7 +158,9 @@ export class RunRouterActivation {
 
     const branchPlan = this.branchPlans.get(routerOp)?.get(branch);
     if (branchPlan === undefined) {
-      throw new TypeError(`Router op ${String(routerOp)} has no runtime plan for branch '${branch}'.`);
+      throw new TypeError(
+        `Router op ${String(routerOp)} has no runtime plan for branch '${branch}'.`,
+      );
     }
 
     const outgoingEdges = this.controlEdges.getOutgoingEdgeIndexes(routerOp);

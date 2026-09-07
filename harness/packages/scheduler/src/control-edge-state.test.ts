@@ -48,12 +48,7 @@ function plan(): ExecutionIrV1 {
 
 describe("control-edge runtime state", () => {
   it("freezes the four-state vocabulary and legal transition table", () => {
-    expect(CONTROL_EDGE_RUNTIME_STATUSES).toEqual([
-      "unresolved",
-      "active",
-      "skipped",
-      "completed",
-    ]);
+    expect(CONTROL_EDGE_RUNTIME_STATUSES).toEqual(["unresolved", "active", "skipped", "completed"]);
     expect(Object.isFrozen(CONTROL_EDGE_RUNTIME_STATUSES)).toBe(true);
     expect(Object.isFrozen(CONTROL_EDGE_RUNTIME_TRANSITIONS)).toBe(true);
     expect(Object.values(CONTROL_EDGE_RUNTIME_TRANSITIONS).every(Object.isFrozen)).toBe(true);

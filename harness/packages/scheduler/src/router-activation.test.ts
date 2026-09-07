@@ -229,9 +229,9 @@ describe("RunRouterActivation", () => {
     );
     const missingReadiness = new RunReadiness(missingDependency);
     const missingEdges = new RunControlEdges(missingDependency);
-    expect(() => new RunRouterActivation(missingDependency, missingReadiness, missingEdges)).toThrow(
-      "Router control edge 0 -> 1 is missing its IR dependency.",
-    );
+    expect(
+      () => new RunRouterActivation(missingDependency, missingReadiness, missingEdges),
+    ).toThrow("Router control edge 0 -> 1 is missing its IR dependency.");
   });
 
   it("requires shared control-edge state from the exact same IR object", () => {
