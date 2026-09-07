@@ -187,24 +187,27 @@ describe("RunAllActiveJoinActivation", () => {
     expect(readiness.getRemainingDependencyCount(2)).toBe(0);
   });
 
-  it("does not skip a target when one of several edges from the same router source is selected", () => {
-    const plan = ir(
-      [routerOp("route", []), executableOp("branch", [0]), joinOp("join", [1])],
-      [
-        { from: { op: 0, port: "yes" }, to: { op: 1 } },
-        { from: { op: 0, port: "no" }, to: { op: 1 } },
-        { from: { op: 1 }, to: { op: 2, port: "left" } },
-      ],
-    );
-    const { readiness, routers, joins } = runtime(plan);
+  it(
+    "does not skip a target when one of several edges from the same router source is selected",
+    () => {
+      const plan = ir(
+        [routerOp("route", []), executableOp("branch", [0]), joinOp("join", [1])],
+        [
+          { from: { op: 0, port: "yes" }, to: { op: 1 } },
+          { from: { op: 0, port: "no" }, to: { op: 1 } },
+          { from: { op: 1 }, to: { op: 2, port: "left" } },
+        ],
+      );
+      const { readiness, routers, joins } = runtime(plan);
 
-    expect(readiness.dequeueReadyOp()).toBe(0);
-    routers.activateReservedRouter(0, "yes");
-    const reconciliation = joins.reconcileJoin(2);
+      expect(readiness.dequeueReadyOp()).toBe(0);
+      routers.activateReservedRouter(0, "yes");
+      const reconciliation = joins.reconcileJoin(2);
 
-    expect(reconciliation.propagatedSkippedOps).toEqual([]);
-    expect(readiness.getOpState(1).status).toBe("ready");
-  });
+      expect(reconciliation.propagatedSkippedOps).toEqual([]);
+      expect(readiness.getOpState(1).status).toBe("ready");
+    },
+  );
 
   it("propagates a definitively skipped control path to a fixed point", () => {
     const plan = ir(
@@ -236,30 +239,33 @@ describe("RunAllActiveJoinActivation", () => {
     expect(controlEdges.getState(4).status).toBe("skipped");
   });
 
-  it("releases one deduplicated join dependency for multiple terminal edges from one source", () => {
-    const plan = ir(
-      [executableOp("source", []), joinOp("join", [0])],
-      [
-        { from: { op: 0 }, to: { op: 1, port: "left" } },
-        { from: { op: 0 }, to: { op: 1, port: "right" } },
-      ],
-    );
-    const { readiness, controlEdges, joins } = runtime(plan);
+  it(
+    "releases one deduplicated join dependency for multiple terminal edges from one source",
+    () => {
+      const plan = ir(
+        [executableOp("source", []), joinOp("join", [0])],
+        [
+          { from: { op: 0 }, to: { op: 1, port: "left" } },
+          { from: { op: 0 }, to: { op: 1, port: "right" } },
+        ],
+      );
+      const { readiness, controlEdges, joins } = runtime(plan);
 
-    controlEdges.activate(0);
-    controlEdges.complete(0);
-    controlEdges.skip(1);
+      controlEdges.activate(0);
+      controlEdges.complete(0);
+      controlEdges.skip(1);
 
-    const first = joins.reconcileJoin(1);
-    expect(first.ready).toBe(true);
-    expect(first.newlyReady).toBe(true);
-    expect(readiness.getRemainingDependencyCount(1)).toBe(0);
+      const first = joins.reconcileJoin(1);
+      expect(first.ready).toBe(true);
+      expect(first.newlyReady).toBe(true);
+      expect(readiness.getRemainingDependencyCount(1)).toBe(0);
 
-    const second = joins.reconcileJoin(1);
-    expect(second.ready).toBe(true);
-    expect(second.newlyReady).toBe(false);
-    expect(readiness.getRemainingDependencyCount(1)).toBe(0);
-  });
+      const second = joins.reconcileJoin(1);
+      expect(second.ready).toBe(true);
+      expect(second.newlyReady).toBe(false);
+      expect(readiness.getRemainingDependencyCount(1)).toBe(0);
+    },
+  );
 
   it("preflights a reserved join before mutating its output edges or lifecycle", () => {
     const plan = ir(
@@ -334,7 +340,8 @@ describe("RunAllActiveJoinActivation", () => {
     const right = ir([joinOp("join", [])], []);
 
     expect(
-      () => new RunAllActiveJoinActivation(left, new RunReadiness(left), new RunControlEdges(right)),
+      () =>
+        new RunAllActiveJoinActivation(left, new RunReadiness(left), new RunControlEdges(right)),
     ).toThrow("Join activation control-edge state does not belong to this Execution IR.");
   });
 
