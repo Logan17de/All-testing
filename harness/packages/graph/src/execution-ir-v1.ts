@@ -127,9 +127,7 @@ export interface ExecutionIrQuorumJoinControlV1 extends ExecutionIrJoinControlBa
 }
 
 export type ExecutionIrJoinControlV1 =
-  | ExecutionIrAllActiveJoinControlV1
-  | ExecutionIrAnyJoinControlV1
-  | ExecutionIrQuorumJoinControlV1;
+  ExecutionIrAllActiveJoinControlV1 | ExecutionIrAnyJoinControlV1 | ExecutionIrQuorumJoinControlV1;
 
 export interface ExecutionIrLoopControlV1 {
   readonly kind: "loop";
