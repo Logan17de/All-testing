@@ -11,7 +11,13 @@ export interface ConcurrencySnapshot {
   readonly available: number;
 }
 
-type PermitWaiter = (permit: ConcurrencyPermit) => void;
+interface PermitWaiter {
+  readonly resolve: (permit: ConcurrencyPermit) => void;
+  readonly reject: (reason?: unknown) => void;
+  readonly signal?: AbortSignal;
+  onAbort?: () => void;
+  settled: boolean;
+}
 
 function assertPositiveSafeInteger(label: string, value: number): void {
   if (!Number.isSafeInteger(value) || value < 1) {
@@ -19,17 +25,22 @@ function assertPositiveSafeInteger(label: string, value: number): void {
   }
 }
 
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new Error("Concurrency acquisition aborted.");
+}
+
 /**
  * Small FIFO async semaphore built only from native Promises.
  *
- * The semaphore owns admission accounting only. It has no execution, timeout,
- * cancellation, retry, or persistence semantics. Waiter cancellation arrives
- * with run cancellation in 3.9 rather than being invented here.
+ * 3.9 adds AbortSignal-aware waiter removal without changing admission ordering:
+ * aborted waiters reject promptly, no longer count as waiting, and are skipped by
+ * the next permit release. Active permits remain explicit and release exactly once.
  */
 export class AsyncSemaphore {
   readonly limit: number;
 
   private active = 0;
+  private waiting = 0;
   private readonly waiters: PermitWaiter[] = [];
   private waiterHead = 0;
 
@@ -43,21 +54,55 @@ export class AsyncSemaphore {
   }
 
   get waitingCount(): number {
-    return this.waiters.length - this.waiterHead;
+    return this.waiting;
   }
 
   get availableCount(): number {
     return Math.max(0, this.limit - this.active);
   }
 
-  acquire(): Promise<ConcurrencyPermit> {
+  acquire(signal?: AbortSignal): Promise<ConcurrencyPermit> {
+    if (signal?.aborted) {
+      return Promise.reject(abortReason(signal));
+    }
+
     if (this.active < this.limit && this.waitingCount === 0) {
       this.active += 1;
       return Promise.resolve(this.createPermit());
     }
 
-    return new Promise<ConcurrencyPermit>((resolve) => {
-      this.waiters.push(resolve);
+    return new Promise<ConcurrencyPermit>((resolve, reject) => {
+      const waiter: PermitWaiter = {
+        resolve,
+        reject,
+        ...(signal === undefined ? {} : { signal }),
+        settled: false,
+      };
+
+      this.waiters.push(waiter);
+      this.waiting += 1;
+
+      if (signal !== undefined) {
+        const onAbort = (): void => {
+          if (waiter.settled) {
+            return;
+          }
+
+          waiter.settled = true;
+          this.waiting -= 1;
+          signal.removeEventListener("abort", onAbort);
+          reject(abortReason(signal));
+          this.compactSettledHead();
+        };
+        waiter.onAbort = onAbort;
+        signal.addEventListener("abort", onAbort, { once: true });
+
+        // Cover an abort that happened after the initial check but before the
+        // listener was attached.
+        if (signal.aborted) {
+          onAbort();
+        }
+      }
     });
   }
 
@@ -89,21 +134,43 @@ export class AsyncSemaphore {
       throw new TypeError("Semaphore active count would underflow.");
     }
 
-    const waiter = this.waiters[this.waiterHead];
-    if (waiter !== undefined) {
+    while (true) {
+      const waiter = this.waiters[this.waiterHead];
+      if (waiter === undefined) {
+        this.active -= 1;
+        this.compactSettledHead();
+        return;
+      }
+
       this.waiterHead += 1;
-      if (this.waiterHead === this.waiters.length) {
-        this.waiters.length = 0;
-        this.waiterHead = 0;
+      if (waiter.settled) {
+        this.compactSettledHead();
+        continue;
+      }
+
+      waiter.settled = true;
+      this.waiting -= 1;
+      if (waiter.signal !== undefined && waiter.onAbort !== undefined) {
+        waiter.signal.removeEventListener("abort", waiter.onAbort);
       }
 
       // The released slot transfers directly to the FIFO waiter, so `active`
       // remains unchanged while ownership moves to the new permit.
-      waiter(this.createPermit());
+      waiter.resolve(this.createPermit());
+      this.compactSettledHead();
       return;
     }
+  }
 
-    this.active -= 1;
+  private compactSettledHead(): void {
+    while (this.waiters[this.waiterHead]?.settled === true) {
+      this.waiterHead += 1;
+    }
+
+    if (this.waiterHead === this.waiters.length) {
+      this.waiters.length = 0;
+      this.waiterHead = 0;
+    }
   }
 }
 
@@ -115,8 +182,9 @@ export interface RunConcurrencySnapshot {
 /**
  * Per-run admission gate sharing one scheduler-global semaphore.
  *
- * A run acquires its local permit before waiting on the global gate. This keeps
- * work already blocked by its per-run ceiling from consuming global capacity.
+ * A run acquires its local permit before waiting on the global gate. AbortSignal
+ * cancellation unwinds either waiting layer and releases an already-acquired local
+ * permit before propagating the abort reason.
  */
 export class RunConcurrency {
   private readonly runSemaphore: AsyncSemaphore;
@@ -140,11 +208,16 @@ export class RunConcurrency {
     return this.runSemaphore.waitingCount;
   }
 
-  async acquire(): Promise<ConcurrencyPermit> {
-    const runPermit = await this.runSemaphore.acquire();
+  async acquire(signal?: AbortSignal): Promise<ConcurrencyPermit> {
+    const runPermit = await this.runSemaphore.acquire(signal);
 
     try {
-      const globalPermit = await this.globalSemaphore.acquire();
+      const globalPermit = await this.globalSemaphore.acquire(signal);
+      if (signal?.aborted) {
+        globalPermit.release();
+        throw abortReason(signal);
+      }
+
       let released = false;
 
       return Object.freeze({
