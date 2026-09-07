@@ -1,3 +1,11 @@
+import { resolve } from "node:path";
+
+import {
+  SqliteDatabase,
+  type SqliteDatabaseOptions,
+  type SqliteDatabaseSnapshot,
+} from "@zet-harness/db";
+
 import { RuntimeEventStream, type RuntimeStreamEvent } from "./runtime-event-stream.js";
 import {
   RuntimeHttpServer,
@@ -5,32 +13,40 @@ import {
   type RuntimeHttpServerSnapshot,
 } from "./runtime-http-server.js";
 
+export const DEFAULT_RUNTIME_DATABASE_PATH = resolve("data", "zet-harness.sqlite");
+
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
 export interface RuntimeDaemonOptions {
   readonly api?: RuntimeHttpServerOptions;
+  readonly database?: SqliteDatabaseOptions;
 }
 
 export interface RuntimeDaemonSnapshot {
   readonly state: RuntimeDaemonState;
   readonly api: RuntimeHttpServerSnapshot;
+  readonly database: SqliteDatabaseSnapshot;
 }
 
 /**
  * Long-lived runtime lifecycle.
  *
- * The daemon owns the process-local runtime event stream; HTTP/SSE is only a
- * transport over that stream. SQLite-backed durability remains later Phase 4 work.
+ * The daemon owns the process-local event stream, loopback HTTP transport, and
+ * native SQLite connection. Schema/migration/WAL policy remains later Phase 4 work.
  */
 export class RuntimeDaemon {
   private state: RuntimeDaemonState = "idle";
   private readonly eventStream = new RuntimeEventStream();
+  private readonly database: SqliteDatabase;
   private readonly httpServer: RuntimeHttpServer;
   private readonly stoppedPromise: Promise<void>;
   private readonly resolveStopped: () => void;
   private stopPromise: Promise<boolean> | undefined;
 
   constructor(options: RuntimeDaemonOptions = {}) {
+    this.database = new SqliteDatabase(
+      options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH },
+    );
     this.httpServer = new RuntimeHttpServer(options.api, this.eventStream);
 
     let resolveStopped!: () => void;
@@ -44,6 +60,7 @@ export class RuntimeDaemon {
     return Object.freeze({
       state: this.state,
       api: this.httpServer.snapshot(),
+      database: this.database.snapshot(),
     });
   }
 
@@ -54,7 +71,7 @@ export class RuntimeDaemon {
     return this.eventStream.publish(type, data);
   }
 
-  /** Start the daemon only after its loopback API has successfully bound. */
+  /** Start only after SQLite is open and the loopback API has successfully bound. */
   async start(): Promise<boolean> {
     if (this.state === "stopped") {
       throw new TypeError("Runtime daemon cannot restart after it has stopped.");
@@ -63,12 +80,19 @@ export class RuntimeDaemon {
       return false;
     }
 
-    await this.httpServer.start();
+    this.database.open();
+    try {
+      await this.httpServer.start();
+    } catch (error) {
+      this.database.close();
+      throw error;
+    }
+
     this.state = "running";
     return true;
   }
 
-  /** Stop once, closing SSE clients and the API listener before releasing lifecycle waiters. */
+  /** Stop once, closing SSE/API transport before the SQLite connection. */
   async stop(): Promise<boolean> {
     if (this.state === "stopped") {
       return false;
@@ -87,7 +111,12 @@ export class RuntimeDaemon {
   }
 
   private async stopOnce(): Promise<boolean> {
-    await this.httpServer.stop();
+    try {
+      await this.httpServer.stop();
+    } finally {
+      this.database.close();
+    }
+
     this.state = "stopped";
     this.resolveStopped();
     return true;
