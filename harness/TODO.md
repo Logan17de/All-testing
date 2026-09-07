@@ -105,7 +105,7 @@ Goal: prove execution semantics without persistence hiding scheduler bugs.
 - [x] 3.8 Add explicit `any`/quorum semantics only after `all-active` is solid.
 - [x] 3.9 Add run cancellation with `AbortController`/`AbortSignal`.
 - [x] 3.10 Add node timeouts.
-- [ ] 3.11 Add bounded retry scheduling with backoff/jitter hooks.
+- [x] 3.11 Add bounded retry scheduling with backoff/jitter hooks.
 - [ ] 3.12 Ensure adapter-reported internal retries are not accidentally doubled.
 - [ ] 3.13 Add small typed runtime event emitter.
 - [ ] 3.14 Separate transient stream events from events intended for durable storage.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**3.11 — Add bounded retry scheduling with backoff/jitter hooks.**
+**3.12 — Ensure adapter-reported internal retries are not accidentally doubled.**
