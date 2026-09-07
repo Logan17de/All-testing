@@ -92,15 +92,16 @@ describe("node timeouts", () => {
     });
 
     const execution = run.execute();
-    await started.promise;
-    await vi.advanceTimersByTimeAsync(25);
-
-    await expect(execution).rejects.toMatchObject({
+    const rejection = expect(execution).rejects.toMatchObject({
       name: "NodeTimeoutError",
       code: "NODE_TIMEOUT",
       op: 0,
       timeoutMs: 25,
     });
+    await started.promise;
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+
     expect(executorSignal?.aborted).toBe(true);
     expect(executorSignal?.reason).toBeInstanceOf(NodeTimeoutError);
     expect(run.signal.aborted).toBe(false);
@@ -174,9 +175,10 @@ describe("node timeouts", () => {
     });
 
     const execution = run.execute();
+    const rejection = expect(execution).rejects.toBeInstanceOf(NodeTimeoutError);
     await started.promise;
     await vi.advanceTimersByTimeAsync(10);
-    await expect(execution).rejects.toBeInstanceOf(NodeTimeoutError);
+    await rejection;
 
     expect(run.snapshot().settled).toBe(true);
     expect(run.snapshot().concurrency.run.active).toBe(1);
