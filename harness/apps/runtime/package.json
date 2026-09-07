@@ -4,11 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "npm --prefix ../.. run build --workspace @zet-harness/db && tsc -p tsconfig.build.json",
     "start": "npm run build && node dist/main.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src --max-warnings=0",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@zet-harness/db": "0.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0"
