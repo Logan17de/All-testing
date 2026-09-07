@@ -1,4 +1,4 @@
-name: Export Android Signing Tools
+name: Export Android SDK Lite
 
 on:
   push:
@@ -13,34 +13,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Collect Android signing tools
+      - name: Collect Android SDK build tools
         shell: bash
         run: |
           set -euo pipefail
           BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
-          echo "Using $BT"
-          mkdir -p android-sign-tools
-          cp "$BT/zipalign" android-sign-tools/zipalign
-          cp "$BT/lib/apksigner.jar" android-sign-tools/apksigner.jar
-          chmod +x android-sign-tools/zipalign
+          echo "Using build-tools: $BT"
+          mkdir -p android-sdk-lite/build-tools android-sdk-lite/platform
+          cp -a "$BT/." android-sdk-lite/build-tools/
+          cp "$ANDROID_HOME/platforms/android-35/android.jar" android-sdk-lite/platform/android.jar
+          echo "$BT" > android-sdk-lite/build-tools-version.txt
+          ls -lh android-sdk-lite/build-tools/aapt2 android-sdk-lite/build-tools/zipalign android-sdk-lite/platform/android.jar
 
-          # Bundle the shared libraries needed by zipalign so it can run outside
-          # the GitHub Android SDK image as well.
-          ldd "$BT/zipalign" || true
-          while read -r lib; do
-            [ -f "$lib" ] && cp -L "$lib" android-sign-tools/
-          done < <(ldd "$BT/zipalign" | awk '/=> \/.*\.so/{print $3} /^\//{print $1}')
-
-          # libc++.so can also live beside the Android build-tools binaries.
-          find "$BT" "$ANDROID_HOME" -name 'libc++.so' -type f -print -quit | while read -r lib; do
-            [ -n "$lib" ] && cp -L "$lib" android-sign-tools/libc++.so
-          done
-
-          ls -lh android-sign-tools
-
-      - name: Upload signing tools
+      - name: Upload SDK lite
         uses: actions/upload-artifact@v4
         with:
-          name: Android-Signing-Tools-With-Libs
-          path: android-sign-tools
+          name: Android-SDK-Lite
+          path: android-sdk-lite
           if-no-files-found: error
