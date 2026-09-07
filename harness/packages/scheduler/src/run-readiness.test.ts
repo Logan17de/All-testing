@@ -110,6 +110,17 @@ describe("RunReadiness", () => {
     expect(readiness.isDependencyReleased(0, 1)).toBe(false);
   });
 
+  it("marks only pending control-inactive work skipped", () => {
+    const readiness = new RunReadiness(
+      ir([op("root", []), op("inactive", [0]), op("independent", [])]),
+    );
+
+    expect(readiness.skipPendingOp(1)).toEqual({ op: 1, status: "skipped" });
+    expect(readiness.getRemainingDependencyCount(1)).toBe(1);
+    expect(readiness.getReadyQueue()).toEqual([0, 2]);
+    expect(() => readiness.skipPendingOp(0)).toThrow("Run op 0 cannot be skipped from 'ready'.");
+  });
+
   it("preserves FIFO order when newly-ready ops are appended behind existing work", () => {
     const readiness = new RunReadiness(
       ir([op("root", []), op("left", [0]), op("right", [0]), op("independent", [])]),
