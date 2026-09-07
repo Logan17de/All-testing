@@ -49,13 +49,22 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
   return { promise, resolve };
 }
 
+function signalReason(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) {
+    return signal.reason;
+  }
+  return new Error(signal.reason === undefined ? "Run aborted." : String(signal.reason), {
+    cause: signal.reason,
+  });
+}
+
 function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
-    return Promise.reject(signal.reason);
+    return Promise.reject(signalReason(signal));
   }
 
   return new Promise<void>((_resolve, reject) => {
-    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    signal.addEventListener("abort", () => reject(signalReason(signal)), { once: true });
   });
 }
 
