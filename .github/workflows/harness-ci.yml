@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - zet-harness-v1
+      - zet-harness-format-probe-311
     paths:
       - "harness/**"
       - ".github/workflows/harness-ci.yml"
