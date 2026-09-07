@@ -26,12 +26,40 @@ export class NodeTimeoutError extends Error {
   }
 }
 
+/**
+ * Shared attempt budget for one scheduler-owned execution attempt.
+ *
+ * Starting the scheduler attempt already consumes one budget unit. Runtime
+ * adapters must report every additional internal retry against the same budget,
+ * so outer retries and adapter retries cannot multiply the IR `maxAttempts` cap.
+ */
+export interface PlainDagRetryBudget {
+  readonly maxAttempts: number;
+  /** Total scheduler attempts plus reported internal retries charged so far. */
+  readonly usedAttempts: number;
+  /** Additional attempts still available after everything charged so far. */
+  readonly remainingAttempts: number;
+  /**
+   * Charge one or more adapter/executor-internal retries to this logical op.
+   * Returns the new total budget usage. `count` defaults to one and may be zero
+   * when an adapter forwards aggregate retry metadata unchanged.
+   */
+  reportInternalRetries(count?: number): number;
+}
+
+interface PlainDagRetryBudgetScope {
+  readonly budget: PlainDagRetryBudget;
+  close(): void;
+}
+
 export interface PlainDagOpExecution {
   /** Zero-based Execution IR op index. */
   readonly op: number;
   readonly operation: ExecutionIrOpV1;
   /** One-based scheduler-owned attempt number for this logical op. */
   readonly attempt: number;
+  /** Shared outer + internal retry budget for this scheduler attempt. */
+  readonly retryBudget: PlainDagRetryBudget;
   /** Run cancellation plus the current op's timeout, when configured. */
   readonly signal: AbortSignal;
 }
@@ -43,9 +71,16 @@ export interface PlainDagRetryBackoffContext {
   readonly op: number;
   readonly operation: ExecutionIrOpV1;
   readonly error: unknown;
+  /** One-based scheduler-owned attempt that just failed. */
   readonly failedAttempt: number;
+  /** One-based scheduler-owned attempt that would run next. */
   readonly nextAttempt: number;
+  /** Shared outer + internal attempt ceiling from the IR retry policy. */
   readonly maxAttempts: number;
+  /** Shared budget charged before scheduling the next outer attempt. */
+  readonly attemptBudgetUsed: number;
+  /** Shared budget still available before scheduling the next outer attempt. */
+  readonly remainingAttempts: number;
   /** Static delay copied from IR retry defaults, or zero when omitted. */
   readonly configuredBackoffMs: number;
 }
@@ -74,6 +109,8 @@ export interface PlainDagRunSnapshot {
   readonly cancelled: boolean;
   /** Number of scheduler-owned attempts started for each IR op. */
   readonly attempts: readonly number[];
+  /** Scheduler attempts plus adapter/executor-internal retries charged per op. */
+  readonly attemptBudgetUsed: readonly number[];
   readonly readiness: RunReadinessSnapshot;
   readonly concurrency: RunConcurrencySnapshot;
 }
@@ -243,9 +280,13 @@ function waitForSettlementOrAbort(
  *
  * 3.9 supplies run-wide cooperative cancellation. 3.10 layers an independent
  * per-op timeout over that run signal. 3.11 adds scheduler-owned bounded retries:
- * `maxAttempts` counts the initial execution, failed attempts move through
- * running -> retry-wait -> ready, retry wait releases concurrency, and downstream
- * dependencies are released only after eventual completion.
+ * failed attempts move through running -> retry-wait -> ready, retry wait releases
+ * concurrency, and downstream dependencies are released only after completion.
+ * 3.12 makes the IR `maxAttempts` ceiling a shared outer + internal budget. Each
+ * scheduler attempt charges one unit, and runtime adapters report their own
+ * internal retries through the frozen per-attempt `retryBudget` object. Future
+ * adapters can cap provider/SDK retries from `remainingAttempts`, preventing
+ * accidental multiplicative retry stacks without adding adapter APIs here.
  *
  * Retry waits are liveness tasks, not active execution tasks. They keep the run
  * alive while backoff is pending but never block dispatch of unrelated ready work.
@@ -268,6 +309,7 @@ export class PlainDagRun {
   private readonly activeTasks = new Set<Promise<void>>();
   private readonly retryWaitTasks = new Set<Promise<void>>();
   private readonly attempts: number[];
+  private readonly attemptBudgetUsed: number[];
   private started = false;
   private settled = false;
   private hasFailure = false;
@@ -282,6 +324,7 @@ export class PlainDagRun {
     assertPlainExecutableDag(ir);
     this.readiness = new RunReadiness(ir);
     this.attempts = ir.ops.map(() => 0);
+    this.attemptBudgetUsed = ir.ops.map(() => 0);
   }
 
   get signal(): AbortSignal {
@@ -294,6 +337,7 @@ export class PlainDagRun {
       settled: this.settled,
       cancelled: this.signal.aborted,
       attempts: frozenCopy(this.attempts),
+      attemptBudgetUsed: frozenCopy(this.attemptBudgetUsed),
       readiness: this.readiness.snapshot(),
       concurrency: this.concurrency.snapshot(),
     });
@@ -386,66 +430,84 @@ export class PlainDagRun {
         throw new RangeError(`Execution IR op ${String(op)} is unavailable.`);
       }
 
-      const attempt = this.startAttempt(op);
-      const timeoutMs = operation.behavior.timeoutMs;
-      if (timeoutMs === undefined) {
-        await this.executor(Object.freeze({ op, operation, attempt, signal: this.signal }));
-      } else {
-        const timeoutController = new AbortController();
-        const timeoutError = new NodeTimeoutError(op, timeoutMs);
-        let timedOut = false;
-        let timeoutReject!: (reason: Error) => void;
+      const maxAttempts = operation.behavior.retry?.maxAttempts ?? 1;
+      const attempt = this.startAttempt(op, maxAttempts);
+      const retryBudgetScope = this.createRetryBudgetScope(op, maxAttempts);
 
-        const onRunAbort = (): void => {
-          timeoutController.abort(this.signal.reason);
-        };
-        if (this.signal.aborted) {
-          onRunAbort();
-        } else {
-          this.signal.addEventListener("abort", onRunAbort, { once: true });
-        }
-
-        const executorPromise = Promise.resolve().then(() =>
-          this.executor(
+      try {
+        const timeoutMs = operation.behavior.timeoutMs;
+        if (timeoutMs === undefined) {
+          await this.executor(
             Object.freeze({
               op,
               operation,
               attempt,
-              signal: timeoutController.signal,
+              retryBudget: retryBudgetScope.budget,
+              signal: this.signal,
             }),
-          ),
-        );
-        const timeoutPromise = new Promise<never>((_resolve, reject) => {
-          timeoutReject = reject;
-        });
-        const cancelTimer = scheduleTimeout(timeoutMs, () => {
-          if (timeoutController.signal.aborted) {
-            return;
-          }
-          timedOut = true;
-          timeoutController.abort(timeoutError);
-          timeoutReject(timeoutError);
-        });
+          );
+        } else {
+          const timeoutController = new AbortController();
+          const timeoutError = new NodeTimeoutError(op, timeoutMs);
+          let timedOut = false;
+          let timeoutReject!: (reason: Error) => void;
 
-        try {
-          await Promise.race([executorPromise, timeoutPromise]);
-        } catch (error) {
-          if (timedOut) {
-            // A timed-out in-process executor may ignore its signal. Keep its
-            // concurrency ownership until the underlying Promise actually settles,
-            // and expose that settlement as a retry barrier for this same op.
-            const heldPermit = permit;
-            permit = undefined;
-            priorAttemptSettlement = executorPromise.then(
-              () => heldPermit?.release(),
-              () => heldPermit?.release(),
-            );
+          const onRunAbort = (): void => {
+            timeoutController.abort(this.signal.reason);
+          };
+          if (this.signal.aborted) {
+            onRunAbort();
+          } else {
+            this.signal.addEventListener("abort", onRunAbort, { once: true });
           }
-          throw error;
-        } finally {
-          cancelTimer();
-          this.signal.removeEventListener("abort", onRunAbort);
+
+          const executorPromise = Promise.resolve().then(() =>
+            this.executor(
+              Object.freeze({
+                op,
+                operation,
+                attempt,
+                retryBudget: retryBudgetScope.budget,
+                signal: timeoutController.signal,
+              }),
+            ),
+          );
+          const timeoutPromise = new Promise<never>((_resolve, reject) => {
+            timeoutReject = reject;
+          });
+          const cancelTimer = scheduleTimeout(timeoutMs, () => {
+            if (timeoutController.signal.aborted) {
+              return;
+            }
+            timedOut = true;
+            timeoutController.abort(timeoutError);
+            timeoutReject(timeoutError);
+          });
+
+          try {
+            await Promise.race([executorPromise, timeoutPromise]);
+          } catch (error) {
+            if (timedOut) {
+              // A timed-out in-process executor may ignore its signal. Keep its
+              // concurrency ownership until the underlying Promise actually settles,
+              // and expose that settlement as a retry barrier for this same op.
+              const heldPermit = permit;
+              permit = undefined;
+              priorAttemptSettlement = executorPromise.then(
+                () => heldPermit?.release(),
+                () => heldPermit?.release(),
+              );
+            }
+            throw error;
+          } finally {
+            cancelTimer();
+            this.signal.removeEventListener("abort", onRunAbort);
+          }
         }
+      } finally {
+        // A stale/timed-out executor must never charge retries to a later outer
+        // attempt after this scheduler-visible attempt has already terminated.
+        retryBudgetScope.close();
       }
 
       if (this.signal.aborted) {
@@ -465,12 +527,24 @@ export class PlainDagRun {
       const operation = this.ir.ops[op];
       const current = this.readiness.getOpState(op);
       const failedAttempt = this.attempts[op] ?? 0;
+      const attemptBudgetUsed = this.attemptBudgetUsed[op] ?? 0;
       const maxAttempts = operation?.behavior.retry?.maxAttempts ?? 1;
 
-      if (operation !== undefined && current.status === "running" && failedAttempt < maxAttempts) {
+      if (
+        operation !== undefined &&
+        current.status === "running" &&
+        attemptBudgetUsed < maxAttempts
+      ) {
         let retryDelayMs: number;
         try {
-          retryDelayMs = this.computeRetryDelay(operation, op, error, failedAttempt, maxAttempts);
+          retryDelayMs = this.computeRetryDelay(
+            operation,
+            op,
+            error,
+            failedAttempt,
+            attemptBudgetUsed,
+            maxAttempts,
+          );
         } catch (retryPolicyError) {
           this.readiness.failRunningOp(op);
           this.recordFailure(retryPolicyError);
@@ -529,9 +603,10 @@ export class PlainDagRun {
     }
   }
 
-  private startAttempt(op: number): number {
+  private startAttempt(op: number, maxAttempts: number): number {
     const current = this.attempts[op];
-    if (current === undefined) {
+    const budgetUsed = this.attemptBudgetUsed[op];
+    if (current === undefined || budgetUsed === undefined) {
       throw new RangeError(`Run op index ${String(op)} is unavailable.`);
     }
 
@@ -539,8 +614,65 @@ export class PlainDagRun {
     if (!Number.isSafeInteger(next)) {
       throw new RangeError(`Run op ${String(op)} attempt counter exceeded the safe integer range.`);
     }
+    if (budgetUsed >= maxAttempts) {
+      throw new RangeError(
+        `Run op ${String(op)} retry budget is exhausted before scheduler attempt ${String(next)}.`,
+      );
+    }
+
     this.attempts[op] = next;
+    this.attemptBudgetUsed[op] = budgetUsed + 1;
     return next;
+  }
+
+  private createRetryBudgetScope(op: number, maxAttempts: number): PlainDagRetryBudgetScope {
+    let closed = false;
+
+    const readUsedAttempts = (): number => {
+      const used = this.attemptBudgetUsed[op];
+      if (used === undefined) {
+        throw new RangeError(`Run op index ${String(op)} is unavailable.`);
+      }
+      return used;
+    };
+
+    const budget: PlainDagRetryBudget = Object.freeze({
+      maxAttempts,
+      get usedAttempts(): number {
+        return readUsedAttempts();
+      },
+      get remainingAttempts(): number {
+        return maxAttempts - readUsedAttempts();
+      },
+      reportInternalRetries: (count = 1): number => {
+        if (closed) {
+          throw new TypeError(
+            `Run op ${String(op)} retry budget is closed for this scheduler attempt.`,
+          );
+        }
+        assertNonNegativeSafeInteger(`Run op ${String(op)} internal retry count`, count);
+
+        const used = readUsedAttempts();
+        const remaining = maxAttempts - used;
+        if (count > remaining) {
+          const attemptLabel = remaining === 1 ? "attempt" : "attempts";
+          throw new RangeError(
+            `Run op ${String(op)} reported ${String(count)} internal retries with only ${String(remaining)} ${attemptLabel} remaining in its retry budget.`,
+          );
+        }
+
+        const next = used + count;
+        this.attemptBudgetUsed[op] = next;
+        return next;
+      },
+    });
+
+    return Object.freeze({
+      budget,
+      close: (): void => {
+        closed = true;
+      },
+    });
   }
 
   private computeRetryDelay(
@@ -548,6 +680,7 @@ export class PlainDagRun {
     op: number,
     error: unknown,
     failedAttempt: number,
+    attemptBudgetUsed: number,
     maxAttempts: number,
   ): number {
     const configuredBackoffMs = operation.behavior.retry?.backoffMs ?? 0;
@@ -558,6 +691,8 @@ export class PlainDagRun {
       failedAttempt,
       nextAttempt: failedAttempt + 1,
       maxAttempts,
+      attemptBudgetUsed,
+      remainingAttempts: maxAttempts - attemptBudgetUsed,
       configuredBackoffMs,
     });
 
