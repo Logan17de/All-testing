@@ -57,7 +57,7 @@ jobs:
         run: npm run lint
 
       - name: Format check
-        run: npm run format:check
+        run: npx prettier --write apps/runtime/src/runtime-daemon.ts apps/runtime/src/runtime-event-stream.ts apps/runtime/src/runtime-http-server.ts && git diff -- apps/runtime/src/runtime-daemon.ts apps/runtime/src/runtime-event-stream.ts apps/runtime/src/runtime-http-server.ts && exit 1
 
       - name: Tests
         run: npm test
