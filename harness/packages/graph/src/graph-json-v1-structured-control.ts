@@ -53,6 +53,26 @@ function resolveControlPorts(contract: NodeStructuredControlContract): ResolvedC
   }
 }
 
+function hasValidJoinPolicy(contract: NodeStructuredControlContract): boolean {
+  if (contract.kind !== "join") {
+    return true;
+  }
+
+  switch (contract.mode) {
+    case "all-active":
+    case "any":
+      return true;
+    case "quorum":
+      return (
+        Number.isSafeInteger(contract.quorum) &&
+        contract.quorum >= 1 &&
+        contract.quorum <= contract.inputs.length
+      );
+    default:
+      return false;
+  }
+}
+
 function hasValidControlContractShape(contract: NodeStructuredControlContract): boolean {
   const { inputs, outputs } = resolveControlPorts(contract);
   const names = [...inputs, ...outputs];
@@ -65,7 +85,7 @@ function hasValidControlContractShape(contract: NodeStructuredControlContract): 
     return false;
   }
 
-  return new Set(names).size === names.length;
+  return new Set(names).size === names.length && hasValidJoinPolicy(contract);
 }
 
 function hasValidBehavior(manifest: NodeManifest): boolean {
@@ -143,11 +163,13 @@ function addPortDiagnostic(
  * Structured nodes declare one static manifest contract: router, join, loop,
  * human-interrupt, or subgraph. Ordinary nodes may still use unported control
  * edges for simple ordering/activation, but arbitrary named ports are rejected.
+ * Join policy is also validated here because all-active/any/quorum and quorum
+ * bounds are static manifest meaning, not an execution-time condition.
  *
- * This is reservation/validation only. It does not select router branches,
- * implement joins, execute loops, suspend for humans, invoke subgraphs, or lower
- * any of those constructs into IR. 2.10 continues to reject all graph SCCs,
- * including graphs containing a node with a `loop` contract.
+ * This stage does not select router branches, execute joins, execute loops,
+ * suspend for humans, invoke subgraphs, or lower any of those constructs into
+ * IR. 2.10 continues to reject all graph SCCs, including graphs containing a
+ * node with a `loop` contract.
  */
 export function checkGraphJsonV1StructuredControl(
   graph: GraphJsonV1,
@@ -172,7 +194,10 @@ export function checkGraphJsonV1StructuredControl(
     if (manifest.control !== undefined && !hasValidControlContractShape(manifest.control)) {
       diagnostics.push({
         code: "GRAPH_CONTROL_CONTRACT_INVALID",
-        message: `Structured ${manifest.control.kind} contract on node '${node.id}' must declare non-empty, unique control port names in both directions.`,
+        message:
+          manifest.control.kind === "join"
+            ? `Structured join contract on node '${node.id}' must declare non-empty, unique control port names and a valid all-active/any/quorum policy; quorum must be a positive safe integer no greater than the input-lane count.`
+            : `Structured ${manifest.control.kind} contract on node '${node.id}' must declare non-empty, unique control port names in both directions.`,
         nodeId: node.id,
       });
     }
