@@ -28,8 +28,9 @@ function frozenCopy<T>(items: readonly T[]): readonly T[] {
  *
  * 3.2 owns deterministic FIFO readiness plus dependency counters. 3.4 adds the
  * narrow execution handoff from a dequeued ready reservation to running and then
- * completed/failed. Branch activation still decides which dependency pairs are
- * actually released in later structured-control items.
+ * completed/failed. 3.11 uses the already-frozen state machine to move a failed
+ * attempt through running -> retry-wait -> ready without touching dependency
+ * counters or pretending the predecessor completed.
  */
 export class RunReadiness {
   private readonly ops: RunOpState[];
@@ -177,6 +178,42 @@ export class RunReadiness {
   /** Mark one actively running op failed without satisfying downstream dependencies. */
   failRunningOp(op: number): RunOpState {
     return this.finishRunningOp(op, "failed");
+  }
+
+  /**
+   * Move one failed execution attempt into retry wait without releasing any DAG
+   * dependency. The next attempt is a scheduler retry of the same logical op.
+   */
+  retryRunningOp(op: number): RunOpState {
+    assertOpIndex(op, this.ops.length);
+    const current = this.getOpState(op);
+    if (current.status !== "running") {
+      throw new TypeError(`Run op ${String(op)} cannot enter retry-wait from '${current.status}'.`);
+    }
+
+    const next = transitionRunOpState(current, "retry-wait");
+    this.ops[op] = next;
+    return next;
+  }
+
+  /**
+   * Re-enqueue one retry-wait op at the FIFO tail after its delay has elapsed.
+   * Dependency counters remain unchanged because this is the same logical op.
+   */
+  readyRetryOp(op: number): RunOpState {
+    assertOpIndex(op, this.ops.length);
+    const current = this.getOpState(op);
+    if (current.status !== "retry-wait") {
+      throw new TypeError(`Run op ${String(op)} cannot retry from '${current.status}'.`);
+    }
+    if (this.reservedReadyOps.has(op)) {
+      throw new TypeError(`Run op ${String(op)} already has a ready reservation.`);
+    }
+
+    const next = transitionRunOpState(current, "ready");
+    this.ops[op] = next;
+    this.readyQueue.push(op);
+    return next;
   }
 
   /** Mark control-inactive work skipped before it ever becomes ready. */
