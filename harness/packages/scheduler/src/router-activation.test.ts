@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 
+import { RunControlEdges } from "./control-edge-state.js";
 import { RunReadiness } from "./run-readiness.js";
 import { RunRouterActivation } from "./router-activation.js";
 
@@ -61,8 +62,15 @@ function ir(
   };
 }
 
+function runtime(plan: ExecutionIrV1) {
+  const readiness = new RunReadiness(plan);
+  const controlEdges = new RunControlEdges(plan);
+  const routers = new RunRouterActivation(plan, readiness, controlEdges);
+  return { readiness, controlEdges, routers };
+}
+
 describe("RunRouterActivation", () => {
-  it("activates only the selected router branch and completes the scheduler-owned router", () => {
+  it("activates only the selected router branch, resolves edge states, and completes the router", () => {
     const plan = ir(
       [routerOp("route", []), executableOp("yes", [0]), executableOp("no", [0])],
       [
@@ -70,8 +78,7 @@ describe("RunRouterActivation", () => {
         { from: { op: 0, port: "no" }, to: { op: 2 } },
       ],
     );
-    const readiness = new RunReadiness(plan);
-    const routers = new RunRouterActivation(plan, readiness);
+    const { readiness, controlEdges, routers } = runtime(plan);
 
     expect(readiness.dequeueReadyOp()).toBe(0);
     const activation = routers.activateReservedRouter(0, "yes");
@@ -90,6 +97,8 @@ describe("RunRouterActivation", () => {
     expect(readiness.getOpState(2).status).toBe("pending");
     expect(readiness.isDependencyReleased(0, 1)).toBe(true);
     expect(readiness.isDependencyReleased(0, 2)).toBe(false);
+    expect(controlEdges.getState(0)).toEqual({ edge: 0, status: "completed" });
+    expect(controlEdges.getState(1)).toEqual({ edge: 1, status: "skipped" });
     expect(routers.getSelectedBranch(0)).toBe("yes");
   });
 
@@ -108,8 +117,7 @@ describe("RunRouterActivation", () => {
         { from: { op: 0, port: "no" }, to: { op: 4 } },
       ],
     );
-    const readiness = new RunReadiness(plan);
-    const routers = new RunRouterActivation(plan, readiness);
+    const { readiness, controlEdges, routers } = runtime(plan);
 
     expect(readiness.dequeueReadyOp()).toBe(0);
     const activation = routers.activateReservedRouter(0, "yes");
@@ -119,9 +127,14 @@ describe("RunRouterActivation", () => {
     expect(readiness.getRemainingDependencyCount(3)).toBe(1);
     expect(readiness.getOpState(3).status).toBe("pending");
     expect(readiness.getOpState(4).status).toBe("pending");
+    expect(controlEdges.snapshot().edges.map(({ status }) => status)).toEqual([
+      "completed",
+      "completed",
+      "skipped",
+    ]);
   });
 
-  it("deduplicates multiple selected-branch control edges to one dependency target", () => {
+  it("deduplicates multiple selected-branch edges to one readiness dependency while completing each edge", () => {
     const plan = ir(
       [routerOp("route", []), executableOp("yes", [0])],
       [
@@ -129,18 +142,23 @@ describe("RunRouterActivation", () => {
         { from: { op: 0, port: "yes" }, to: { op: 1 } },
       ],
     );
-    const readiness = new RunReadiness(plan);
-    const routers = new RunRouterActivation(plan, readiness);
+    const { readiness, controlEdges, routers } = runtime(plan);
 
     expect(readiness.dequeueReadyOp()).toBe(0);
     expect(routers.activateReservedRouter(0, "yes").activatedTargets).toEqual([1]);
     expect(readiness.getRemainingDependencyCount(1)).toBe(0);
+    expect(controlEdges.snapshot().edges.map(({ status }) => status)).toEqual([
+      "completed",
+      "completed",
+    ]);
   });
 
-  it("rejects an undeclared branch before mutating the reserved router", () => {
-    const plan = ir([routerOp("route", [])], []);
-    const readiness = new RunReadiness(plan);
-    const routers = new RunRouterActivation(plan, readiness);
+  it("rejects an undeclared branch before mutating the reserved router or edge states", () => {
+    const plan = ir(
+      [routerOp("route", []), executableOp("yes", [0])],
+      [{ from: { op: 0, port: "yes" }, to: { op: 1 } }],
+    );
+    const { readiness, controlEdges, routers } = runtime(plan);
 
     expect(readiness.dequeueReadyOp()).toBe(0);
     expect(() => routers.activateReservedRouter(0, "maybe")).toThrow(
@@ -148,6 +166,7 @@ describe("RunRouterActivation", () => {
     );
     expect(readiness.getOpState(0).status).toBe("ready");
     expect(readiness.isReadyOpReserved(0)).toBe(true);
+    expect(controlEdges.getState(0).status).toBe("unresolved");
     expect(routers.hasSelectedBranch(0)).toBe(false);
   });
 
@@ -156,8 +175,7 @@ describe("RunRouterActivation", () => {
       [routerOp("route", []), executableOp("plain", []), executableOp("yes", [0])],
       [{ from: { op: 0, port: "yes" }, to: { op: 2 } }],
     );
-    const readiness = new RunReadiness(plan);
-    const routers = new RunRouterActivation(plan, readiness);
+    const { readiness, routers } = runtime(plan);
 
     expect(() => routers.getSelectedBranch(1)).toThrow("Run op 1 is not a router.");
 
@@ -170,8 +188,7 @@ describe("RunRouterActivation", () => {
 
   it("requires a dequeued ready reservation before router activation", () => {
     const plan = ir([routerOp("route", [])], []);
-    const readiness = new RunReadiness(plan);
-    const routers = new RunRouterActivation(plan, readiness);
+    const { readiness, routers } = runtime(plan);
 
     expect(() => routers.activateReservedRouter(0, "yes")).toThrow(
       "Router op 0 is not a dequeued ready reservation.",
@@ -179,12 +196,30 @@ describe("RunRouterActivation", () => {
     expect(readiness.getOpState(0).status).toBe("ready");
   });
 
+  it("rejects pre-resolved outgoing edge state before mutating router readiness", () => {
+    const plan = ir(
+      [routerOp("route", []), executableOp("yes", [0])],
+      [{ from: { op: 0, port: "yes" }, to: { op: 1 } }],
+    );
+    const { readiness, controlEdges, routers } = runtime(plan);
+
+    controlEdges.activate(0);
+    expect(readiness.dequeueReadyOp()).toBe(0);
+    expect(() => routers.activateReservedRouter(0, "yes")).toThrow(
+      "Router op 0 cannot resolve control edge 0 from 'active'.",
+    );
+    expect(readiness.getOpState(0).status).toBe("ready");
+    expect(readiness.isReadyOpReserved(0)).toBe(true);
+  });
+
   it("rejects malformed router wiring before any activation can occur", () => {
     const unported = ir(
       [routerOp("route", []), executableOp("target", [0])],
       [{ from: { op: 0 }, to: { op: 1 } }],
     );
-    expect(() => new RunRouterActivation(unported, new RunReadiness(unported))).toThrow(
+    const unportedReadiness = new RunReadiness(unported);
+    const unportedEdges = new RunControlEdges(unported);
+    expect(() => new RunRouterActivation(unported, unportedReadiness, unportedEdges)).toThrow(
       "Router op 0 has an outgoing control edge without a declared branch port.",
     );
 
@@ -192,9 +227,20 @@ describe("RunRouterActivation", () => {
       [routerOp("route", []), executableOp("target", [])],
       [{ from: { op: 0, port: "yes" }, to: { op: 1 } }],
     );
+    const missingReadiness = new RunReadiness(missingDependency);
+    const missingEdges = new RunControlEdges(missingDependency);
+    expect(() => new RunRouterActivation(missingDependency, missingReadiness, missingEdges)).toThrow(
+      "Router control edge 0 -> 1 is missing its IR dependency.",
+    );
+  });
+
+  it("requires shared control-edge state from the exact same IR object", () => {
+    const left = ir([routerOp("route", [])], []);
+    const right = ir([routerOp("route", [])], []);
+
     expect(
-      () => new RunRouterActivation(missingDependency, new RunReadiness(missingDependency)),
-    ).toThrow("Router control edge 0 -> 1 is missing its IR dependency.");
+      () => new RunRouterActivation(left, new RunReadiness(left), new RunControlEdges(right)),
+    ).toThrow("Router activation control-edge state does not belong to this Execution IR.");
   });
 
   it("returns deterministic frozen selection snapshots", () => {
@@ -210,8 +256,7 @@ describe("RunRouterActivation", () => {
         { from: { op: 1, port: "no" }, to: { op: 3 } },
       ],
     );
-    const readiness = new RunReadiness(plan);
-    const routers = new RunRouterActivation(plan, readiness);
+    const { readiness, routers } = runtime(plan);
 
     expect(readiness.dequeueReadyOp()).toBe(0);
     routers.activateReservedRouter(0, "yes");
