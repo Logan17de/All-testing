@@ -1,6 +1,5 @@
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { once } from "node:events";
+import { createServer } from "node:http";
 
 import { describe, expect, it } from "vitest";
 
@@ -67,7 +66,7 @@ describe("RuntimeHttpServer", () => {
       throw new TypeError("Test blocker did not expose a TCP address.");
     }
 
-    const server = new RuntimeHttpServer({ port: (address as AddressInfo).port });
+    const server = new RuntimeHttpServer({ port: address.port });
 
     try {
       await expect(server.start()).rejects.toMatchObject({ code: "EADDRINUSE" });
