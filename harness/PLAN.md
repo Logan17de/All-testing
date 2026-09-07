@@ -82,7 +82,8 @@ Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE
            ├─ 3.8 explicit any/quorum join semantics                   ✅
            ├─ 3.9 run cancellation with AbortController/AbortSignal    ✅
            ├─ 3.10 node timeouts                                       ✅
-           └─ 3.11 bounded retry scheduling                            ▶ CURRENT
+           ├─ 3.11 bounded retry scheduling                            ✅
+           └─ 3.12 adapter retry accounting                            ▶ CURRENT
 Phase 4  Runtime daemon + SQLite           ⏳
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
@@ -100,7 +101,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
-| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.11 current** |
+| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.12 current** |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
@@ -345,7 +346,9 @@ PENDING → READY → RUNNING
 
 Use native Promises, bounded semaphores, and `AbortController`; no queue service by default.
 
-Phase 3 timeouts are execution-local: `timeoutMs` starts only after scheduler concurrency admission, aborts the op's composed executor signal without aborting the whole run, marks the timed op failed, and releases no downstream dependency. If in-process work ignores its timeout signal, its concurrency permit remains charged until the underlying Promise really settles. Retry scheduling remains a separate 3.11 concern.
+Phase 3 timeouts are execution-local: `timeoutMs` starts only after scheduler concurrency admission, aborts the op's composed executor signal without aborting the whole run, marks the timed op failed, and releases no downstream dependency. If in-process work ignores its timeout signal, its concurrency permit remains charged until the underlying Promise really settles.
+
+Phase 3 retry scheduling is scheduler-owned and bounded: `maxAttempts` includes the initial attempt, failed attempts move through `running → retry-wait → ready`, backoff/jitter are deterministic injectable hooks, retry wait does not consume a concurrency permit, and downstream dependencies release only after eventual success. A timed-out in-process attempt that ignores cancellation must actually settle before its retry can start, preventing overlapping attempts of the same logical op. Adapter-reported internal retry accounting remains a separate 3.12 concern so scheduler retries are not accidentally multiplied by provider/tool retries.
 
 Side effects are explicit. The contract distinguishes determinism, effect class, idempotency, retry defaults, and recovery policy. Compile-time validation keeps determinism separate from repeat safety: a deterministic external write is not automatically safe to retry, while a nondeterministic external read may still be side-effect-idempotent. Unknown-idempotency external writes cannot declare automatic retry beyond one attempt or automatic rerun recovery; idempotent/idempotency-key writes may declare controlled retries. Reconcile recovery is reserved for external writes, and compile-time/control nodes without executors cannot carry runtime retry/recovery defaults. Never claim exactly-once execution for arbitrary third-party effects. Secret-only inputs are also compile-time constrained: only opaque secret-reference bindings may target `secret: true`; literals, public graph inputs, and node data edges are rejected without inspecting or echoing secret material. Secret-provider resolution and authorization remain runtime concerns.
 
@@ -412,4 +415,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 3 / Item 3.11 — Add bounded retry scheduling with backoff/jitter hooks.**
+> **Phase 3 / Item 3.12 — Ensure adapter-reported internal retries are not accidentally doubled.**
