@@ -57,7 +57,10 @@ jobs:
         run: npm run lint
 
       - name: Format check
-        run: npm run format:check
+        run: |
+          npm exec prettier -- --write packages/scheduler/src/offline-scheduler-scenarios.test.ts
+          git diff -- packages/scheduler/src/offline-scheduler-scenarios.test.ts
+          node -e "process.exit(1)"
 
       - name: Tests
         run: npm test
