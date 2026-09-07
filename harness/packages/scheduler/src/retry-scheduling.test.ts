@@ -110,7 +110,11 @@ describe("bounded retry scheduling", () => {
     const scheduler = new SchedulerConcurrency(1);
     const failures = [new Error("first"), new Error("second"), new Error("final")];
     const run = new PlainDagRun(plan, scheduler.createRun(plan), ({ attempt }) => {
-      throw failures[attempt - 1];
+      const failure = failures[attempt - 1];
+      if (failure === undefined) {
+        throw new Error(`Unexpected retry attempt ${String(attempt)}.`);
+      }
+      throw failure;
     });
 
     await expect(run.execute()).rejects.toBe(failures[2]);
