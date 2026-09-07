@@ -86,7 +86,8 @@ Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE
            ├─ 3.12 adapter retry accounting                            ✅
            ├─ 3.13 typed runtime event emitter                         ✅
            ├─ 3.14 transient vs durable runtime events                 ✅
-           └─ 3.15 deterministic mock nodes/executors                  ▶ CURRENT
+           ├─ 3.15 deterministic mock nodes/executors                  ✅
+           └─ 3.16 offline scheduler scenario tests                    ▶ CURRENT
 Phase 4  Runtime daemon + SQLite           ⏳
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
@@ -104,7 +105,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **0 — Foundation** | repo/workspaces, Next.js shell, TS/lint/test, health check, startup smoke, lockfile/toolchain pins, Linux+Windows CI, license, proven workspace wiring | ✅ Complete |
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
-| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.15 current** |
+| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.16 current** |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ⏳ Planned |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
@@ -355,6 +356,8 @@ Phase 3 retry scheduling is scheduler-owned and bounded: failed attempts move th
 
 Phase 3 runtime event transport is a tiny dependency-free synchronous typed emitter. It accepts discriminated event unions, supports type-narrowed listeners plus catch-all listeners, invokes matching subscriptions in global registration order, returns idempotent unsubscribe handles, and snapshots subscriptions at the start of each emit so listener mutation affects only later events. Listener errors are intentionally not swallowed. Runtime events that participate in the 3.14 routing contract carry an explicit `persistence: "transient" | "durable"` classification. `RuntimeEventChannels` exposes disjoint typed transient and durable listener APIs; a persistence consumer can subscribe only to durable event types, while token/progress-style transient events cannot enter that channel accidentally at the type level. The marker expresses retention intent only: `durable` means eligible for the later journal, not already persisted. The router does not serialize, sequence, replay, buffer, retain, write SQLite, or define SSE behavior; those remain Phase 4 responsibilities.
 
+Phase 3 deterministic scheduler fixtures live behind the explicit `@zet-harness/scheduler/testing` subpath rather than the production scheduler export. Scheduler-level mock nodes are deterministic Execution IR ops, preserving the compiler/plugin boundary instead of inventing fake `NodeDefinition` semantics. The testing surface supplies minimal IR/op builders, clock-free manual gates, and a `DeterministicPlainDagExecutor` scripted by stable `sourceNodeId` and one-based scheduler attempt. It records frozen ordered invocation/trace snapshots, exposes actual/max concurrent mock executions, can complete/fail/wait on a gate/wait cooperatively for abort, and can report adapter-internal retries through the real shared retry budget. Unscripted nodes complete immediately; explicitly scripted nodes fail loudly if execution reaches an unconfigured attempt. These fixtures are infrastructure for 3.16/3.17, not the scenario/stress coverage itself.
+
 Side effects are explicit. The contract distinguishes determinism, effect class, idempotency, retry defaults, and recovery policy. Compile-time validation keeps determinism separate from repeat safety: a deterministic external write is not automatically safe to retry, while a nondeterministic external read may still be side-effect-idempotent. Unknown-idempotency external writes cannot declare automatic retry beyond one attempt or automatic rerun recovery; idempotent/idempotency-key writes may declare controlled retries. Reconcile recovery is reserved for external writes, and compile-time/control nodes without executors cannot carry runtime retry/recovery defaults. Never claim exactly-once execution for arbitrary third-party effects. Secret-only inputs are also compile-time constrained: only opaque secret-reference bindings may target `secret: true`; literals, public graph inputs, and node data edges are rejected without inspecting or echoing secret material. Secret-provider resolution and authorization remain runtime concerns.
 
 Keep three concepts separate:
@@ -420,4 +423,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 3 / Item 3.15 — Add deterministic mock nodes/executors.**
+> **Phase 3 / Item 3.16 — Add offline scheduler tests for chain, fan-out/fan-in, router/join, timeout, retry, cancellation, and failure propagation.**
