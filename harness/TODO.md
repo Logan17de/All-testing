@@ -122,7 +122,7 @@ Goal: prove execution semantics without persistence hiding scheduler bugs.
 Goal: make the scheduler durable without changing Graph/IR semantics.
 
 - [x] 4.1 Create `apps/runtime` as a long-lived Node process.
-- [ ] 4.2 Bind the local API to loopback by default using built-in `node:http` where practical.
+- [x] 4.2 Bind the local API to loopback by default using built-in `node:http` where practical.
 - [ ] 4.3 Add SSE event streaming with reconnect cursor/`Last-Event-ID` support.
 - [ ] 4.4 Add SQLite through Node 24 `node:sqlite`; no ORM initially.
 - [ ] 4.5 Add a tiny ordered SQL migration runner + `schema_migrations`.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**4.2 — Bind the local API to loopback by default using built-in `node:http` where practical.**
+**4.3 — Add SSE event streaming with reconnect cursor/`Last-Event-ID` support.**
