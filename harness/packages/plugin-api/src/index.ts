@@ -193,9 +193,7 @@ export interface NodeQuorumJoinControlContract extends NodeJoinControlContractBa
 
 /** Explicit activation-aware join policy carried by the resolved node manifest. */
 export type NodeJoinControlContract =
-  | NodeAllActiveJoinControlContract
-  | NodeAnyJoinControlContract
-  | NodeQuorumJoinControlContract;
+  NodeAllActiveJoinControlContract | NodeAnyJoinControlContract | NodeQuorumJoinControlContract;
 
 /**
  * Explicit loop boundary shape only. This does not make cycles executable.
