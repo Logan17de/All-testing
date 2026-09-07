@@ -194,8 +194,7 @@ export class RunJoinActivation {
     let controlGateSatisfied = false;
 
     if (plan.control.mode === "all-active") {
-      controlGateSatisfied =
-        edgeBuckets.unresolved.length === 0 && edgeBuckets.active.length === 0;
+      controlGateSatisfied = edgeBuckets.unresolved.length === 0 && edgeBuckets.active.length === 0;
       if (controlGateSatisfied) {
         newlyReady = this.releaseIncomingSources(joinOp, plan);
       }
@@ -260,7 +259,9 @@ export class RunJoinActivation {
         (lane) => this.getThresholdLaneStatus(lane) === "completed",
       ).length;
       if (threshold === undefined || completedLaneCount < threshold) {
-        throw new TypeError(`Join op ${String(joinOp)} cannot complete before its threshold is met.`);
+        throw new TypeError(
+          `Join op ${String(joinOp)} cannot complete before its threshold is met.`,
+        );
       }
     }
 
@@ -313,9 +314,7 @@ export class RunJoinActivation {
     return plan;
   }
 
-  private bucketInputEdges(
-    plan: JoinPlan,
-  ): Readonly<Record<ControlEdgeRuntimeStatus, number[]>> {
+  private bucketInputEdges(plan: JoinPlan): Readonly<Record<ControlEdgeRuntimeStatus, number[]>> {
     const buckets: Record<ControlEdgeRuntimeStatus, number[]> = {
       unresolved: [],
       active: [],
