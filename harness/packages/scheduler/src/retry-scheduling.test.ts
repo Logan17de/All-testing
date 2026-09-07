@@ -135,14 +135,19 @@ describe("bounded retry scheduling", () => {
     );
     const scheduler = new SchedulerConcurrency(1);
     const events: string[] = [];
+    const independentStarted = deferred();
     const run = new PlainDagRun(plan, scheduler.createRun(plan), ({ op: opIndex, attempt }) => {
       events.push(`${String(opIndex)}:${String(attempt)}`);
       if (opIndex === 0 && attempt === 1) {
         throw new Error("retry me");
       }
+      if (opIndex === 1) {
+        independentStarted.resolve();
+      }
     });
 
     const execution = run.execute();
+    await independentStarted.promise;
     await flushMicrotasks();
 
     expect(events).toEqual(["0:1", "1:1"]);
