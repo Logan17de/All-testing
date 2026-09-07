@@ -71,10 +71,10 @@ export function getAllowedRunOpTransitions(status: RunOpStatus): readonly RunOpS
 /**
  * Apply one legal run-local state transition without mutating the previous state.
  *
- * 3.1 owns only the state vocabulary and transition invariants. Readiness,
- * dependency accounting, branch activation, retry timers, cancellation signals,
- * and executor dispatch are later Phase-3 items that decide when to request a
- * legal transition.
+ * 3.1 owns only the state vocabulary and transition invariants. Later Phase-3
+ * scheduler layers decide when to request those transitions; 3.11 now owns the
+ * running -> retry-wait -> ready timing/requeue path without changing this state
+ * machine's legal-transition boundary.
  */
 export function transitionRunOpState(state: RunOpState, next: RunOpStatus): RunOpState {
   assertOpIndex(state.op);
