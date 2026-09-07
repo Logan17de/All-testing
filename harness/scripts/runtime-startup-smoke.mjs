@@ -68,12 +68,35 @@ async function waitForReady() {
 
 try {
   const { host, port } = await waitForReady();
-  const healthUrl = `http://${host}:${String(port)}/api/health`;
+  const baseUrl = `http://${host}:${String(port)}`;
+  const healthUrl = `${baseUrl}/api/health`;
   const response = await fetch(healthUrl, { cache: "no-store" });
   const health = await response.json();
 
   if (!response.ok || health.status !== "ok" || health.service !== "zet-harness-runtime") {
     throw new Error(`Runtime health probe failed at ${healthUrl}.\n${output}`);
+  }
+
+  const eventResponse = await fetch(`${baseUrl}/api/events`);
+  if (
+    !eventResponse.ok ||
+    eventResponse.headers.get("content-type") !== "text/event-stream; charset=utf-8"
+  ) {
+    throw new Error(`Runtime SSE handshake failed at ${baseUrl}/api/events.\n${output}`);
+  }
+
+  const eventReader = eventResponse.body?.getReader();
+  if (eventReader === undefined) {
+    throw new Error(`Runtime SSE response had no body.\n${output}`);
+  }
+
+  const firstEventChunk = await eventReader.read();
+  const firstEventText =
+    firstEventChunk.value === undefined ? "" : new TextDecoder().decode(firstEventChunk.value);
+  await eventReader.cancel();
+
+  if (!firstEventText.includes(": connected")) {
+    throw new Error(`Runtime SSE stream did not send its connection prelude.\n${output}`);
   }
 
   await sleep(livenessProbeMs);
@@ -82,7 +105,7 @@ try {
     throw new Error(`Runtime did not remain alive after readiness.\n${output}`);
   }
 
-  console.log(`RUNTIME_STARTUP_OK ${healthUrl}`);
+  console.log(`RUNTIME_STARTUP_OK ${healthUrl} sse=ok`);
 } finally {
   await stopRuntime();
 }
