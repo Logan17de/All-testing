@@ -107,12 +107,29 @@ export interface ExecutionIrRouterControlV1 {
   readonly branches: readonly NodePortName[];
 }
 
-export interface ExecutionIrJoinControlV1 {
+interface ExecutionIrJoinControlBaseV1 {
   readonly kind: "join";
   readonly inputs: readonly NodePortName[];
   readonly output: NodePortName;
+}
+
+export interface ExecutionIrAllActiveJoinControlV1 extends ExecutionIrJoinControlBaseV1 {
   readonly mode: "all-active";
 }
+
+export interface ExecutionIrAnyJoinControlV1 extends ExecutionIrJoinControlBaseV1 {
+  readonly mode: "any";
+}
+
+export interface ExecutionIrQuorumJoinControlV1 extends ExecutionIrJoinControlBaseV1 {
+  readonly mode: "quorum";
+  readonly quorum: number;
+}
+
+export type ExecutionIrJoinControlV1 =
+  | ExecutionIrAllActiveJoinControlV1
+  | ExecutionIrAnyJoinControlV1
+  | ExecutionIrQuorumJoinControlV1;
 
 export interface ExecutionIrLoopControlV1 {
   readonly kind: "loop";
