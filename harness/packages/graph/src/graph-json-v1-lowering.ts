@@ -64,12 +64,24 @@ function lowerInitialControlDescriptor(
         branches: [...control.branches],
       };
     case "join":
-      return {
-        kind: "join",
-        inputs: [...control.inputs],
-        output: control.output,
-        mode: control.mode,
-      };
+      switch (control.mode) {
+        case "all-active":
+        case "any":
+          return {
+            kind: "join",
+            inputs: [...control.inputs],
+            output: control.output,
+            mode: control.mode,
+          };
+        case "quorum":
+          return {
+            kind: "join",
+            inputs: [...control.inputs],
+            output: control.output,
+            mode: "quorum",
+            quorum: control.quorum,
+          };
+      }
     case "loop":
     case "human-interrupt":
     case "subgraph":
@@ -169,7 +181,7 @@ function lowerDataEdgeInput(
  * - dependency indexes are deduplicated and sorted numerically;
  * - authored non-edge bindings stay ordered, followed by incoming data edges in
  *   canonical edge-id order, making multi-source aggregation sequence explicit;
- * - router and all-active join manifest contracts become IR control descriptors;
+ * - router and activation-aware join manifest contracts become IR control descriptors;
  * - loop/human/subgraph descriptors remain reserved but are not lowered here.
  *
  * This is not a user-facing validation pass. Any missing/mismatched pin, manifest,
