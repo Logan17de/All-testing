@@ -1,6 +1,10 @@
 import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 
-import type { RunConcurrency, RunConcurrencySnapshot } from "./concurrency.js";
+import type {
+  ConcurrencyPermit,
+  RunConcurrency,
+  RunConcurrencySnapshot,
+} from "./concurrency.js";
 import { RunReadiness, type RunReadinessSnapshot } from "./run-readiness.js";
 
 export interface PlainDagOpExecution {
@@ -138,7 +142,7 @@ export class PlainDagRun {
   }
 
   private async executeReservedOp(op: number): Promise<void> {
-    let permit;
+    let permit: ConcurrencyPermit | undefined;
 
     try {
       permit = await this.concurrency.acquire();
