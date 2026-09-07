@@ -3,7 +3,7 @@ import type { ExecutionIrJoinControlV1, ExecutionIrV1 } from "@zet-harness/graph
 import type { ControlEdgeRuntimeStatus, RunControlEdges } from "./control-edge-state.js";
 import type { RunReadiness } from "./run-readiness.js";
 
-export interface AllActiveJoinReconciliation {
+export interface JoinReconciliation {
   readonly joinOp: number;
   readonly ready: boolean;
   readonly newlyReady: boolean;
@@ -14,18 +14,30 @@ export interface AllActiveJoinReconciliation {
   readonly propagatedSkippedOps: readonly number[];
 }
 
-export interface AllActiveJoinCompletion {
+export interface JoinCompletion {
   readonly joinOp: number;
   readonly activatedTargets: readonly number[];
   readonly newlyReadyTargets: readonly number[];
 }
 
-interface AllActiveJoinPlan {
+export type AllActiveJoinReconciliation = JoinReconciliation;
+export type AllActiveJoinCompletion = JoinCompletion;
+
+interface JoinInputLanePlan {
+  readonly port: string;
+  readonly edges: readonly number[];
+}
+
+interface JoinPlan {
+  readonly control: ExecutionIrJoinControlV1;
   readonly incomingEdges: readonly number[];
   readonly incomingSources: readonly number[];
+  readonly incomingLanes: readonly JoinInputLanePlan[];
   readonly outgoingEdges: readonly number[];
   readonly outgoingTargets: readonly number[];
 }
+
+type ThresholdLaneStatus = "completed" | "possible" | "skipped";
 
 function assertOpIndex(op: number, opCount: number): void {
   if (!Number.isSafeInteger(op) || op < 0 || op >= opCount) {
@@ -34,7 +46,7 @@ function assertOpIndex(op: number, opCount: number): void {
 }
 
 function frozenNumbers(items: Iterable<number>): readonly number[] {
-  return Object.freeze([...items].sort((left, right) => left - right));
+  return Object.freeze([...new Set(items)].sort((left, right) => left - right));
 }
 
 function getJoinControl(ir: ExecutionIrV1, joinOp: number): ExecutionIrJoinControlV1 {
@@ -46,25 +58,36 @@ function getJoinControl(ir: ExecutionIrV1, joinOp: number): ExecutionIrJoinContr
   return operation.control;
 }
 
+function getThreshold(control: ExecutionIrJoinControlV1): number | undefined {
+  switch (control.mode) {
+    case "all-active":
+      return undefined;
+    case "any":
+      return 1;
+    case "quorum":
+      return control.quorum;
+  }
+}
+
 /**
- * Activation-aware runtime semantics for the initial `all-active` join mode.
+ * Activation-aware runtime semantics for all supported join policies.
  *
- * A join remains blocked while any candidate incoming control edge is unresolved
- * or active. Once every candidate edge is terminal, completed inputs participate
- * and skipped inputs are ignored. The join's deduplicated IR predecessor relation
- * is then released once per source op. This preserves the compact dependency
- * counter without treating an unselected router branch as unfinished forever.
+ * `all-active` preserves 3.7 semantics: every candidate incoming control edge
+ * must become terminal, completed inputs participate, and skipped inputs do not
+ * block the join.
  *
- * Reconciliation also propagates definitive skipped control paths through ordinary
- * unstarted ops. For a deduplicated source->target dependency, a target is inactive
- * only when every control edge from that same source op to the target is skipped.
- * This avoids incorrectly skipping a target that has multiple alternative router
- * edges from one predecessor and at least one selected edge.
+ * `any` and `quorum` count distinct declared input lanes, not raw edge count.
+ * A lane is completed when any edge targeting that lane completed. A lane remains
+ * possible while it has an unresolved/active edge and no completed edge. Duplicate
+ * edges into one lane can therefore never manufacture extra quorum votes.
  *
- * `any` and quorum semantics are deliberately absent until 3.8.
+ * Threshold joins may release while other lanes are still active/unresolved. 3.8
+ * deliberately does not cancel those losing branches; run cancellation belongs to
+ * 3.9. If the remaining possible lanes cannot reach the threshold, the pending join
+ * is skipped and that inactive result propagates downstream instead of deadlocking.
  */
-export class RunAllActiveJoinActivation {
-  private readonly joinPlans = new Map<number, AllActiveJoinPlan>();
+export class RunJoinActivation {
+  private readonly joinPlans = new Map<number, JoinPlan>();
 
   constructor(
     private readonly ir: ExecutionIrV1,
@@ -84,15 +107,24 @@ export class RunAllActiveJoinActivation {
       if (operation.control?.kind !== "join") {
         return;
       }
-      if (operation.control.mode !== "all-active") {
-        throw new TypeError(
-          `Join op ${String(joinOp)} uses unsupported mode '${String(operation.control.mode)}'.`,
-        );
-      }
       if (operation.behavior.executionMode !== "none") {
         throw new TypeError(
           `Join op ${String(joinOp)} must be scheduler-owned with executionMode 'none'.`,
         );
+      }
+      if (
+        operation.control.inputs.length === 0 ||
+        new Set(operation.control.inputs).size !== operation.control.inputs.length
+      ) {
+        throw new TypeError(`Join op ${String(joinOp)} must declare unique input lanes.`);
+      }
+      if (
+        operation.control.mode === "quorum" &&
+        (!Number.isSafeInteger(operation.control.quorum) ||
+          operation.control.quorum < 1 ||
+          operation.control.quorum > operation.control.inputs.length)
+      ) {
+        throw new TypeError(`Join op ${String(joinOp)} has an invalid quorum.`);
       }
 
       const incomingEdges = controlEdges.getIncomingEdgeIndexes(joinOp);
@@ -112,6 +144,13 @@ export class RunAllActiveJoinActivation {
         }
         incomingSources.add(edge.from.op);
       }
+
+      const incomingLanes = operation.control.inputs.map((port) =>
+        Object.freeze({
+          port,
+          edges: frozenNumbers(controlEdges.getIncomingEdgeIndexesForPort(joinOp, port)),
+        }),
+      );
 
       const outgoingEdges = controlEdges.getOutgoingEdgeIndexes(joinOp);
       const outgoingTargets = new Set<number>();
@@ -134,8 +173,10 @@ export class RunAllActiveJoinActivation {
       this.joinPlans.set(
         joinOp,
         Object.freeze({
+          control: operation.control,
           incomingEdges: frozenNumbers(incomingEdges),
           incomingSources: frozenNumbers(incomingSources),
+          incomingLanes: Object.freeze(incomingLanes),
           outgoingEdges: frozenNumbers(outgoingEdges),
           outgoingTargets: frozenNumbers(outgoingTargets),
         }),
@@ -143,34 +184,36 @@ export class RunAllActiveJoinActivation {
     });
   }
 
-  /** Reconcile one all-active join against current control-edge participation state. */
-  reconcileJoin(joinOp: number): AllActiveJoinReconciliation {
+  /** Reconcile one join against current control-edge participation state. */
+  reconcileJoin(joinOp: number): JoinReconciliation {
     getJoinControl(this.ir, joinOp);
     const plan = this.getPlan(joinOp);
-    const propagatedSkippedOps = this.propagateDefinitiveSkips();
-    const edgeBuckets: Record<ControlEdgeRuntimeStatus, number[]> = {
-      unresolved: [],
-      active: [],
-      skipped: [],
-      completed: [],
-    };
-
-    for (const edgeIndex of plan.incomingEdges) {
-      edgeBuckets[this.controlEdges.getState(edgeIndex).status].push(edgeIndex);
-    }
-
-    const controlGateSatisfied =
-      edgeBuckets.unresolved.length === 0 && edgeBuckets.active.length === 0;
+    const propagatedSkippedOps = [...this.propagateDefinitiveSkips()];
+    const edgeBuckets = this.bucketInputEdges(plan);
     let newlyReady = false;
+    let controlGateSatisfied = false;
 
-    if (controlGateSatisfied) {
-      for (const sourceOp of plan.incomingSources) {
-        if (
-          !this.readiness.isDependencyReleased(sourceOp, joinOp) &&
-          this.readiness.releaseDependency(sourceOp, joinOp)
-        ) {
-          newlyReady = true;
-        }
+    if (plan.control.mode === "all-active") {
+      controlGateSatisfied =
+        edgeBuckets.unresolved.length === 0 && edgeBuckets.active.length === 0;
+      if (controlGateSatisfied) {
+        newlyReady = this.releaseIncomingSources(joinOp, plan);
+      }
+    } else {
+      const threshold = getThreshold(plan.control);
+      if (threshold === undefined) {
+        throw new TypeError(`Join op ${String(joinOp)} has no threshold.`);
+      }
+
+      const laneStatuses = plan.incomingLanes.map((lane) => this.getThresholdLaneStatus(lane));
+      const completedLaneCount = laneStatuses.filter((status) => status === "completed").length;
+      const possibleLaneCount = laneStatuses.filter((status) => status === "possible").length;
+      controlGateSatisfied = completedLaneCount >= threshold;
+
+      if (controlGateSatisfied) {
+        newlyReady = this.releaseIncomingSources(joinOp, plan);
+      } else if (completedLaneCount + possibleLaneCount < threshold) {
+        propagatedSkippedOps.push(...this.skipImpossibleJoin(joinOp, plan));
       }
     }
 
@@ -182,17 +225,17 @@ export class RunAllActiveJoinActivation {
       activeInputEdges: frozenNumbers(edgeBuckets.active),
       completedInputEdges: frozenNumbers(edgeBuckets.completed),
       skippedInputEdges: frozenNumbers(edgeBuckets.skipped),
-      propagatedSkippedOps,
+      propagatedSkippedOps: frozenNumbers(propagatedSkippedOps),
     });
   }
 
   /**
-   * Complete one dequeued scheduler-owned join after successful all-active reconciliation.
+   * Complete one dequeued scheduler-owned join after its policy has been satisfied.
    * Outgoing join edges are activated/completed atomically in memory before their
    * deduplicated join->target readiness dependencies are released.
    */
-  completeReservedJoin(joinOp: number): AllActiveJoinCompletion {
-    getJoinControl(this.ir, joinOp);
+  completeReservedJoin(joinOp: number): JoinCompletion {
+    const control = getJoinControl(this.ir, joinOp);
     const plan = this.getPlan(joinOp);
 
     if (!this.readiness.isReadyOpReserved(joinOp)) {
@@ -202,14 +245,25 @@ export class RunAllActiveJoinActivation {
       throw new TypeError(`Join op ${String(joinOp)} is not ready for completion.`);
     }
 
-    for (const edgeIndex of plan.incomingEdges) {
-      const status = this.controlEdges.getState(edgeIndex).status;
-      if (status === "unresolved" || status === "active") {
-        throw new TypeError(
-          `Join op ${String(joinOp)} cannot complete while input edge ${String(edgeIndex)} is '${status}'.`,
-        );
+    if (control.mode === "all-active") {
+      for (const edgeIndex of plan.incomingEdges) {
+        const status = this.controlEdges.getState(edgeIndex).status;
+        if (status === "unresolved" || status === "active") {
+          throw new TypeError(
+            `Join op ${String(joinOp)} cannot complete while input edge ${String(edgeIndex)} is '${status}'.`,
+          );
+        }
+      }
+    } else {
+      const threshold = getThreshold(control);
+      const completedLaneCount = plan.incomingLanes.filter(
+        (lane) => this.getThresholdLaneStatus(lane) === "completed",
+      ).length;
+      if (threshold === undefined || completedLaneCount < threshold) {
+        throw new TypeError(`Join op ${String(joinOp)} cannot complete before its threshold is met.`);
       }
     }
+
     for (const edgeIndex of plan.outgoingEdges) {
       const status = this.controlEdges.getState(edgeIndex).status;
       if (status !== "unresolved") {
@@ -251,12 +305,82 @@ export class RunAllActiveJoinActivation {
     });
   }
 
-  private getPlan(joinOp: number): AllActiveJoinPlan {
+  private getPlan(joinOp: number): JoinPlan {
     const plan = this.joinPlans.get(joinOp);
     if (plan === undefined) {
-      throw new TypeError(`Join op ${String(joinOp)} has no all-active runtime plan.`);
+      throw new TypeError(`Join op ${String(joinOp)} has no runtime plan.`);
     }
     return plan;
+  }
+
+  private bucketInputEdges(
+    plan: JoinPlan,
+  ): Readonly<Record<ControlEdgeRuntimeStatus, number[]>> {
+    const buckets: Record<ControlEdgeRuntimeStatus, number[]> = {
+      unresolved: [],
+      active: [],
+      skipped: [],
+      completed: [],
+    };
+
+    for (const edgeIndex of plan.incomingEdges) {
+      buckets[this.controlEdges.getState(edgeIndex).status].push(edgeIndex);
+    }
+    return buckets;
+  }
+
+  private getThresholdLaneStatus(lane: JoinInputLanePlan): ThresholdLaneStatus {
+    const statuses = lane.edges.map((edgeIndex) => this.controlEdges.getState(edgeIndex).status);
+    if (statuses.includes("completed")) {
+      return "completed";
+    }
+    if (statuses.includes("unresolved") || statuses.includes("active")) {
+      return "possible";
+    }
+    return "skipped";
+  }
+
+  private releaseIncomingSources(joinOp: number, plan: JoinPlan): boolean {
+    let newlyReady = false;
+    for (const sourceOp of plan.incomingSources) {
+      if (
+        !this.readiness.isDependencyReleased(sourceOp, joinOp) &&
+        this.readiness.releaseDependency(sourceOp, joinOp)
+      ) {
+        newlyReady = true;
+      }
+    }
+    return newlyReady;
+  }
+
+  private skipImpossibleJoin(joinOp: number, plan: JoinPlan): readonly number[] {
+    const state = this.readiness.getOpState(joinOp).status;
+    if (state === "skipped") {
+      return this.propagateDefinitiveSkips();
+    }
+    if (state !== "pending") {
+      throw new TypeError(
+        `Join op ${String(joinOp)} became '${state}' before its threshold impossibility was resolved.`,
+      );
+    }
+
+    for (const edgeIndex of plan.outgoingEdges) {
+      const status = this.controlEdges.getState(edgeIndex).status;
+      if (status === "active" || status === "completed") {
+        throw new TypeError(
+          `Join op ${String(joinOp)} cannot become skipped after output edge ${String(edgeIndex)} became '${status}'.`,
+        );
+      }
+    }
+
+    this.readiness.skipPendingOp(joinOp);
+    for (const edgeIndex of plan.outgoingEdges) {
+      if (this.controlEdges.getState(edgeIndex).status === "unresolved") {
+        this.controlEdges.skip(edgeIndex);
+      }
+    }
+
+    return frozenNumbers([joinOp, ...this.propagateDefinitiveSkips()]);
   }
 
   /**
@@ -342,3 +466,6 @@ export class RunAllActiveJoinActivation {
     return frozenNumbers(skippedOps);
   }
 }
+
+/** Backward-compatible 3.7 name; it now delegates to the general join runtime. */
+export { RunJoinActivation as RunAllActiveJoinActivation };
