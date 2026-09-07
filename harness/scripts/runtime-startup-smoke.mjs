@@ -9,11 +9,16 @@ const runtimeEntry = resolve(root, "apps/runtime/dist/main.js");
 const startupTimeoutMs = 5_000;
 const shutdownTimeoutMs = 3_000;
 const livenessProbeMs = 50;
+const readyPattern = /ZET_RUNTIME_READY service=zet-harness-runtime host=([^\s]+) port=(\d+)/;
 
 let output = "";
 
 const runtime = spawn(process.execPath, [runtimeEntry], {
   cwd: root,
+  env: {
+    ...process.env,
+    ZET_RUNTIME_PORT: "0",
+  },
   stdio: ["ignore", "pipe", "pipe"],
 });
 
@@ -48,8 +53,9 @@ async function waitForReady() {
       );
     }
 
-    if (output.includes("ZET_RUNTIME_READY service=zet-harness-runtime")) {
-      return;
+    const ready = readyPattern.exec(output);
+    if (ready !== null) {
+      return { host: ready[1], port: Number(ready[2]) };
     }
 
     await sleep(20);
@@ -61,14 +67,22 @@ async function waitForReady() {
 }
 
 try {
-  await waitForReady();
+  const { host, port } = await waitForReady();
+  const healthUrl = `http://${host}:${String(port)}/api/health`;
+  const response = await fetch(healthUrl, { cache: "no-store" });
+  const health = await response.json();
+
+  if (!response.ok || health.status !== "ok" || health.service !== "zet-harness-runtime") {
+    throw new Error(`Runtime health probe failed at ${healthUrl}.\n${output}`);
+  }
+
   await sleep(livenessProbeMs);
 
   if (runtime.exitCode !== null || runtime.signalCode !== null) {
     throw new Error(`Runtime did not remain alive after readiness.\n${output}`);
   }
 
-  console.log("RUNTIME_STARTUP_OK service=zet-harness-runtime");
+  console.log(`RUNTIME_STARTUP_OK ${healthUrl}`);
 } finally {
   await stopRuntime();
 }
