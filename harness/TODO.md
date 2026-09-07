@@ -106,7 +106,7 @@ Goal: prove execution semantics without persistence hiding scheduler bugs.
 - [x] 3.9 Add run cancellation with `AbortController`/`AbortSignal`.
 - [x] 3.10 Add node timeouts.
 - [x] 3.11 Add bounded retry scheduling with backoff/jitter hooks.
-- [ ] 3.12 Ensure adapter-reported internal retries are not accidentally doubled.
+- [x] 3.12 Ensure adapter-reported internal retries are not accidentally doubled.
 - [ ] 3.13 Add small typed runtime event emitter.
 - [ ] 3.14 Separate transient stream events from events intended for durable storage.
 - [ ] 3.15 Add deterministic mock nodes/executors.
@@ -251,7 +251,7 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 
 ## Phase 9 — Replay/fork, memory, triggers, external clients
 
-- [ ] 9.1 Add read-only recorded trace replay with no external/model/tool invocation.
+- [ ] 9.1 Add read-only recorded trace replay with no external/model/tool/human invocation.
 - [ ] 9.2 Add execution fork from a checkpoint; keep historical run immutable.
 - [ ] 9.3 Record parent run + fork checkpoint metadata.
 - [ ] 9.4 Add graph/run identity checks so edited graphs do not silently resume old runs.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**3.12 — Ensure adapter-reported internal retries are not accidentally doubled.**
+**3.13 — Add small typed runtime event emitter.**
