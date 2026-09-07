@@ -1,0 +1,97 @@
+name: Harness complete 3.4 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-3-4.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Freeze 3.4 and advance 3.5
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              "harness/TODO.md": [
+                  (
+                      "- [ ] 3.4 Execute independent DAG branches concurrently.",
+                      "- [x] 3.4 Execute independent DAG branches concurrently.",
+                  ),
+              ],
+              "harness/README.md": [
+                  (
+                      "3.4 concurrent DAG branches              ▶ CURRENT",
+                      "3.4 concurrent DAG branches              ✅\n3.5 router branch activation             ▶ CURRENT",
+                  ),
+                  (
+                      "Item 3.3 adds native-Promise concurrency admission without starting the executor loop. `AsyncSemaphore` is a FIFO bounded semaphore with runtime-frozen permits/snapshots and duplicate-release protection. `SchedulerConcurrency` owns one runtime-global semaphore; every `RunConcurrency` owns an independent per-run semaphore derived from compiled `policies.maxParallelism`, inheriting the global limit when that policy is omitted. A run acquires its local permit before the global permit so work already blocked by its own run ceiling cannot hoard global slots. Combined release returns the global slot first, then the run-local slot. Separate runs therefore share one hard global ceiling while preserving independent local queues. 3.3 adds no timeout, abort-aware waiter removal, retries, executor calls, or DAG dispatch loop; cancellation-aware waits remain 3.9 and actual concurrent branch execution begins in 3.4.",
+                      "Item 3.3 adds native-Promise concurrency admission without starting the executor loop. `AsyncSemaphore` is a FIFO bounded semaphore with runtime-frozen permits/snapshots and duplicate-release protection. `SchedulerConcurrency` owns one runtime-global semaphore; every `RunConcurrency` owns an independent per-run semaphore derived from compiled `policies.maxParallelism`, inheriting the global limit when that policy is omitted. A run acquires its local permit before the global permit so work already blocked by its own run ceiling cannot hoard global slots. Combined release returns the global slot first, then the run-local slot. Separate runs therefore share one hard global ceiling while preserving independent local queues. 3.3 adds no timeout, abort-aware waiter removal, retries, executor calls, or DAG dispatch loop; cancellation-aware waits remain 3.9 and actual concurrent branch execution begins in 3.4.\n\nItem 3.4 adds the first one-shot in-memory execution loop as `PlainDagRun`. It supports only the ordinary executable DAG subset: structured-control descriptors and `executionMode: none` are rejected rather than accidentally treated as normal fan-out. FIFO-ready reservations acquire the 3.3 run/global permit before `ready → running`; successful execution transitions to `completed`, then releases every ordinary predecessor pair so newly-unblocked work enters the readiness queue. Independent ready branches are dispatched concurrently up to the compiled per-run/global ceilings, while fan-in remains blocked until every predecessor completes. Ready reservations are tracked explicitly so an op cannot be double-dispatched. Executor failure marks only the active op `failed`, releases no downstream dependency, stops new dispatch, lets already-admitted peers settle, and rejects with the original error; downstream failure propagation remains later coverage. The executor callback is adapter-neutral and returns no runtime values yet, preserving later model/tool/value-materialization ownership. Router activation begins in 3.5; control-edge states, joins, cancellation, timeout, retry, events, and persistence remain later items.",
+                  ),
+              ],
+              "harness/PLAN.md": [
+                  (
+                      "Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE\n           ├─ 3.1 op status state machine                              ✅\n           ├─ 3.2 readiness queue + dependency counters                ✅\n           ├─ 3.3 bounded global/per-run concurrency                   ✅\n           └─ 3.4 concurrent DAG branches                              ▶ CURRENT",
+                      "Phase 3  In-memory DAG scheduler           🚧 WE ARE HERE\n           ├─ 3.1 op status state machine                              ✅\n           ├─ 3.2 readiness queue + dependency counters                ✅\n           ├─ 3.3 bounded global/per-run concurrency                   ✅\n           ├─ 3.4 concurrent DAG branches                              ✅\n           └─ 3.5 router branch activation                             ▶ CURRENT",
+                  ),
+                  (
+                      "| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.4 current** |",
+                      "| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.5 current** |",
+                  ),
+                  (
+                      "> **Phase 3 / Item 3.4 — Execute independent DAG branches concurrently.**",
+                      "> **Phase 3 / Item 3.5 — Add router branch activation.**",
+                  ),
+              ],
+              "harness/RUNTIME.md": [
+                  (
+                      "Item 3.3 adds a framework-free FIFO `AsyncSemaphore` plus scheduler-global and per-run admission gates. The runtime chooses one positive global limit. Each run gets an independent local limit from compiled `policies.maxParallelism`, or inherits the global ceiling when omitted. Run-local admission happens before global admission so a run stalled at its own limit does not consume a global slot while waiting. Once both permits are held, the work counts against both limits until the combined permit is released; global capacity is returned before local capacity to favor cross-run progress. Permit and snapshot objects are runtime-frozen and duplicate release is rejected before accounting can underflow. This layer remains admission-only: it does not dequeue work, transition op status, invoke executors, add timeouts/retries, or remove aborted waiters. Concurrent DAG dispatch starts in 3.4 and AbortSignal-aware waiter cancellation remains 3.9.",
+                      "Item 3.3 adds a framework-free FIFO `AsyncSemaphore` plus scheduler-global and per-run admission gates. The runtime chooses one positive global limit. Each run gets an independent local limit from compiled `policies.maxParallelism`, or inherits the global ceiling when omitted. Run-local admission happens before global admission so a run stalled at its own limit does not consume a global slot while waiting. Once both permits are held, the work counts against both limits until the combined permit is released; global capacity is returned before local capacity to favor cross-run progress. Permit and snapshot objects are runtime-frozen and duplicate release is rejected before accounting can underflow. This layer remains admission-only: it does not dequeue work, transition op status, invoke executors, add timeouts/retries, or remove aborted waiters. Concurrent DAG dispatch starts in 3.4 and AbortSignal-aware waiter cancellation remains 3.9.\n\nItem 3.4 composes readiness and concurrency into `PlainDagRun`, the first actual framework-free executor loop. Dequeue creates an explicit ready reservation; after run/global admission succeeds that exact reservation becomes `running`, and successful completion releases all ordinary dependent pairs. Newly-zero dependency counters append work to the FIFO queue, so fan-out branches can overlap while fan-in waits for all predecessors. Dispatch never exceeds the compiled run ceiling or scheduler-global ceiling. The 3.4 runner intentionally rejects structured-control descriptors and `executionMode: none`; routers are not treated as ordinary completion fan-out. Executor errors mark the active op failed, satisfy no downstream dependency, stop new dispatch, allow already-admitted peers to settle, and reject the one-shot run. Failure propagation, value materialization, retries, cancellation, timeout, events, and persistence are not claimed here. Router branch activation begins in 3.5.",
+                  ),
+              ],
+          }
+
+          for filename, edits in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"missing expected text in {filename}: {old[:180]}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+      - name: Format tracker docs
+        working-directory: harness
+        run: npx prettier --write TODO.md README.md PLAN.md RUNTIME.md
+
+      - name: Commit tracker freeze and remove helper
+        run: |
+          rm .github/workflows/harness-complete-3-4.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/RUNTIME.md .github/workflows/harness-complete-3-4.yml
+          git commit -m "docs(harness): freeze 3.4 and advance 3.5"
+          git push origin HEAD:zet-harness-v1
