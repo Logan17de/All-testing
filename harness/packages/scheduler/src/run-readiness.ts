@@ -174,6 +174,19 @@ export class RunReadiness {
     return this.finishRunningOp(op, "failed");
   }
 
+  /** Mark control-inactive work skipped before it ever becomes ready. */
+  skipPendingOp(op: number): RunOpState {
+    assertOpIndex(op, this.ops.length);
+    const current = this.getOpState(op);
+    if (current.status !== "pending") {
+      throw new TypeError(`Run op ${String(op)} cannot be skipped from '${current.status}'.`);
+    }
+
+    const next = transitionRunOpState(current, "skipped");
+    this.ops[op] = next;
+    return next;
+  }
+
   /** Return the current FIFO queue without exposing mutable scheduler storage. */
   getReadyQueue(): readonly number[] {
     return frozenCopy(this.readyQueue.slice(this.readyHead));
