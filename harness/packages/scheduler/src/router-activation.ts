@@ -97,7 +97,10 @@ export class RunRouterActivation {
       this.branchTargets.set(
         routerOp,
         new Map(
-          [...targetsByBranch.entries()].map(([branch, targets]) => [branch, frozenNumbers(targets)]),
+          [...targetsByBranch.entries()].map(([branch, targets]) => [
+            branch,
+            frozenNumbers(targets),
+          ]),
         ),
       );
     });

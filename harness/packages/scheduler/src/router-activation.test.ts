@@ -192,14 +192,19 @@ describe("RunRouterActivation", () => {
       [routerOp("route", []), executableOp("target", [])],
       [{ from: { op: 0, port: "yes" }, to: { op: 1 } }],
     );
-    expect(() => new RunRouterActivation(missingDependency, new RunReadiness(missingDependency))).toThrow(
-      "Router control edge 0 -> 1 is missing its IR dependency.",
-    );
+    expect(
+      () => new RunRouterActivation(missingDependency, new RunReadiness(missingDependency)),
+    ).toThrow("Router control edge 0 -> 1 is missing its IR dependency.");
   });
 
   it("returns deterministic frozen selection snapshots", () => {
     const plan = ir(
-      [routerOp("route-a", []), routerOp("route-b", []), executableOp("a", [0]), executableOp("b", [1])],
+      [
+        routerOp("route-a", []),
+        routerOp("route-b", []),
+        executableOp("a", [0]),
+        executableOp("b", [1]),
+      ],
       [
         { from: { op: 0, port: "yes" }, to: { op: 2 } },
         { from: { op: 1, port: "no" }, to: { op: 3 } },
