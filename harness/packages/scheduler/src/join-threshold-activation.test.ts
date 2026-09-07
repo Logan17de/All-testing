@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  ExecutionIrJoinControlV1,
-  ExecutionIrOpV1,
-  ExecutionIrV1,
-} from "@zet-harness/graph";
+import type { ExecutionIrJoinControlV1, ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 
 import { RunControlEdges } from "./control-edge-state.js";
 import { RunJoinActivation } from "./join-activation.js";
