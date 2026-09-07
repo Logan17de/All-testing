@@ -250,7 +250,9 @@ describe("offline scheduler scenarios", () => {
 
     const result = await run.execute();
 
-    expect(mock.snapshot().invocations.map(({ sourceNodeId, attempt }) => [sourceNodeId, attempt])).toEqual([
+    expect(
+      mock.snapshot().invocations.map(({ sourceNodeId, attempt }) => [sourceNodeId, attempt]),
+    ).toEqual([
       ["flaky", 1],
       ["flaky", 2],
       ["child", 1],
