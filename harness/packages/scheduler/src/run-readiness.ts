@@ -21,9 +21,10 @@ function frozenCopy<T>(items: readonly T[]): readonly T[] {
 /**
  * Run-local readiness bookkeeping over immutable Execution IR dependencies.
  *
- * 3.2 owns only deterministic FIFO readiness plus dependency counters. The
- * caller decides when one specific source→target dependency is satisfied;
- * completion/failure/skip/control-edge semantics are later Phase-3 concerns.
+ * 3.2 owns deterministic FIFO readiness plus dependency counters. 3.4 adds the
+ * narrow execution handoff from a dequeued ready reservation to running and then
+ * completed/failed. Branch activation still decides which dependency pairs are
+ * actually released in later structured-control items.
  */
 export class RunReadiness {
   private readonly ops: RunOpState[];
@@ -31,6 +32,7 @@ export class RunReadiness {
   private readonly remainingDependencies: number[];
   private readonly dependents: readonly (readonly number[])[];
   private readonly releasedDependencies: Set<number>[];
+  private readonly reservedReadyOps = new Set<number>();
   private readonly readyQueue: number[] = [];
   private readyHead = 0;
 
@@ -111,15 +113,19 @@ export class RunReadiness {
     return released.has(sourceOp);
   }
 
+  isReadyOpReserved(op: number): boolean {
+    assertOpIndex(op, this.ops.length);
+    return this.reservedReadyOps.has(op);
+  }
+
   peekReadyOp(): number | undefined {
     return this.readyQueue[this.readyHead];
   }
 
   /**
-   * Reserve the next FIFO-ready op for a later dispatch stage.
-   *
-   * 3.2 deliberately leaves the op status as `ready`; 3.3+ owns transition to
-   * `running` once concurrency permission and dispatch are actually available.
+   * Reserve the next FIFO-ready op for dispatch without starting it yet.
+   * 3.4 transitions this exact reservation to running only after concurrency
+   * admission has succeeded.
    */
   dequeueReadyOp(): number | undefined {
     const op = this.readyQueue[this.readyHead];
@@ -132,7 +138,40 @@ export class RunReadiness {
       this.readyQueue.length = 0;
       this.readyHead = 0;
     }
+
+    if (this.reservedReadyOps.has(op)) {
+      throw new TypeError(`Run op ${String(op)} already has a ready reservation.`);
+    }
+    this.reservedReadyOps.add(op);
     return op;
+  }
+
+  /** Transition one dequeued ready reservation to running exactly once. */
+  startReservedReadyOp(op: number): RunOpState {
+    assertOpIndex(op, this.ops.length);
+    if (!this.reservedReadyOps.has(op)) {
+      throw new TypeError(`Run op ${String(op)} is not a dequeued ready reservation.`);
+    }
+
+    const current = this.getOpState(op);
+    if (current.status !== "ready") {
+      throw new TypeError(`Run op ${String(op)} cannot start from '${current.status}'.`);
+    }
+
+    this.reservedReadyOps.delete(op);
+    const next = transitionRunOpState(current, "running");
+    this.ops[op] = next;
+    return next;
+  }
+
+  /** Mark one actively running op completed. Dependency release remains explicit. */
+  completeRunningOp(op: number): RunOpState {
+    return this.finishRunningOp(op, "completed");
+  }
+
+  /** Mark one actively running op failed without satisfying downstream dependencies. */
+  failRunningOp(op: number): RunOpState {
+    return this.finishRunningOp(op, "failed");
   }
 
   /** Return the current FIFO queue without exposing mutable scheduler storage. */
@@ -190,6 +229,20 @@ export class RunReadiness {
       remainingDependencies: frozenCopy(this.remainingDependencies),
       readyQueue: this.getReadyQueue(),
     });
+  }
+
+  private finishRunningOp(op: number, nextStatus: "completed" | "failed"): RunOpState {
+    assertOpIndex(op, this.ops.length);
+    const current = this.getOpState(op);
+    if (current.status !== "running") {
+      throw new TypeError(
+        `Run op ${String(op)} cannot enter ${nextStatus} from '${current.status}'.`,
+      );
+    }
+
+    const next = transitionRunOpState(current, nextStatus);
+    this.ops[op] = next;
+    return next;
   }
 
   private markReady(op: number): void {
