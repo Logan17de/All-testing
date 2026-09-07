@@ -4,6 +4,7 @@ import type { ConcurrencyPermit, RunConcurrency, RunConcurrencySnapshot } from "
 import { RunReadiness, type RunReadinessSnapshot } from "./run-readiness.js";
 
 const MAX_NATIVE_TIMER_MS = 2_147_483_647;
+const RETRY_ACCOUNTING_ERRORS = new WeakSet<object>();
 
 export class RunCancellationError extends Error {
   readonly code = "RUN_CANCELLED" as const;
@@ -24,6 +25,15 @@ export class NodeTimeoutError extends Error {
     super(`Run op ${String(op)} timed out after ${String(timeoutMs)} ms.`);
     this.name = "NodeTimeoutError";
   }
+}
+
+function retryAccountingError<T extends Error>(error: T): T {
+  RETRY_ACCOUNTING_ERRORS.add(error);
+  return error;
+}
+
+function isRetryAccountingError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && RETRY_ACCOUNTING_ERRORS.has(error);
 }
 
 /**
@@ -287,6 +297,8 @@ function waitForSettlementOrAbort(
  * internal retries through the frozen per-attempt `retryBudget` object. Future
  * adapters can cap provider/SDK retries from `remainingAttempts`, preventing
  * accidental multiplicative retry stacks without adding adapter APIs here.
+ * Retry-accounting contract violations are terminal and never schedule another
+ * outer retry while preserving their original TypeError/RangeError identity.
  *
  * Retry waits are liveness tasks, not active execution tasks. They keep the run
  * alive while backoff is pending but never block dispatch of unrelated ready work.
@@ -530,6 +542,14 @@ export class PlainDagRun {
       const attemptBudgetUsed = this.attemptBudgetUsed[op] ?? 0;
       const maxAttempts = operation?.behavior.retry?.maxAttempts ?? 1;
 
+      if (isRetryAccountingError(error)) {
+        if (current.status === "running") {
+          this.readiness.failRunningOp(op);
+        }
+        this.recordFailure(error);
+        return;
+      }
+
       if (
         operation !== undefined &&
         current.status === "running" &&
@@ -646,18 +666,28 @@ export class PlainDagRun {
       },
       reportInternalRetries: (count = 1): number => {
         if (closed) {
-          throw new TypeError(
-            `Run op ${String(op)} retry budget is closed for this scheduler attempt.`,
+          throw retryAccountingError(
+            new TypeError(
+              `Run op ${String(op)} retry budget is closed for this scheduler attempt.`,
+            ),
           );
         }
-        assertNonNegativeSafeInteger(`Run op ${String(op)} internal retry count`, count);
+        if (!Number.isSafeInteger(count) || count < 0) {
+          throw retryAccountingError(
+            new TypeError(
+              `Run op ${String(op)} internal retry count must be a non-negative safe integer.`,
+            ),
+          );
+        }
 
         const used = readUsedAttempts();
         const remaining = maxAttempts - used;
         if (count > remaining) {
           const attemptLabel = remaining === 1 ? "attempt" : "attempts";
-          throw new RangeError(
-            `Run op ${String(op)} reported ${String(count)} internal retries with only ${String(remaining)} ${attemptLabel} remaining in its retry budget.`,
+          throw retryAccountingError(
+            new RangeError(
+              `Run op ${String(op)} reported ${String(count)} internal retries with only ${String(remaining)} ${attemptLabel} remaining in its retry budget.`,
+            ),
           );
         }
 
