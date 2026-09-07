@@ -1,25 +1,36 @@
-const BOOTSTRAP_KEEP_ALIVE_MS = 2_147_483_647;
+import {
+  RuntimeHttpServer,
+  type RuntimeHttpServerOptions,
+  type RuntimeHttpServerSnapshot,
+} from "./runtime-http-server.js";
 
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
+export interface RuntimeDaemonOptions {
+  readonly api?: RuntimeHttpServerOptions;
+}
+
 export interface RuntimeDaemonSnapshot {
   readonly state: RuntimeDaemonState;
+  readonly api: RuntimeHttpServerSnapshot;
 }
 
 /**
- * Minimal long-lived runtime lifecycle for Phase 4.1.
+ * Long-lived runtime lifecycle.
  *
- * The referenced timer is intentionally only a bootstrap event-loop handle. Phase
- * 4.2 replaces its keep-alive role with the loopback HTTP server; persistence and
- * execution ownership remain later Phase 4 concerns.
+ * Phase 4.2 makes the loopback HTTP server the first real event-loop owner. SQLite,
+ * scheduler ownership, SSE, plugins, and permissions remain later Phase 4 concerns.
  */
 export class RuntimeDaemon {
   private state: RuntimeDaemonState = "idle";
-  private keepAliveTimer: NodeJS.Timeout | undefined;
+  private readonly httpServer: RuntimeHttpServer;
   private readonly stoppedPromise: Promise<void>;
   private readonly resolveStopped: () => void;
+  private stopPromise: Promise<boolean> | undefined;
 
-  constructor() {
+  constructor(options: RuntimeDaemonOptions = {}) {
+    this.httpServer = new RuntimeHttpServer(options.api);
+
     let resolveStopped!: () => void;
     this.stoppedPromise = new Promise<void>((resolve) => {
       resolveStopped = resolve;
@@ -28,11 +39,14 @@ export class RuntimeDaemon {
   }
 
   snapshot(): RuntimeDaemonSnapshot {
-    return Object.freeze({ state: this.state });
+    return Object.freeze({
+      state: this.state,
+      api: this.httpServer.snapshot(),
+    });
   }
 
-  /** Start this daemon lifecycle exactly once. Repeated calls while running are idempotent. */
-  start(): boolean {
+  /** Start the daemon only after its loopback API has successfully bound. */
+  async start(): Promise<boolean> {
     if (this.state === "stopped") {
       throw new TypeError("Runtime daemon cannot restart after it has stopped.");
     }
@@ -40,27 +54,33 @@ export class RuntimeDaemon {
       return false;
     }
 
-    this.keepAliveTimer = setInterval(() => undefined, BOOTSTRAP_KEEP_ALIVE_MS);
+    await this.httpServer.start();
     this.state = "running";
     return true;
   }
 
-  /** Stop the lifecycle once and release its event-loop keep-alive handle. */
-  stop(): boolean {
+  /** Stop once, closing the API listener before releasing lifecycle waiters. */
+  async stop(): Promise<boolean> {
     if (this.state === "stopped") {
       return false;
     }
-
-    if (this.keepAliveTimer !== undefined) {
-      clearInterval(this.keepAliveTimer);
-      this.keepAliveTimer = undefined;
+    if (this.stopPromise !== undefined) {
+      await this.stopPromise;
+      return false;
     }
-    this.state = "stopped";
-    this.resolveStopped();
-    return true;
+
+    this.stopPromise = this.stopOnce();
+    return this.stopPromise;
   }
 
   waitUntilStopped(): Promise<void> {
     return this.stoppedPromise;
+  }
+
+  private async stopOnce(): Promise<boolean> {
+    await this.httpServer.stop();
+    this.state = "stopped";
+    this.resolveStopped();
+    return true;
   }
 }
