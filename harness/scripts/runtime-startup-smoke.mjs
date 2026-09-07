@@ -1,11 +1,15 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const runtimeEntry = resolve(root, "apps/runtime/dist/main.js");
+const databaseRoot = mkdtempSync(join(tmpdir(), "zet-harness-runtime-"));
+const databasePath = join(databaseRoot, "runtime.sqlite");
 const startupTimeoutMs = 5_000;
 const shutdownTimeoutMs = 3_000;
 const livenessProbeMs = 50;
@@ -17,6 +21,7 @@ const runtime = spawn(process.execPath, [runtimeEntry], {
   cwd: root,
   env: {
     ...process.env,
+    ZET_RUNTIME_DB_PATH: databasePath,
     ZET_RUNTIME_PORT: "0",
   },
   stdio: ["ignore", "pipe", "pipe"],
@@ -68,6 +73,10 @@ async function waitForReady() {
 
 try {
   const { host, port } = await waitForReady();
+  if (!existsSync(databasePath)) {
+    throw new Error(`Runtime reported ready without creating its SQLite database.\n${output}`);
+  }
+
   const baseUrl = `http://${host}:${String(port)}`;
   const healthUrl = `${baseUrl}/api/health`;
   const response = await fetch(healthUrl, { cache: "no-store" });
@@ -105,7 +114,8 @@ try {
     throw new Error(`Runtime did not remain alive after readiness.\n${output}`);
   }
 
-  console.log(`RUNTIME_STARTUP_OK ${healthUrl} sse=ok`);
+  console.log(`RUNTIME_STARTUP_OK ${healthUrl} sqlite=ok sse=ok`);
 } finally {
   await stopRuntime();
+  rmSync(databaseRoot, { recursive: true, force: true });
 }
