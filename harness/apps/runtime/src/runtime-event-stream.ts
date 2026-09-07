@@ -26,11 +26,7 @@ export class RuntimeEventCursorError extends RangeError {
   readonly oldestRetainedEventId: number | null;
   readonly latestEventId: number;
 
-  constructor(
-    cursor: number,
-    oldestRetainedEventId: number | null,
-    latestEventId: number,
-  ) {
+  constructor(cursor: number, oldestRetainedEventId: number | null, latestEventId: number) {
     super(
       `Runtime event cursor ${String(cursor)} is outside the retained range ` +
         `(oldest ${String(oldestRetainedEventId)}, latest ${String(latestEventId)}).`,
