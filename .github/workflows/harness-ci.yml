@@ -15,7 +15,7 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: harness-ci-${{ github.workflow }}-${{ github.ref }}
@@ -38,6 +38,69 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Close 4.3 roadmap
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one {label} match, found {count}")
+              return text.replace(old, new, 1)
+
+          todo_path = Path("TODO.md")
+          todo = todo_path.read_text(encoding="utf-8")
+          todo = replace_once(
+              todo,
+              "- [ ] 4.3 Add SSE event streaming with reconnect cursor/`Last-Event-ID` support.",
+              "- [x] 4.3 Add SSE event streaming with reconnect cursor/`Last-Event-ID` support.",
+              "TODO 4.3 checkbox",
+          )
+          todo = replace_once(
+              todo,
+              "**4.3 — Add SSE event streaming with reconnect cursor/`Last-Event-ID` support.**",
+              "**4.4 — Add SQLite through Node 24 `node:sqlite`; no ORM initially.**",
+              "TODO next action",
+          )
+          todo_path.write_text(todo, encoding="utf-8")
+
+          plan_path = Path("PLAN.md")
+          plan = plan_path.read_text(encoding="utf-8")
+          plan = replace_once(
+              plan,
+              "           └─ 4.3 SSE reconnect/cursor support                        ▶ CURRENT",
+              "           ├─ 4.3 SSE reconnect/cursor support                        ✅\n           └─ 4.4 node:sqlite database foundation                     ▶ CURRENT",
+              "PLAN phase tree",
+          )
+          plan = replace_once(
+              plan,
+              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.3 current** |",
+              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.4 current** |",
+              "PLAN phase map",
+          )
+          old_runtime = "Phase 4 runtime ownership now has a real process and transport boundary. `apps/runtime` is a dependency-light long-lived Node process with explicit lifecycle and clean shutdown behavior. Its first event-loop owner is the built-in `node:http` listener: the runtime binds `127.0.0.1` by default, does not report `running`/ready until `listen()` has actually succeeded, exposes only the small `GET /api/health` surface for now, and keeps bind failures out of the ready state. Tests use port `0` for collision-free ephemeral listeners, while the normal default remains a fixed local port. SSE streaming, durable event cursors, authentication/origin policy, and database health are intentionally separate later items."
+          new_runtime = "Phase 4 runtime ownership now has a real process and transport boundary. `apps/runtime` is a dependency-light long-lived Node process with explicit lifecycle and clean shutdown behavior. Its built-in `node:http` listener binds `127.0.0.1` by default, does not report `running`/ready until `listen()` succeeds, and exposes `GET /api/health` plus `GET /api/events`. The SSE transport uses a bounded in-memory replay stream with process-local monotonic IDs, live fan-out, `?cursor=N` and `Last-Event-ID` reconnect semantics, explicit `400` malformed-cursor and `409` unavailable-cursor responses, and clean client teardown during daemon shutdown. Cursorless clients begin live from the current stream head. These IDs and replay buffers are intentionally non-durable and reset with the process; SQLite-backed durable event identity, authentication/origin policy, and database health remain later Phase 4 responsibilities."
+          plan = replace_once(plan, old_runtime, new_runtime, "PLAN runtime transport note")
+          plan = replace_once(
+              plan,
+              "> **Phase 4 / Item 4.3 — Add SSE event streaming with reconnect cursor/`Last-Event-ID` support.**",
+              "> **Phase 4 / Item 4.4 — Add SQLite through Node 24 `node:sqlite`; no ORM initially.**",
+              "PLAN next action",
+          )
+          plan_path.write_text(plan, encoding="utf-8")
+          PY
+
+          if ! git diff --quiet -- TODO.md PLAN.md; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add TODO.md PLAN.md
+            git commit -m "docs: complete SSE runtime transport"
+            git push origin HEAD:zet-harness-v1
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
