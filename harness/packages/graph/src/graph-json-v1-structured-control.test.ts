@@ -52,6 +52,19 @@ const manifests: readonly NodeManifest[] = [
     output: "out",
     mode: "all-active",
   }),
+  manifest("join-any", "control", {
+    kind: "join",
+    inputs: ["left", "right"],
+    output: "out",
+    mode: "any",
+  }),
+  manifest("join-quorum", "control", {
+    kind: "join",
+    inputs: ["a", "b", "c"],
+    output: "out",
+    mode: "quorum",
+    quorum: 2,
+  }),
   manifest("loop", "control", {
     kind: "loop",
     entry: "enter",
@@ -224,31 +237,57 @@ describe("Graph JSON v1 structured control contracts", () => {
     ]);
   });
 
-  it("reserves join lanes and the all-active output without adding any/quorum semantics", () => {
+  it("accepts all-active, any, and bounded quorum join policies", () => {
     const value = graph(
       [
         node("left", "ordinary"),
         node("right", "ordinary"),
-        node("join", "join"),
+        node("join-all", "join"),
+        node("join-any", "join-any"),
+        node("join-quorum", "join-quorum"),
         node("end", "ordinary"),
       ],
       [
         {
-          id: "left-join",
+          id: "left-all",
           kind: "control",
           from: { nodeId: "left" },
-          to: { nodeId: "join", port: "left" },
+          to: { nodeId: "join-all", port: "left" },
         },
         {
-          id: "right-join",
+          id: "right-all",
           kind: "control",
           from: { nodeId: "right" },
-          to: { nodeId: "join", port: "right" },
+          to: { nodeId: "join-all", port: "right" },
         },
         {
-          id: "join-end",
+          id: "left-any",
           kind: "control",
-          from: { nodeId: "join", port: "out" },
+          from: { nodeId: "left" },
+          to: { nodeId: "join-any", port: "left" },
+        },
+        {
+          id: "right-any",
+          kind: "control",
+          from: { nodeId: "right" },
+          to: { nodeId: "join-any", port: "right" },
+        },
+        {
+          id: "left-quorum-a",
+          kind: "control",
+          from: { nodeId: "left" },
+          to: { nodeId: "join-quorum", port: "a" },
+        },
+        {
+          id: "right-quorum-b",
+          kind: "control",
+          from: { nodeId: "right" },
+          to: { nodeId: "join-quorum", port: "b" },
+        },
+        {
+          id: "all-end",
+          kind: "control",
+          from: { nodeId: "join-all", port: "out" },
           to: { nodeId: "end" },
         },
       ],
@@ -259,7 +298,46 @@ describe("Graph JSON v1 structured control contracts", () => {
       kind: "join",
       mode: "all-active",
     });
+    expect(manifests.find((item) => item.type === "join-any")?.control).toMatchObject({
+      kind: "join",
+      mode: "any",
+    });
+    expect(manifests.find((item) => item.type === "join-quorum")?.control).toMatchObject({
+      kind: "join",
+      mode: "quorum",
+      quorum: 2,
+    });
   });
+
+  it.each([0, 4, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects invalid quorum value %s at the structured-control boundary",
+    (quorum) => {
+      const invalid = manifest("invalid-quorum", "control", {
+        kind: "join",
+        inputs: ["a", "b", "c"],
+        output: "out",
+        mode: "quorum",
+        quorum,
+      });
+      const localResolver: NodeManifestResolver = {
+        getManifest(type) {
+          return type === "invalid-quorum" ? invalid : undefined;
+        },
+      };
+
+      expect(
+        checkGraphJsonV1StructuredControl(
+          graph([node("join", "invalid-quorum")], []),
+          localResolver,
+        ).diagnostics,
+      ).toEqual([
+        expect.objectContaining({
+          code: "GRAPH_CONTROL_CONTRACT_INVALID",
+          nodeId: "join",
+        }),
+      ]);
+    },
+  );
 
   it("reserves loop ports but does not override 2.10 cycle rejection", () => {
     const value = graph(
