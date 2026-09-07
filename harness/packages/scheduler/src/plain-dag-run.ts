@@ -3,24 +3,35 @@ import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 import type { ConcurrencyPermit, RunConcurrency, RunConcurrencySnapshot } from "./concurrency.js";
 import { RunReadiness, type RunReadinessSnapshot } from "./run-readiness.js";
 
+export class RunCancellationError extends Error {
+  readonly code = "RUN_CANCELLED" as const;
+
+  constructor(message = "Plain DAG run cancelled.") {
+    super(message);
+    this.name = "RunCancellationError";
+  }
+}
+
 export interface PlainDagOpExecution {
   /** Zero-based Execution IR op index. */
   readonly op: number;
   readonly operation: ExecutionIrOpV1;
+  /** Run-owned cooperative cancellation signal shared by every admitted op. */
+  readonly signal: AbortSignal;
 }
 
 /**
  * Runtime-owned adapter invoked for one already-admitted plain DAG op.
  *
- * 3.4 deliberately does not define value materialization, model/tool adapters,
- * timeout, retry, or cancellation semantics. Later runtime layers can adapt this
- * boundary to concrete node executors while the scheduler owns ordering only.
+ * 3.9 adds only cooperative run cancellation through `execution.signal`. Value
+ * materialization, model/tool adapters, timeout, and retry remain later layers.
  */
 export type PlainDagOpExecutor = (execution: PlainDagOpExecution) => void | Promise<void>;
 
 export interface PlainDagRunSnapshot {
   readonly started: boolean;
   readonly settled: boolean;
+  readonly cancelled: boolean;
   readonly readiness: RunReadinessSnapshot;
   readonly concurrency: RunConcurrencySnapshot;
 }
@@ -43,20 +54,20 @@ function assertPlainExecutableDag(ir: ExecutionIrV1): void {
 /**
  * First framework-free in-memory DAG execution loop.
  *
- * 3.4 owns only the plain DAG subset: dequeue FIFO-ready ops, acquire the frozen
- * 3.3 run/global concurrency admission, transition ready→running→completed, and
- * release every ordinary predecessor relation after successful completion.
- * Independent ready branches therefore overlap naturally up to the concurrency
- * limits. Structured router/join activation is rejected here and lands in 3.5+
- * rather than being accidentally treated as ordinary completion fan-out.
+ * The run owns exactly one AbortController. Calling `cancel()` stops new dispatch,
+ * clears queued/reserved readiness, aborts local/global concurrency waiters, marks
+ * every unfinished op cancelled, and propagates the same AbortSignal to running
+ * executors. JavaScript work remains cooperative: an executor that ignores its
+ * signal may still take time to settle, but it cannot complete or release new DAG
+ * dependencies after the run has been cancelled.
  *
- * Executor failure marks only that op failed, releases no downstream dependency,
- * stops new dispatch, lets already-admitted peers settle, and rejects the run
- * with the original error. Downstream failure propagation is intentionally not
- * claimed until its dedicated later scheduler coverage.
+ * Executor failure remains distinct from cancellation. The first executor failure
+ * still wins the final rejection if it happened before a later user cancellation;
+ * cancellation may nevertheless abort already-admitted peers so they can settle.
  */
 export class PlainDagRun {
   private readonly readiness: RunReadiness;
+  private readonly abortController = new AbortController();
   private readonly activeTasks = new Set<Promise<void>>();
   private started = false;
   private settled = false;
@@ -72,13 +83,34 @@ export class PlainDagRun {
     this.readiness = new RunReadiness(ir);
   }
 
+  get signal(): AbortSignal {
+    return this.abortController.signal;
+  }
+
   snapshot(): PlainDagRunSnapshot {
     return Object.freeze({
       started: this.started,
       settled: this.settled,
+      cancelled: this.signal.aborted,
       readiness: this.readiness.snapshot(),
       concurrency: this.concurrency.snapshot(),
     });
+  }
+
+  /**
+   * Request cooperative run cancellation exactly once.
+   *
+   * Returns true only for the first accepted cancellation request. A settled run
+   * is immutable and cannot be retroactively cancelled.
+   */
+  cancel(reason: unknown = new RunCancellationError()): boolean {
+    if (this.settled || this.signal.aborted) {
+      return false;
+    }
+
+    this.readiness.cancelNonTerminalOps();
+    this.abortController.abort(reason);
+    return true;
   }
 
   async execute(): Promise<PlainDagRunSnapshot> {
@@ -102,6 +134,9 @@ export class PlainDagRun {
     if (this.hasFailure) {
       throw this.firstFailure;
     }
+    if (this.signal.aborted) {
+      throw this.signal.reason;
+    }
 
     const incomplete = this.readiness
       .snapshot()
@@ -119,6 +154,7 @@ export class PlainDagRun {
   private dispatchAvailableReadyOps(): void {
     while (
       !this.hasFailure &&
+      !this.signal.aborted &&
       this.readiness.hasReadyOps() &&
       this.concurrency.activeCount < this.concurrency.limit
     ) {
@@ -139,7 +175,11 @@ export class PlainDagRun {
     let permit: ConcurrencyPermit | undefined;
 
     try {
-      permit = await this.concurrency.acquire();
+      permit = await this.concurrency.acquire(this.signal);
+      if (this.signal.aborted) {
+        return;
+      }
+
       this.readiness.startReservedReadyOp(op);
 
       const operation = this.ir.ops[op];
@@ -147,13 +187,21 @@ export class PlainDagRun {
         throw new RangeError(`Execution IR op ${String(op)} is unavailable.`);
       }
 
-      await this.executor(Object.freeze({ op, operation }));
+      await this.executor(Object.freeze({ op, operation, signal: this.signal }));
+      if (this.signal.aborted) {
+        return;
+      }
+
       this.readiness.completeRunningOp(op);
 
       for (const targetOp of this.readiness.getDependents(op)) {
         this.readiness.releaseDependency(op, targetOp);
       }
     } catch (error) {
+      if (this.signal.aborted) {
+        return;
+      }
+
       if (this.readiness.getOpState(op).status === "running") {
         this.readiness.failRunningOp(op);
       }
