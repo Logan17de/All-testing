@@ -57,27 +57,23 @@ describe("adapter/internal retry accounting", () => {
       readonly remaining: number;
     }> = [];
 
-    const run = new PlainDagRun(
-      plan,
-      scheduler.createRun(plan),
-      ({ attempt, retryBudget }) => {
-        observations.push({
-          attempt,
-          used: retryBudget.usedAttempts,
-          remaining: retryBudget.remainingAttempts,
-        });
+    const run = new PlainDagRun(plan, scheduler.createRun(plan), ({ attempt, retryBudget }) => {
+      observations.push({
+        attempt,
+        used: retryBudget.usedAttempts,
+        remaining: retryBudget.remainingAttempts,
+      });
 
-        if (attempt === 1) {
-          expect(Object.isFrozen(retryBudget)).toBe(true);
-          expect(retryBudget.reportInternalRetries()).toBe(2);
-          expect(retryBudget.usedAttempts).toBe(2);
-          expect(retryBudget.remainingAttempts).toBe(1);
-          throw firstFailure;
-        }
+      if (attempt === 1) {
+        expect(Object.isFrozen(retryBudget)).toBe(true);
+        expect(retryBudget.reportInternalRetries()).toBe(2);
+        expect(retryBudget.usedAttempts).toBe(2);
+        expect(retryBudget.remainingAttempts).toBe(1);
+        throw firstFailure;
+      }
 
-        throw finalFailure;
-      },
-    );
+      throw finalFailure;
+    });
 
     await expect(run.execute()).rejects.toBe(finalFailure);
 
@@ -134,16 +130,12 @@ describe("adapter/internal retry accounting", () => {
     const plan = ir(op());
     const scheduler = new SchedulerConcurrency(1);
 
-    const result = await new PlainDagRun(
-      plan,
-      scheduler.createRun(plan),
-      ({ retryBudget }) => {
-        expect(retryBudget.maxAttempts).toBe(1);
-        expect(retryBudget.usedAttempts).toBe(1);
-        expect(retryBudget.remainingAttempts).toBe(0);
-        expect(retryBudget.reportInternalRetries(0)).toBe(1);
-      },
-    ).execute();
+    const result = await new PlainDagRun(plan, scheduler.createRun(plan), ({ retryBudget }) => {
+      expect(retryBudget.maxAttempts).toBe(1);
+      expect(retryBudget.usedAttempts).toBe(1);
+      expect(retryBudget.remainingAttempts).toBe(0);
+      expect(retryBudget.reportInternalRetries(0)).toBe(1);
+    }).execute();
 
     expect(result.attemptBudgetUsed).toEqual([1]);
   });
