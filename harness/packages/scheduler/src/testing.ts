@@ -154,16 +154,27 @@ function freezeArray<T>(items: readonly T[]): readonly T[] {
   return Object.freeze([...items]);
 }
 
+function abortReasonError(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) {
+    return signal.reason;
+  }
+  return new Error(
+    signal.reason === undefined
+      ? "Deterministic mock execution aborted."
+      : `Deterministic mock execution aborted: ${String(signal.reason)}`,
+  );
+}
+
 function waitForAbort(signal: AbortSignal): Promise<never> {
   if (signal.aborted) {
-    return Promise.reject(signal.reason);
+    return Promise.reject(abortReasonError(signal));
   }
 
   return new Promise<never>((_resolve, reject) => {
     signal.addEventListener(
       "abort",
       () => {
-        reject(signal.reason);
+        reject(abortReasonError(signal));
       },
       { once: true },
     );
