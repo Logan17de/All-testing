@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { NodeDefinition } from "./index.js";
+import type { NodeDefinition, NodeStructuredControlContract } from "./index.js";
 
 describe("universal node contract", () => {
   it("supports executable JSON-safe nodes with explicit input/output ports", async () => {
@@ -138,5 +138,24 @@ describe("universal node contract", () => {
       retry: { maxAttempts: 3, backoffMs: 500 },
       requiredCapabilities: ["network:http", "publish:write"],
     });
+  });
+
+  it("represents explicit any and quorum join policies", () => {
+    const anyJoin: NodeStructuredControlContract = {
+      kind: "join",
+      inputs: ["left", "right"],
+      output: "out",
+      mode: "any",
+    };
+    const quorumJoin: NodeStructuredControlContract = {
+      kind: "join",
+      inputs: ["a", "b", "c"],
+      output: "out",
+      mode: "quorum",
+      quorum: 2,
+    };
+
+    expect(anyJoin).toMatchObject({ kind: "join", mode: "any" });
+    expect(quorumJoin).toMatchObject({ kind: "join", mode: "quorum", quorum: 2 });
   });
 });
