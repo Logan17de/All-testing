@@ -15,7 +15,7 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: harness-ci-${{ github.workflow }}-${{ github.ref }}
@@ -46,19 +46,6 @@ jobs:
 
       - name: Pin npm
         run: npm install --global npm@12.0.2 --no-audit --no-fund
-
-      - name: Sync lockfile
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          if ! git diff --quiet -- package-lock.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add package-lock.json
-            git commit -m "chore: sync sqlite workspace lockfile"
-            git push origin HEAD:zet-harness-v1
-          fi
 
       - name: Clean install
         run: npm ci --no-audit --no-fund
