@@ -2,9 +2,12 @@ import { RuntimeDaemon } from "./runtime-daemon.js";
 
 const configuredPort = process.env.ZET_RUNTIME_PORT;
 const runtimePort = configuredPort === undefined ? undefined : Number(configuredPort);
-const daemon = new RuntimeDaemon(
-  runtimePort === undefined ? undefined : { api: { port: runtimePort } },
-);
+const runtimeDatabasePath = process.env.ZET_RUNTIME_DB_PATH;
+
+const daemon = new RuntimeDaemon({
+  ...(runtimePort === undefined ? {} : { api: { port: runtimePort } }),
+  ...(runtimeDatabasePath === undefined ? {} : { database: { path: runtimeDatabasePath } }),
+});
 
 let stopRequested = false;
 
@@ -32,6 +35,9 @@ process.once("SIGTERM", onSigterm);
 const snapshot = daemon.snapshot();
 if (snapshot.api.port === null) {
   throw new TypeError("Runtime API reported ready without a bound TCP port.");
+}
+if (snapshot.database.state !== "open") {
+  throw new TypeError("Runtime reported ready without an open SQLite database.");
 }
 
 console.log(
