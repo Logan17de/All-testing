@@ -106,9 +106,7 @@ function resolverWithJoin(control: NodeStructuredControlContract): NodeResolutio
   const joinManifest = manifest("join", { behavior: controlBehavior, control });
   return {
     getManifest(type, version) {
-      return type === "join" && version === "1"
-        ? joinManifest
-        : base.getManifest(type, version);
+      return type === "join" && version === "1" ? joinManifest : base.getManifest(type, version);
     },
     getResolution(type, version) {
       return type === "join" && version === "1"
