@@ -8,11 +8,7 @@ import {
   createMockExecutionOp,
 } from "./testing.js";
 
-async function waitFor(
-  predicate: () => boolean,
-  message: string,
-  turns = 200,
-): Promise<void> {
+async function waitFor(predicate: () => boolean, message: string, turns = 200): Promise<void> {
   for (let turn = 0; turn < turns; turn += 1) {
     if (predicate()) {
       return;
@@ -99,23 +95,19 @@ describe("scheduler stress and race coverage", () => {
     let active = 0;
     let maxActive = 0;
 
-    const run = new PlainDagRun(
-      plan,
-      scheduler.createRun(plan),
-      async ({ op, attempt }) => {
-        invocationCounts[op] = (invocationCounts[op] ?? 0) + 1;
-        active += 1;
-        maxActive = Math.max(maxActive, active);
-        try {
-          await Promise.resolve();
-          if (attempt < 3) {
-            throw new Error(`retry-${String(op)}-${String(attempt)}`);
-          }
-        } finally {
-          active -= 1;
+    const run = new PlainDagRun(plan, scheduler.createRun(plan), async ({ op, attempt }) => {
+      invocationCounts[op] = (invocationCounts[op] ?? 0) + 1;
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      try {
+        await Promise.resolve();
+        if (attempt < 3) {
+          throw new Error(`retry-${String(op)}-${String(attempt)}`);
         }
-      },
-    );
+      } finally {
+        active -= 1;
+      }
+    });
 
     const result = await run.execute();
 
