@@ -1,0 +1,107 @@
+name: Harness complete 3.6 tracker
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-complete-3-6.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Install workspace
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Freeze 3.6 and advance 3.7
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str):
+              text = path.read_text()
+              if old not in text:
+                  raise SystemExit(f"missing expected text in {path}: {old[:180]}")
+              path.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              Path("harness/TODO.md"),
+              "- [ ] 3.6 Add control-edge runtime states: unresolved/active/skipped/completed.",
+              "- [x] 3.6 Add control-edge runtime states: unresolved/active/skipped/completed.",
+          )
+
+          replace_once(
+              Path("harness/README.md"),
+              "3.6 control-edge runtime states           ▶ CURRENT",
+              "3.6 control-edge runtime states           ✅\n3.7 activation-aware all-active joins     ▶ CURRENT",
+          )
+
+          readme = Path("harness/README.md")
+          text = readme.read_text()
+          paragraph = (
+              "Item 3.6 adds `RunControlEdges`, an explicit run-local state machine over the immutable `ExecutionIrV1.controlEdges` index domain. Every control edge starts `unresolved`; the only legal transitions are `unresolved → active`, `unresolved → skipped`, and `active → completed`, with skipped/completed terminal. `active` means the edge participates in the live control path while its source-side obligation is unfinished; `completed` means that active source-side obligation finished; `skipped` means the edge is definitively outside the live path. Status vocabulary, transition tables, state objects, incoming/outgoing edge-index lists, and snapshots are runtime-frozen. Queries preserve IR edge order and support exact source/target control-port lookup for later joins. Router activation now shares one `RunControlEdges` instance: selected output edges transition `unresolved → active → completed`, unselected outgoing router edges transition `unresolved → skipped`, and only deduplicated selected targets release readiness dependencies. Invalid branch/state/IR mismatches are rejected before router/readiness mutation. 3.6 records control truth only; it does not decide join readiness, `any`/quorum semantics, cancellation, timeout, retry, events, or persistence. Activation-aware `all-active` join behavior begins in 3.7."
+          )
+          anchor = "\n\nValidation ownership is permanently separated:"
+          if paragraph not in text:
+              if anchor not in text:
+                  raise SystemExit("README validation anchor missing")
+              text = text.replace(anchor, f"\n\n{paragraph}{anchor}", 1)
+              readme.write_text(text)
+
+          replace_once(
+              Path("harness/PLAN.md"),
+              "           └─ 3.6 control-edge runtime states                          ▶ CURRENT",
+              "           ├─ 3.6 control-edge runtime states                          ✅\n           └─ 3.7 activation-aware all-active joins                    ▶ CURRENT",
+          )
+          replace_once(
+              Path("harness/PLAN.md"),
+              "| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.6 current** |",
+              "| **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | 🚧 In progress — **3.7 current** |",
+          )
+          replace_once(
+              Path("harness/PLAN.md"),
+              "> **Phase 3 / Item 3.6 — Add control-edge runtime states: unresolved/active/skipped/completed.**",
+              "> **Phase 3 / Item 3.7 — Add activation-aware `all-active` joins.**",
+          )
+
+          runtime = Path("harness/RUNTIME.md")
+          text = runtime.read_text()
+          runtime_paragraph = (
+              "Item 3.6 introduces `RunControlEdges` as the run-local truth for every indexed IR control edge. All edges begin `unresolved`; a control decision may mark an edge `active` or `skipped`, and only an `active` edge may become `completed`. Skipped/completed edges are terminal, and all transition vocabulary/state/snapshot objects are runtime-frozen. The tracker also builds immutable incoming/outgoing edge-index lists and exact named-port queries without reordering the IR edge domain. `RunRouterActivation` now requires the shared control-edge tracker from the exact same IR object: before mutation it verifies all router outgoing edges are unresolved and selected readiness pairs are unreleased; selected branch edges become active, unselected router outputs become skipped, the scheduler-owned router completes, selected edges become completed, and then only deduplicated selected router→target dependencies are released. Thus router outcomes leave explicit stable control truth instead of permanently unresolved branches. 3.6 intentionally does not infer join readiness from those states; activation-aware `all-active` join semantics remain 3.7."
+          )
+          anchor = "\n\n## Plugin relationship"
+          if runtime_paragraph not in text:
+              if anchor not in text:
+                  raise SystemExit("RUNTIME plugin anchor missing")
+              text = text.replace(anchor, f"\n\n{runtime_paragraph}{anchor}", 1)
+              runtime.write_text(text)
+
+      - name: Format tracker docs
+        working-directory: harness
+        run: npx prettier --write TODO.md README.md PLAN.md RUNTIME.md
+
+      - name: Commit tracker freeze and remove helper
+        run: |
+          rm .github/workflows/harness-complete-3-6.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/README.md harness/PLAN.md harness/RUNTIME.md .github/workflows/harness-complete-3-6.yml
+          git commit -m "docs(harness): freeze 3.6 and advance 3.7"
+          git push origin HEAD:zet-harness-v1
