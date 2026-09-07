@@ -235,7 +235,11 @@ describe("scheduler stress and race coverage", () => {
         signal.addEventListener(
           "abort",
           () => {
-            reject(signal.reason);
+            const reason =
+              signal.reason instanceof Error
+                ? signal.reason
+                : new Error(`Stress cancellation: ${String(signal.reason)}`);
+            reject(reason);
           },
           { once: true },
         );
