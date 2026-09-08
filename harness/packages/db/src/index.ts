@@ -13,6 +13,20 @@ export {
   type FileContentAddressedBlobStoreSnapshot,
 } from "./content-addressed-blob-store.js";
 export {
+  DURABLE_BACKUP_BLOB_DIRECTORY,
+  DURABLE_BACKUP_DATABASE_FILE,
+  DURABLE_BACKUP_FORMAT,
+  DURABLE_BACKUP_MANIFEST_FILE,
+  createDurableBackup,
+  restoreDurableBackup,
+  type CreateDurableBackupOptions,
+  type DurableBackupManifest,
+  type DurableBackupResult,
+  type DurableBackupSqliteSource,
+  type DurableRestoreResult,
+  type RestoreDurableBackupOptions,
+} from "./durable-backup.js";
+export {
   commitDurableNodeCompletion,
   type DurableNodeCompletionCommitResult,
   type DurableNodeCompletionInput,
