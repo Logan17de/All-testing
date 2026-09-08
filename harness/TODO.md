@@ -133,7 +133,7 @@ Goal: make the scheduler durable without changing Graph/IR semantics.
 - [x] 4.10 Define append-only durable events with schema versions.
 - [x] 4.11 Define sparse checkpoints/frontier state.
 - [x] 4.12 Add a filesystem content-addressed blob store for large immutable values.
-- [ ] 4.13 Keep short SQLite writes serialized through one clear commit path.
+- [x] 4.13 Keep short SQLite writes serialized through one clear commit path.
 - [ ] 4.14 Commit node completion + output reference + terminal event atomically.
 - [ ] 4.15 Make downstream work runnable only after the durable completion commit succeeds.
 - [ ] 4.16 Reconstruct the execution frontier after process restart.
