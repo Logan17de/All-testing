@@ -7,9 +7,7 @@ type NonPromise<T> = T extends PromiseLike<unknown> ? never : unknown;
 
 /** Small structural boundary implemented by `SqliteDatabase.commit(...)`. */
 export interface SerializedSqliteCommitPath {
-  commit<T>(
-    write: (connection: DatabaseSync) => T & NonPromise<T>,
-  ): Promise<T>;
+  commit<T>(write: (connection: DatabaseSync) => T & NonPromise<T>): Promise<T>;
 }
 
 export interface DurableNodeCompletionTerminalEventInput {
@@ -78,9 +76,7 @@ export function commitDurableNodeCompletion(
       );
 
     if (completion.changes !== 1) {
-      throw new TypeError(
-        "Durable node completion requires exactly one matching running attempt.",
-      );
+      throw new TypeError("Durable node completion requires exactly one matching running attempt.");
     }
 
     const terminalEvent = connection

@@ -25,7 +25,9 @@ const MIGRATIONS = Object.freeze([
   DURABLE_EVENTS_MIGRATION,
 ]);
 
-const withDatabase = async (run: (database: SqliteDatabase) => Promise<void> | void): Promise<void> => {
+const withDatabase = async (
+  run: (database: SqliteDatabase) => Promise<void> | void,
+): Promise<void> => {
   const database = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
   database.open();
 
@@ -170,7 +172,9 @@ describe("durable node completion commits", () => {
       const runId = createRun(database, "completion");
       createAttempt(database, runId, 3);
 
-      await expect(commitDurableNodeCompletion(database, completionInput(runId, 3))).resolves.toEqual({
+      await expect(
+        commitDurableNodeCompletion(database, completionInput(runId, 3)),
+      ).resolves.toEqual({
         eventId: 1,
       });
 
