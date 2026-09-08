@@ -15,7 +15,7 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: harness-ci-${{ github.workflow }}-${{ github.ref }}
@@ -38,52 +38,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Close 4.7 roadmap
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          todo = Path("TODO.md")
-          text = todo.read_text()
-          text = text.replace(
-              "- [ ] 4.7 Define durable graph/source and compiled-plan identity records.",
-              "- [x] 4.7 Define durable graph/source and compiled-plan identity records.",
-          )
-          text = text.replace(
-              "**4.7 — Define durable graph/source and compiled-plan identity records.**",
-              "**4.8 — Define runs and nullable `parent_run_id`/fork metadata.**",
-          )
-          todo.write_text(text)
-
-          plan = Path("PLAN.md")
-          text = plan.read_text()
-          text = text.replace(
-              "           ├─ 4.6 foreign keys + WAL                                  ✅\n           └─ 4.7 durable graph/source + compiled-plan identity        ▶ CURRENT",
-              "           ├─ 4.6 foreign keys + WAL                                  ✅\n           ├─ 4.7 durable graph/source + compiled-plan identity        ✅\n           └─ 4.8 runs + parent/fork metadata                          ▶ CURRENT",
-          )
-          text = text.replace(
-              "🚧 In progress — **4.7 current**",
-              "🚧 In progress — **4.8 current**",
-          )
-          old = "The default runtime migration catalog is intentionally empty until application durability tables land. Filesystem migration discovery, schema checksums, and application durability tables remain deferred; 4.7 next defines durable graph/source and compiled-plan identity records."
-          new = "The default runtime migration catalog now begins with the 4.7 durable identity schema. `graph_sources` stores exact normalized authoring-document identity (`documentHash`) beside its executable `semanticHash`, graph/revision identity, normalized document JSON, and canonical semantic JSON. `compiled_plans` keeps the deterministic compile identity `semanticHash + registryHash + compilerVersion` separate from the content-only `irHash`, so identical IR bytes produced under different provenance do not collapse into one compiler identity. `graph_compilations` links exact source documents to compatible plans and carries `semanticHash` through composite foreign keys, preventing a document from being associated with a plan for different executable semantics. Multiple metadata/editor-distinct documents may intentionally share one plan when their semantic identity is unchanged. The database records compiler outputs only; it does not recompute hashes or reinterpret Graph JSON/IR. Run records remain 4.8, and general write serialization remains 4.13."
-          if old not in text:
-              raise SystemExit("PLAN 4.7 insertion anchor missing")
-          text = text.replace(old, new)
-          text = text.replace(
-              "> **Phase 4 / Item 4.7 — Define durable graph/source and compiled-plan identity records.**",
-              "> **Phase 4 / Item 4.8 — Define runs and nullable `parent_run_id`/fork metadata.**",
-          )
-          plan.write_text(text)
-          PY
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add TODO.md PLAN.md
-          git commit -m "docs: complete durable graph identity records"
-          git push
 
       - name: Setup Node
         uses: actions/setup-node@v4
