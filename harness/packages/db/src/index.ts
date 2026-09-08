@@ -28,9 +28,10 @@ export interface SqliteDatabaseSnapshot {
 /**
  * Thin direct wrapper around Node 24 `node:sqlite`.
  *
- * This layer intentionally owns only connection lifecycle in Phase 4.4. Schema
- * migrations are a separate 4.5 primitive; foreign-key enforcement, WAL,
- * durable tables, and write serialization remain later Phase 4 items.
+ * Connections enforce foreign keys. File-backed databases use WAL mode;
+ * `:memory:` databases retain SQLite's in-memory journal mode because WAL is
+ * unavailable there. Schema migrations remain a separate primitive, while
+ * durable application tables and write serialization remain later Phase 4 items.
  */
 export class SqliteDatabase {
   private readonly path: string;
@@ -65,8 +66,18 @@ export class SqliteDatabase {
 
     const connection = new DatabaseSync(this.path, {
       allowExtension: false,
-      enableForeignKeyConstraints: false,
+      enableForeignKeyConstraints: true,
     });
+
+    try {
+      assertForeignKeysEnabled(connection);
+      if (this.path !== SQLITE_MEMORY_PATH) {
+        enableAndAssertWalMode(connection);
+      }
+    } catch (error) {
+      connection.close();
+      throw error;
+    }
 
     this.connectionValue = connection;
     return true;
@@ -89,5 +100,19 @@ export class SqliteDatabase {
       throw new TypeError("SQLite database is not open.");
     }
     return connection;
+  }
+}
+
+function assertForeignKeysEnabled(connection: DatabaseSync): void {
+  const row = connection.prepare("PRAGMA foreign_keys").get();
+  if (row?.foreign_keys !== 1) {
+    throw new TypeError("SQLite foreign-key enforcement could not be enabled.");
+  }
+}
+
+function enableAndAssertWalMode(connection: DatabaseSync): void {
+  const row = connection.prepare("PRAGMA journal_mode = WAL").get();
+  if (typeof row?.journal_mode !== "string" || row.journal_mode.toLowerCase() !== "wal") {
+    throw new TypeError("SQLite WAL journal mode could not be enabled.");
   }
 }
