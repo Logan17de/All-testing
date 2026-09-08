@@ -18,7 +18,7 @@ const createDaemon = (migrations?: readonly SqliteMigration[]): RuntimeDaemon =>
   new RuntimeDaemon({
     api: { port: 0 },
     database: { path: SQLITE_MEMORY_PATH },
-    migrations,
+    ...(migrations === undefined ? {} : { migrations }),
   });
 
 describe("RuntimeDaemon", () => {
