@@ -61,9 +61,9 @@ describe("durable backup + restore", () => {
       const blobStore = new FileContentAddressedBlobStore({ rootPath: sourceBlobRoot });
 
       try {
-        database.connection().exec(
-          "CREATE TABLE durable_test (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
-        );
+        database
+          .connection()
+          .exec("CREATE TABLE durable_test (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
         database.connection().prepare("INSERT INTO durable_test VALUES (?, ?)").run("one", "first");
 
         const pendingWrite = database.commit((connection) => {

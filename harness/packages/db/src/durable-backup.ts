@@ -326,10 +326,7 @@ async function verifyDatabase(
 }
 
 function stagingPath(destinationPath: string, label: string): string {
-  return join(
-    dirname(destinationPath),
-    `.${basename(destinationPath)}.${label}-${randomUUID()}`,
-  );
+  return join(dirname(destinationPath), `.${basename(destinationPath)}.${label}-${randomUUID()}`);
 }
 
 /**
