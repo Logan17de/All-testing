@@ -1,4 +1,4 @@
-name: Zet Harness 4.19 Apply
+name: Zet Harness 4.19 Closeout
 
 on:
   push:
@@ -11,9 +11,9 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  closeout:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
     steps:
       - name: Checkout real Harness branch
         uses: actions/checkout@v4
@@ -21,53 +21,70 @@ jobs:
           ref: zet-harness-v1
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.20.0
-
-      - name: Pin npm
-        run: npm install --global npm@12.0.2 --no-audit --no-fund
-
-      - name: Clean install
-        working-directory: harness
-        run: npm ci --no-audit --no-fund
-
-      - name: Recover and apply validated 4.19 patch
+      - name: Advance roadmap to 4.20
         run: |
-          git fetch origin 2aa2e7af4ff03ad11fc7f03ca3fa05ce86652aec
-          git show 2aa2e7af4ff03ad11fc7f03ca3fa05ce86652aec:.github/workflows/harness-ci.yml > /tmp/source-workflow.yml
           python - <<'PY'
           from pathlib import Path
 
-          text = Path('/tmp/source-workflow.yml').read_text()
-          start_marker = '      - name: Apply 4.19 implementation\n        run: |\n'
-          end_marker = '\n      - name: Format and verify 4.19\n'
-          start = text.index(start_marker) + len(start_marker)
-          end = text.index(end_marker, start)
-          lines = text[start:end].splitlines()
-          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
-          Path('/tmp/apply-419.sh').write_text(script)
+          todo = Path('harness/TODO.md')
+          text = todo.read_text()
+          old = '- [ ] 4.19 Expand `/api/health` with runtime/database checks.'
+          new = '- [x] 4.19 Expand `/api/health` with runtime/database checks.'
+          if old not in text:
+              raise SystemExit('TODO 4.19 anchor not found')
+          todo.write_text(text.replace(old, new, 1))
+
+          plan = Path('harness/PLAN.md')
+          text = plan.read_text()
+
+          old = '''           ├─ 4.18 SQLite/file-level backup + restore                          ✅
+           └─ 4.19 runtime/database health checks                              ▶ CURRENT'''
+          new = '''           ├─ 4.18 SQLite/file-level backup + restore                          ✅
+           ├─ 4.19 runtime/database health checks                              ✅
+           ├─ 4.20 kill/restart fault-injection tests                          ▶ CURRENT
+           ├─ 4.21 lightweight performance baseline                            ⏳
+           └─ 4.22 CI baseline check                                            ⏳'''
+          if old not in text:
+              raise SystemExit('PLAN phase tree anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.19 current** |'
+          new = '| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.20 current** |'
+          if old not in text:
+              raise SystemExit('PLAN phase map anchor not found')
+          text = text.replace(old, new, 1)
+
+          anchor = '''Phase 4.18 adds a dependency-free durable backup bundle combining SQLite's native online backup with the immutable filesystem blob store. A backup is staged as a directory containing `database.sqlite`, `blobs/`, and a versioned `zet-harness.backup/v1` manifest recording creation time, database SHA-256/size, the blob algorithm, and verified blob count. The runtime first drains already-queued serialized writes, then SQLite owns database snapshot consistency; current cross-store capture remains safe because blob bytes are published before durable SQLite references, are immutable after publication, and are not garbage-collected yet. Only the canonical `sha256/` tree is copied, so in-flight root temp files are excluded, and every copied blob is verified by content address before the bundle is renamed into place. Restore verifies the manifest, database digest, `PRAGMA quick_check`, and every blob; it refuses overwrite/merge destinations, stages both stores, and publishes blobs before the SQLite file so a failed restore cannot expose a database that references missing restored bytes. Restore is an explicit clean-destination/offline operation. No schema migration, archive framework, or cloud dependency is added.
+'''
+          addition = anchor + '''
+Phase 4.19 turns `GET /api/health` into a cheap daemon-owned readiness check rather than a static process response. `RuntimeDaemon` supplies a synchronous health provider while the `node:http` layer owns only transport and maps healthy reports to HTTP `200` and unhealthy reports to `503`. The probe requires the runtime lifecycle to be `running`, the owned SQLite connection to be open, a read-only `SELECT 1` to succeed, and the ordered `schema_migrations(version,name)` history to exactly match the code-owned runtime migration catalog. Provider exceptions become a stable sanitized unhealthy response instead of leaking internal database details. The request path intentionally performs no writes, `PRAGMA quick_check`/`integrity_check`, blob-tree scans, provider/network checks, or recovery work; deep SQLite/blob integrity remains the explicit backup/diagnostic boundary. No migration or dependency is added.
+'''
+          if anchor not in text:
+              raise SystemExit('PLAN 4.18 paragraph anchor not found')
+          text = text.replace(anchor, addition, 1)
+
+          old = '> **Phase 4 / Item 4.19 — Expand `/api/health` with runtime/database checks.**'
+          new = '> **Phase 4 / Item 4.20 — Add random/fault-injection kill/restart tests around node and commit transitions.**'
+          if old not in text:
+              raise SystemExit('PLAN next action anchor not found')
+          text = text.replace(old, new, 1)
+
+          plan.write_text(text)
           PY
-          bash /tmp/apply-419.sh
 
-      - name: Exact format affected files
-        working-directory: harness
-        run: npx prettier --write apps/runtime/src/runtime-health.ts apps/runtime/src/runtime-health.test.ts apps/runtime/src/runtime-http-server.ts apps/runtime/src/runtime-http-server.test.ts apps/runtime/src/runtime-daemon.ts apps/runtime/src/runtime-daemon.test.ts apps/runtime/src/index.ts
-
-      - name: Verify through repository root
-        working-directory: harness
-        run: |
-          npm run typecheck
-          npm run lint
-          npm run format:check
-          npm test
-
-      - name: Commit implementation
+      - name: Validate closeout diff
         run: |
           git diff --check
+          grep -F -- '- [x] 4.19 Expand `/api/health` with runtime/database checks.' harness/TODO.md
+          grep -F -- '4.20 kill/restart fault-injection tests' harness/PLAN.md
+          grep -F -- '**4.20 current**' harness/PLAN.md
+          grep -F -- 'Phase 4.19 turns `GET /api/health`' harness/PLAN.md
+          grep -F -- 'Item 4.20 — Add random/fault-injection kill/restart tests' harness/PLAN.md
+
+      - name: Commit closeout
+        run: |
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
-          git add harness/apps/runtime/src/runtime-health.ts harness/apps/runtime/src/runtime-health.test.ts harness/apps/runtime/src/runtime-http-server.ts harness/apps/runtime/src/runtime-http-server.test.ts harness/apps/runtime/src/runtime-daemon.ts harness/apps/runtime/src/runtime-daemon.test.ts harness/apps/runtime/src/index.ts
-          git commit -m "feat(runtime): expand health checks"
+          git add harness/PLAN.md harness/TODO.md
+          git commit -m "docs: mark Harness 4.19 complete"
           git push origin HEAD:zet-harness-v1
