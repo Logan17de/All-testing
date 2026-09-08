@@ -90,7 +90,9 @@ describe("RuntimeDaemon", () => {
         expect(
           database
             .connection()
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runtime_probe'")
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runtime_probe'",
+            )
             .get(),
         ).toEqual({ name: "runtime_probe" });
       } finally {
