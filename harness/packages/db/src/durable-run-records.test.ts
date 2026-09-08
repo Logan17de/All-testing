@@ -129,9 +129,7 @@ describe("durable run records", () => {
       ).toEqual({ name: RUNS_TABLE });
 
       expect(
-        connection
-          .prepare("SELECT version, name FROM schema_migrations ORDER BY version")
-          .all(),
+        connection.prepare("SELECT version, name FROM schema_migrations ORDER BY version").all(),
       ).toEqual([
         { version: 1, name: "durable_graph_and_compiled_plan_identity" },
         { version: 2, name: "durable_runs_and_fork_lineage" },
