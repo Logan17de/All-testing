@@ -1,4 +1,4 @@
-name: Zet Harness 4.18 Exact Format
+name: Zet Harness 4.18 Export Wire
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  format:
+  wire:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -33,23 +33,54 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Exact-format and verify 4.18
+      - name: Add public backup export
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("harness/packages/db/src/index.ts")
+          text = path.read_text()
+          if 'from "./durable-backup.js";' not in text:
+              marker = '} from "./content-addressed-blob-store.js";\n'
+              block = '''export {
+            DURABLE_BACKUP_BLOB_DIRECTORY,
+            DURABLE_BACKUP_DATABASE_FILE,
+            DURABLE_BACKUP_FORMAT,
+            DURABLE_BACKUP_MANIFEST_FILE,
+            createDurableBackup,
+            restoreDurableBackup,
+            type CreateDurableBackupOptions,
+            type DurableBackupManifest,
+            type DurableBackupResult,
+            type DurableBackupSqliteSource,
+            type DurableRestoreResult,
+            type RestoreDurableBackupOptions,
+          } from "./durable-backup.js";
+          '''
+              if marker not in text:
+                  raise SystemExit("content-addressed export marker not found")
+              text = text.replace(marker, marker + block, 1)
+              path.write_text(text)
+          PY
+
+      - name: Format and verify export
         working-directory: harness
         run: |
-          npx prettier --write packages/db/src/durable-backup.ts packages/db/src/durable-backup.test.ts
+          npx prettier --write packages/db/src/index.ts packages/db/src/durable-backup.ts packages/db/src/durable-backup.test.ts
           npm run typecheck --workspace @zet-harness/db
           npm run lint --workspace @zet-harness/db
           npm run test --workspace @zet-harness/db
+          npm run build --workspace @zet-harness/db
           npm run format:check
 
-      - name: Commit exact formatting if needed
+      - name: Commit export wiring
         run: |
           if git diff --quiet; then
-            echo "4.18 files already match exact Prettier output."
+            echo "4.18 export already wired."
             exit 0
           fi
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
-          git add harness/packages/db/src/durable-backup.ts harness/packages/db/src/durable-backup.test.ts
-          git commit -m "style(db): apply exact 4.18 prettier output"
+          git add harness/packages/db/src/index.ts harness/packages/db/src/durable-backup.ts harness/packages/db/src/durable-backup.test.ts
+          git commit -m "feat(db): export durable backup API"
           git push origin HEAD:zet-harness-v1
