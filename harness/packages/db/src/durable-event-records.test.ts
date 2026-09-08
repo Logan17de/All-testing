@@ -260,8 +260,16 @@ describe("durable event records", () => {
           )
           .all(runId),
       ).toEqual([
-        { eventType: "op.completed", eventSchemaVersion: 1, payloadJson: '{"shape":"v1"}' },
-        { eventType: "op.completed", eventSchemaVersion: 2, payloadJson: '{"shape":"v2"}' },
+        {
+          eventType: "op.completed",
+          eventSchemaVersion: 1,
+          payloadJson: '{"shape":"v1"}',
+        },
+        {
+          eventType: "op.completed",
+          eventSchemaVersion: 2,
+          payloadJson: '{"shape":"v2"}',
+        },
       ]);
     });
   });
@@ -335,20 +343,29 @@ describe("durable event records", () => {
   it("rejects updates and deletes so committed events remain append-only", () => {
     withDatabase((connection) => {
       const runId = createRun(connection, "append-only");
-      const eventId = appendEvent(connection, { runId, payloadJson: '{"value":1}' });
+      const eventId = appendEvent(connection, {
+        runId,
+        payloadJson: '{"value":1}',
+      });
 
       expect(() =>
         connection
-          .prepare(`UPDATE ${DURABLE_EVENTS_TABLE} SET payload_json = '{"value":2}' WHERE event_id = ?`)
+          .prepare(
+            `UPDATE ${DURABLE_EVENTS_TABLE} SET payload_json = '{"value":2}' WHERE event_id = ?`,
+          )
           .run(eventId),
       ).toThrow("durable_events is append-only");
       expect(() =>
-        connection.prepare(`DELETE FROM ${DURABLE_EVENTS_TABLE} WHERE event_id = ?`).run(eventId),
+        connection
+          .prepare(`DELETE FROM ${DURABLE_EVENTS_TABLE} WHERE event_id = ?`)
+          .run(eventId),
       ).toThrow("durable_events is append-only");
 
       expect(
         connection
-          .prepare(`SELECT payload_json AS payloadJson FROM ${DURABLE_EVENTS_TABLE} WHERE event_id = ?`)
+          .prepare(
+            `SELECT payload_json AS payloadJson FROM ${DURABLE_EVENTS_TABLE} WHERE event_id = ?`,
+          )
           .get(eventId),
       ).toEqual({ payloadJson: '{"value":1}' });
     });
