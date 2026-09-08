@@ -1,4 +1,4 @@
-name: Zet Harness 4.18 Export Wire
+name: Zet Harness 4.18 Roadmap Closeout
 
 on:
   push:
@@ -11,9 +11,9 @@ permissions:
   contents: write
 
 jobs:
-  wire:
+  closeout:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Checkout real Harness branch
         uses: actions/checkout@v4
@@ -21,66 +21,60 @@ jobs:
           ref: zet-harness-v1
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.20.0
-
-      - name: Pin npm
-        run: npm install --global npm@12.0.2 --no-audit --no-fund
-
-      - name: Clean install
-        working-directory: harness
-        run: npm ci --no-audit --no-fund
-
-      - name: Add public backup export
+      - name: Advance roadmap to 4.19
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          path = Path("harness/packages/db/src/index.ts")
-          text = path.read_text()
-          if 'from "./durable-backup.js";' not in text:
-              marker = '} from "./content-addressed-blob-store.js";\n'
-              block = '''export {
-            DURABLE_BACKUP_BLOB_DIRECTORY,
-            DURABLE_BACKUP_DATABASE_FILE,
-            DURABLE_BACKUP_FORMAT,
-            DURABLE_BACKUP_MANIFEST_FILE,
-            createDurableBackup,
-            restoreDurableBackup,
-            type CreateDurableBackupOptions,
-            type DurableBackupManifest,
-            type DurableBackupResult,
-            type DurableBackupSqliteSource,
-            type DurableRestoreResult,
-            type RestoreDurableBackupOptions,
-          } from "./durable-backup.js";
-          '''
-              if marker not in text:
-                  raise SystemExit("content-addressed export marker not found")
-              text = text.replace(marker, marker + block, 1)
-              path.write_text(text)
+          todo = Path("harness/TODO.md")
+          todo_text = todo.read_text()
+          old_todo = "- [ ] 4.18 Add backup/restore using SQLite/file-level facilities."
+          new_todo = "- [x] 4.18 Add backup/restore using SQLite/file-level facilities."
+          if old_todo not in todo_text:
+              raise SystemExit("TODO 4.18 marker not found")
+          todo.write_text(todo_text.replace(old_todo, new_todo, 1))
+
+          plan = Path("harness/PLAN.md")
+          text = plan.read_text()
+
+          old_tree = "           └─ 4.18 SQLite/file-level backup + restore                          ▶ CURRENT"
+          new_tree = "           ├─ 4.18 SQLite/file-level backup + restore                          ✅\n           └─ 4.19 runtime/database health checks                              ▶ CURRENT"
+          if old_tree not in text:
+              raise SystemExit("PLAN 4.18 tree marker not found")
+          text = text.replace(old_tree, new_tree, 1)
+
+          old_phase = "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.18 current** |"
+          new_phase = "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.19 current** |"
+          if old_phase not in text:
+              raise SystemExit("PLAN phase-map 4.18 marker not found")
+          text = text.replace(old_phase, new_phase, 1)
+
+          anchor = "Phase 4.17 adds pure `classifyPreCrashRunningAttempts(...)` classification over the 4.16 reconstructed frontier. It consumes only the frozen Execution IR recovery policy: `rerun` is the sole immediately rerun-eligible action, while `reuse`, `reconcile`, and `manual` become explicit `hold-for-reuse`, `hold-for-reconciliation`, and `hold-for-manual-review` outcomes. A durable attempt still marked `running` has no committed terminal result, so `reuse` never silently promotes uncertain work to success. The classifier preserves op/iteration/attempt/logical-effect identity and rejects impossible missing-op, non-executable, `not-applicable`, unknown-policy, and duplicate-running-attempt states. It does not mutate scheduler state, write SQLite, spend retry budget, or re-derive effect/idempotency safety; compiler stage 2.14 remains authoritative for those cross-field promises, and the classifier itself does not execute the chosen recovery action.\n"
+          paragraph = "\nPhase 4.18 adds a dependency-free durable backup bundle combining SQLite's native online backup with the immutable filesystem blob store. A backup is staged as a directory containing `database.sqlite`, `blobs/`, and a versioned `zet-harness.backup/v1` manifest recording creation time, database SHA-256/size, the blob algorithm, and verified blob count. The runtime first drains already-queued serialized writes, then SQLite owns database snapshot consistency; current cross-store capture remains safe because blob bytes are published before durable SQLite references, are immutable after publication, and are not garbage-collected yet. Only the canonical `sha256/` tree is copied, so in-flight root temp files are excluded, and every copied blob is verified by content address before the bundle is renamed into place. Restore verifies the manifest, database digest, `PRAGMA quick_check`, and every blob; it refuses overwrite/merge destinations, stages both stores, and publishes blobs before the SQLite file so a failed restore cannot expose a database that references missing restored bytes. Restore is an explicit clean-destination/offline operation. No schema migration, archive framework, or cloud dependency is added.\n"
+          if anchor not in text:
+              raise SystemExit("PLAN 4.17 architecture paragraph not found")
+          text = text.replace(anchor, anchor + paragraph, 1)
+
+          old_next = "> **Phase 4 / Item 4.18 — Add backup/restore using SQLite/file-level facilities.**"
+          new_next = "> **Phase 4 / Item 4.19 — Expand `/api/health` with runtime/database checks.**"
+          if old_next not in text:
+              raise SystemExit("PLAN next-action 4.18 marker not found")
+          text = text.replace(old_next, new_next, 1)
+
+          plan.write_text(text)
           PY
 
-      - name: Format and verify export
-        working-directory: harness
+      - name: Validate closeout diff
         run: |
-          npx prettier --write packages/db/src/index.ts packages/db/src/durable-backup.ts packages/db/src/durable-backup.test.ts
-          npm run typecheck --workspace @zet-harness/db
-          npm run lint --workspace @zet-harness/db
-          npm run test --workspace @zet-harness/db
-          npm run build --workspace @zet-harness/db
-          npm run format:check
+          git diff --check
+          grep -F -- "- [x] 4.18 Add backup/restore using SQLite/file-level facilities." harness/TODO.md
+          grep -F -- "4.19 runtime/database health checks" harness/PLAN.md
+          grep -F -- "Phase 4 / Item 4.19" harness/PLAN.md
 
-      - name: Commit export wiring
+      - name: Commit closeout
         run: |
-          if git diff --quiet; then
-            echo "4.18 export already wired."
-            exit 0
-          fi
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
-          git add harness/packages/db/src/index.ts harness/packages/db/src/durable-backup.ts harness/packages/db/src/durable-backup.test.ts
-          git commit -m "feat(db): export durable backup API"
+          git add harness/PLAN.md harness/TODO.md
+          git commit -m "docs: mark Harness 4.18 complete"
           git push origin HEAD:zet-harness-v1
