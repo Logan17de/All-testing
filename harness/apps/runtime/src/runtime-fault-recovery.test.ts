@@ -35,7 +35,10 @@ const migrations = Object.freeze([
 
 const tempDirectories: string[] = [];
 
-function op(sourceNodeId: string, dependencies: readonly number[]): Readonly<Record<string, unknown>> {
+function op(
+  sourceNodeId: string,
+  dependencies: readonly number[],
+): Readonly<Record<string, unknown>> {
   return {
     sourceNodeId,
     type: "test.node",
@@ -361,10 +364,10 @@ describe("runtime kill/restart fault injection", () => {
 
         if (cut === 0) {
           expect(attempt?.status, `seed ${String(seed)}`).toBe("running");
-          expect(frontier.ops.map(({ status }) => status), `seed ${String(seed)}`).toEqual([
-            "running",
-            "pending",
-          ]);
+          expect(
+            frontier.ops.map(({ status }) => status),
+            `seed ${String(seed)}`,
+          ).toEqual(["running", "pending"]);
           expect(classifyPreCrashRunningAttempts(frontier), `seed ${String(seed)}`).toHaveLength(1);
           continue;
         }
@@ -376,18 +379,18 @@ describe("runtime kill/restart fault injection", () => {
         expect(frontier.preCrashRunningAttempts, `seed ${String(seed)}`).toEqual([]);
 
         if (cut === 1) {
-          expect(frontier.ops.map(({ status }) => status), `seed ${String(seed)}`).toEqual([
-            "ready",
-            "pending",
-          ]);
+          expect(
+            frontier.ops.map(({ status }) => status),
+            `seed ${String(seed)}`,
+          ).toEqual(["ready", "pending"]);
           expect(frontier.readyQueue, `seed ${String(seed)}`).toEqual([
             { opIndex: 0, iteration: 0, readyOrder: 0 },
           ]);
         } else {
-          expect(frontier.ops.map(({ status }) => status), `seed ${String(seed)}`).toEqual([
-            "completed",
-            "ready",
-          ]);
+          expect(
+            frontier.ops.map(({ status }) => status),
+            `seed ${String(seed)}`,
+          ).toEqual(["completed", "ready"]);
           expect(frontier.readyQueue, `seed ${String(seed)}`).toEqual([
             { opIndex: 1, iteration: 0, readyOrder: 0 },
           ]);
