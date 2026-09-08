@@ -21,3 +21,9 @@ export {
   type RecoveryExecutionIrOp,
   type RecoveryExecutionIrV1,
 } from "./runtime-recovery.js";
+export {
+  classifyPreCrashRunningAttempts,
+  type PreCrashRecoveryAction,
+  type PreCrashRecoveryClassification,
+  type PreCrashRecoveryPolicy,
+} from "./runtime-recovery-policy.js";
