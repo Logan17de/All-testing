@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -204,9 +203,9 @@ beforeAll(async () => {
   compiledIr = await compileFixture();
 
   database.open();
-  database.connection().exec(
-    "CREATE TABLE baseline_commits (sequence INTEGER PRIMARY KEY, payload TEXT NOT NULL)",
-  );
+  database
+    .connection()
+    .exec("CREATE TABLE baseline_commits (sequence INTEGER PRIMARY KEY, payload TEXT NOT NULL)");
   insertStatement = database
     .connection()
     .prepare("INSERT INTO baseline_commits(sequence, payload) VALUES (?, 'baseline')");
