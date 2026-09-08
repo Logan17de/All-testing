@@ -1,6 +1,6 @@
 # Runtime health contract
 
-`GET /api/health` is a cheap local readiness probe owned by the runtime daemon.
+`GET /api/health` is a cheap local readiness probe owned by the runtime daemon. This contract was established in Phase 4.19.
 
 A healthy response uses HTTP `200` and reports:
 
