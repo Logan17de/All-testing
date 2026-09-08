@@ -211,9 +211,15 @@ describe("durable event records", () => {
       const firstRunId = createRun(connection, "events-a");
       const secondRunId = createRun(connection, "events-b");
 
-      expect(appendEvent(connection, { runId: firstRunId, occurredAtMs: 100 })).toBe(1);
-      expect(appendEvent(connection, { runId: secondRunId, occurredAtMs: 1 })).toBe(2);
-      expect(appendEvent(connection, { runId: firstRunId, occurredAtMs: 50 })).toBe(3);
+      expect(
+        appendEvent(connection, { runId: firstRunId, occurredAtMs: 100 }),
+      ).toBe(1);
+      expect(
+        appendEvent(connection, { runId: secondRunId, occurredAtMs: 1 }),
+      ).toBe(2);
+      expect(
+        appendEvent(connection, { runId: firstRunId, occurredAtMs: 50 }),
+      ).toBe(3);
 
       expect(
         connection
@@ -308,9 +314,19 @@ describe("durable event records", () => {
           )
           .all(runId),
       ).toEqual([
-        { eventType: "run.started", opIndex: null, iteration: null, attempt: null },
+        {
+          eventType: "run.started",
+          opIndex: null,
+          iteration: null,
+          attempt: null,
+        },
         { eventType: "op.ready", opIndex: 4, iteration: 2, attempt: null },
-        { eventType: "op.attempt.started", opIndex: 4, iteration: 2, attempt: 1 },
+        {
+          eventType: "op.attempt.started",
+          opIndex: 4,
+          iteration: 2,
+          attempt: 1,
+        },
       ]);
     });
   });
@@ -333,7 +349,9 @@ describe("durable event records", () => {
       const runId = createRun(connection, "envelope");
 
       expect(() => appendEvent(connection, { runId, eventType: "" })).toThrow();
-      expect(() => appendEvent(connection, { runId, eventSchemaVersion: 0 })).toThrow();
+      expect(() =>
+        appendEvent(connection, { runId, eventSchemaVersion: 0 }),
+      ).toThrow();
       expect(() => appendEvent(connection, { runId, occurredAtMs: -1 })).toThrow();
       expect(() => appendEvent(connection, { runId, payloadJson: "" })).toThrow();
       expect(() => appendEvent(connection, { runId: "missing-run" })).toThrow();
