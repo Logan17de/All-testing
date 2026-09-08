@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 
 import {
   DURABLE_GRAPH_IDENTITY_MIGRATION,
+  DURABLE_RUNS_MIGRATION,
   SqliteDatabase,
   runSqliteMigrations,
   type SqliteDatabaseOptions,
@@ -19,6 +20,7 @@ import {
 export const DEFAULT_RUNTIME_DATABASE_PATH = resolve("data", "zet-harness.sqlite");
 export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
   DURABLE_GRAPH_IDENTITY_MIGRATION,
+  DURABLE_RUNS_MIGRATION,
 ]);
 
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
@@ -40,8 +42,8 @@ export interface RuntimeDaemonSnapshot {
  *
  * The daemon owns the process-local event stream, loopback HTTP transport, and
  * native SQLite connection. Ordered SQL migrations run before API readiness.
- * Durable graph/compiled-plan identity tables are installed by the default
- * catalog; run/attempt/event/checkpoint durability remains later Phase 4 work.
+ * Durable graph/compiled-plan and run-lineage tables are installed by the
+ * default catalog; attempt/event/checkpoint durability remains later Phase 4 work.
  */
 export class RuntimeDaemon {
   private state: RuntimeDaemonState = "idle";
