@@ -135,7 +135,7 @@ Goal: make the scheduler durable without changing Graph/IR semantics.
 - [x] 4.12 Add a filesystem content-addressed blob store for large immutable values.
 - [x] 4.13 Keep short SQLite writes serialized through one clear commit path.
 - [x] 4.14 Commit node completion + output reference + terminal event atomically.
-- [ ] 4.15 Make downstream work runnable only after the durable completion commit succeeds.
+- [x] 4.15 Make downstream work runnable only after the durable completion commit succeeds.
 - [ ] 4.16 Reconstruct the execution frontier after process restart.
 - [ ] 4.17 Classify pre-crash running nodes by recovery policy instead of blindly replaying them.
 - [ ] 4.18 Add backup/restore using SQLite/file-level facilities.

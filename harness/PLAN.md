@@ -104,7 +104,8 @@ Phase 4  Runtime daemon + SQLite           🚧 WE ARE HERE
            ├─ 4.12 filesystem content-addressed blob store                 ✅
            ├─ 4.13 serialized short SQLite commit path                       ✅
            ├─ 4.14 atomic node completion/output/event commit                  ✅
-           └─ 4.15 durable completion gates downstream readiness              ▶ CURRENT
+           ├─ 4.15 durable completion gates downstream readiness              ✅
+           └─ 4.16 restart frontier reconstruction                            ▶ CURRENT
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
 Phase 7  Visual graph + inspector          ⏳  ← Harness v0.1 boundary
@@ -122,7 +123,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ✅ Complete |
-| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.15 current** |
+| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.16 current** |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ⏳ **v0.1 finish line** |
@@ -380,7 +381,9 @@ Phase 4.12 adds a dependency-free filesystem content-addressed blob store in `@z
 
 Phase 4.13 establishes one runtime durability commit path on `SqliteDatabase`. Async callers enqueue FIFO, but each admitted write executes as a synchronous short `BEGIN IMMEDIATE` transaction; commit callbacks cannot return promises, so SQLite locks are never intentionally held across awaits. Failure rolls back the active transaction without poisoning later queued writes, nested commit admission is rejected, and `close()` refuses to discard pending serialized writes; callers can await `drainWrites()` before shutdown. Startup migration transactions remain a deliberate pre-readiness bootstrap exception, and raw connection access remains available for reads/bootstrap rather than becoming a second runtime durability path. Phase 4.14 is the first concrete durability operation built on this path.
 
-Phase 4.14 adds `commitDurableNodeCompletion(...)` as the first concrete user of the 4.13 serialized commit path. It updates exactly one currently-running durable attempt to `completed` with opaque output/usage refs and finish time, then appends the terminal durable event in the same transaction. Event scope is derived from the attempt identity rather than caller input. If either the attempt update or event insert fails, the whole transaction rolls back, so no completed attempt becomes visible without its terminal event. Blob publication and other async work happen before this short SQLite commit; the DB does not parse output-reference JSON or define terminal event taxonomy. No schema migration is required because the v3 attempt and v4 event invariants already express the relationship. Scheduler/downstream readiness remains 4.15.
+Phase 4.14 adds `commitDurableNodeCompletion(...)` as the first concrete user of the 4.13 serialized commit path. It updates exactly one currently-running durable attempt to `completed` with opaque output/usage refs and finish time, then appends the terminal durable event in the same transaction. Event scope is derived from the attempt identity rather than caller input. If either the attempt update or event insert fails, the whole transaction rolls back, so no completed attempt becomes visible without its terminal event. Blob publication and other async work happen before this short SQLite commit; the DB does not parse output-reference JSON or define terminal event taxonomy. No schema migration is required because the v3 attempt and v4 event invariants already express the relationship. Scheduler/downstream readiness is gated by 4.15.
+
+Phase 4.15 adds an optional persistence-neutral `completionBarrier` to `PlainDagRun`. It runs only after executor success and after the scheduler closes that attempt's retry-budget scope, but before `completeRunningOp(...)` or any dependent-edge release. A durable runtime can therefore await the 4.14 atomic completion commit at this boundary: while the commit is pending the op remains scheduler-visible as `running` and every dependent remains blocked. Barrier rejection is terminal for the run, marks the still-running op failed, and deliberately bypasses ordinary executor retry scheduling even when retry budget remains, because successful external work must not be repeated merely because local durability failed. Cancellation during the barrier likewise prevents completion/dependency release. The scheduler still imports no SQLite or database package; 4.16 owns reconstructing this durable frontier after restart.
 
 Phase 3 deterministic scheduler fixtures live behind the explicit `@zet-harness/scheduler/testing` subpath rather than the production scheduler export. Scheduler-level mock nodes are deterministic Execution IR ops, preserving the compiler/plugin boundary instead of inventing fake `NodeDefinition` semantics. The testing surface supplies minimal IR/op builders, clock-free manual gates, and a `DeterministicPlainDagExecutor` scripted by stable `sourceNodeId` and one-based scheduler attempt. It records frozen ordered invocation/trace snapshots, exposes actual/max concurrent mock executions, can complete/fail/wait on a gate/wait cooperatively for abort, and can report adapter-internal retries through the real shared retry budget. Unscripted nodes complete immediately; explicitly scripted nodes fail loudly if execution reaches an unconfigured attempt. These fixtures are infrastructure for 3.16/3.17, not the scenario/stress coverage itself.
 
@@ -453,4 +456,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 4 / Item 4.15 — Make downstream work runnable only after the durable completion commit succeeds.**
+> **Phase 4 / Item 4.16 — Reconstruct the execution frontier after process restart.**
