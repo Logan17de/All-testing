@@ -2,6 +2,14 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+export {
+  SCHEMA_MIGRATIONS_TABLE,
+  runSqliteMigrations,
+  type SqliteMigration,
+  type SqliteMigrationRunnerOptions,
+  type SqliteMigrationRunResult,
+} from "./migrations.js";
+
 export const SQLITE_MEMORY_PATH = ":memory:";
 
 export type SqliteDatabaseState = "closed" | "open";
@@ -21,8 +29,8 @@ export interface SqliteDatabaseSnapshot {
  * Thin direct wrapper around Node 24 `node:sqlite`.
  *
  * This layer intentionally owns only connection lifecycle in Phase 4.4. Schema
- * migrations, foreign-key enforcement, WAL, durable tables, and write
- * serialization remain later Phase 4 items.
+ * migrations are a separate 4.5 primitive; foreign-key enforcement, WAL,
+ * durable tables, and write serialization remain later Phase 4 items.
  */
 export class SqliteDatabase {
   private readonly path: string;
