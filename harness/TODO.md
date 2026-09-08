@@ -140,7 +140,7 @@ Goal: make the scheduler durable without changing Graph/IR semantics.
 - [x] 4.17 Classify pre-crash running nodes by recovery policy instead of blindly replaying them.
 - [x] 4.18 Add backup/restore using SQLite/file-level facilities.
 - [x] 4.19 Expand `/api/health` with runtime/database checks.
-- [ ] 4.20 Add random/fault-injection kill/restart tests around node and commit transitions.
+- [x] 4.20 Add random/fault-injection kill/restart tests around node and commit transitions.
 - [ ] 4.21 Add the lightweight baseline: startup latency, idle RSS, direct runtime dependency count, compiler overhead, scheduler overhead, SQLite commit latency.
 - [ ] 4.22 Record/check the baseline in CI without making noisy machine-specific thresholds brittle.
 
