@@ -28,20 +28,45 @@ describe("SqliteDatabase", () => {
     expect(() => database.connection()).toThrow("SQLite database is not open.");
   });
 
-  it("keeps foreign-key enforcement disabled until Phase 4.6", () => {
+  it("enforces foreign keys on every opened connection", () => {
     const database = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
     database.open();
 
     try {
       expect(database.connection().prepare("PRAGMA foreign_keys").get()).toEqual({
-        foreign_keys: 0,
+        foreign_keys: 1,
+      });
+
+      database.connection().exec(`
+        CREATE TABLE parent(id INTEGER PRIMARY KEY);
+        CREATE TABLE child(
+          id INTEGER PRIMARY KEY,
+          parent_id INTEGER NOT NULL REFERENCES parent(id)
+        );
+      `);
+
+      expect(() =>
+        database.connection().exec("INSERT INTO child(id, parent_id) VALUES (1, 999)"),
+      ).toThrow();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps the SQLite memory journal for in-memory databases", () => {
+    const database = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
+    database.open();
+
+    try {
+      expect(database.connection().prepare("PRAGMA journal_mode").get()).toEqual({
+        journal_mode: "memory",
       });
     } finally {
       database.close();
     }
   });
 
-  it("creates parent directories for a file-backed database and may reopen it", () => {
+  it("enables persistent WAL mode for file-backed databases and may reopen them", () => {
     const root = mkdtempSync(join(tmpdir(), "zet-harness-db-"));
     const path = join(root, "nested", "runtime.sqlite");
     const database = new SqliteDatabase({ path });
@@ -49,12 +74,24 @@ describe("SqliteDatabase", () => {
     try {
       expect(database.open()).toBe(true);
       expect(existsSync(path)).toBe(true);
+      expect(database.connection().prepare("PRAGMA journal_mode").get()).toEqual({
+        journal_mode: "wal",
+      });
+      expect(database.connection().prepare("PRAGMA foreign_keys").get()).toEqual({
+        foreign_keys: 1,
+      });
 
       database.connection().exec("CREATE TABLE probe(value TEXT NOT NULL)");
       database.connection().exec("INSERT INTO probe(value) VALUES ('persisted')");
       expect(database.close()).toBe(true);
 
       expect(database.open()).toBe(true);
+      expect(database.connection().prepare("PRAGMA journal_mode").get()).toEqual({
+        journal_mode: "wal",
+      });
+      expect(database.connection().prepare("PRAGMA foreign_keys").get()).toEqual({
+        foreign_keys: 1,
+      });
       expect(database.connection().prepare("SELECT value FROM probe").get()).toEqual({
         value: "persisted",
       });
