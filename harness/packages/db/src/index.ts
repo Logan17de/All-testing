@@ -3,6 +3,15 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export {
+  COMPILED_PLANS_TABLE,
+  DURABLE_GRAPH_IDENTITY_MIGRATION,
+  GRAPH_COMPILATIONS_TABLE,
+  GRAPH_SOURCES_TABLE,
+  type DurableCompiledPlanRecord,
+  type DurableGraphCompilationRecord,
+  type DurableGraphSourceRecord,
+} from "./durable-identity-records.js";
+export {
   SCHEMA_MIGRATIONS_TABLE,
   runSqliteMigrations,
   type SqliteMigration,
