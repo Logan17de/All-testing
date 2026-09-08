@@ -105,7 +105,8 @@ Phase 4  Runtime daemon + SQLite           🚧 WE ARE HERE
            ├─ 4.13 serialized short SQLite commit path                       ✅
            ├─ 4.14 atomic node completion/output/event commit                  ✅
            ├─ 4.15 durable completion gates downstream readiness              ✅
-           └─ 4.16 restart frontier reconstruction                            ▶ CURRENT
+           ├─ 4.16 restart frontier reconstruction                            ✅
+           └─ 4.17 pre-crash recovery-policy classification                   ▶ CURRENT
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
 Phase 7  Visual graph + inspector          ⏳  ← Harness v0.1 boundary
@@ -123,7 +124,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ✅ Complete |
-| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.16 current** |
+| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.17 current** |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ⏳ **v0.1 finish line** |
@@ -385,6 +386,8 @@ Phase 4.14 adds `commitDurableNodeCompletion(...)` as the first concrete user of
 
 Phase 4.15 adds an optional persistence-neutral `completionBarrier` to `PlainDagRun`. It runs only after executor success and after the scheduler closes that attempt's retry-budget scope, but before `completeRunningOp(...)` or any dependent-edge release. A durable runtime can therefore await the 4.14 atomic completion commit at this boundary: while the commit is pending the op remains scheduler-visible as `running` and every dependent remains blocked. Barrier rejection is terminal for the run, marks the still-running op failed, and deliberately bypasses ordinary executor retry scheduling even when retry budget remains, because successful external work must not be repeated merely because local durability failed. Cancellation during the barrier likewise prevents completion/dependency release. The scheduler still imports no SQLite or database package; 4.16 owns reconstructing this durable frontier after restart.
 
+Phase 4.16 adds a read-only runtime `reconstructExecutionFrontier(...)` reducer. For a durable run it loads the stored compiled `harness.ir/v1`, derives fresh iteration-0 dependency/ready state, overlays the latest schema-v1 sparse checkpoint, then replays only recognized schema-v1 frontier events (`harness.frontier.op`, `harness.frontier.control-edge`, and `harness.frontier.router-selection`) after the checkpoint cursor in authoritative `event_id` order; unrelated durable events remain opaque and are ignored for reconstruction. The reducer validates op/control-edge indexes, dependency and retry accounting, ready-order uniqueness, absolute retry deadlines, and router selections against the immutable IR. Durable attempts still stored as `running` override stale ready/retry state and are excluded from the recovered ready queue while being surfaced separately as `preCrashRunningAttempts`. 4.16 deliberately does not choose rerun, reconcile, or terminal-failure behavior for those attempts; Phase 4.17 classifies them from each op's recovery policy. No database migration or DB-layer semantic parsing is added.
+
 Phase 3 deterministic scheduler fixtures live behind the explicit `@zet-harness/scheduler/testing` subpath rather than the production scheduler export. Scheduler-level mock nodes are deterministic Execution IR ops, preserving the compiler/plugin boundary instead of inventing fake `NodeDefinition` semantics. The testing surface supplies minimal IR/op builders, clock-free manual gates, and a `DeterministicPlainDagExecutor` scripted by stable `sourceNodeId` and one-based scheduler attempt. It records frozen ordered invocation/trace snapshots, exposes actual/max concurrent mock executions, can complete/fail/wait on a gate/wait cooperatively for abort, and can report adapter-internal retries through the real shared retry budget. Unscripted nodes complete immediately; explicitly scripted nodes fail loudly if execution reaches an unconfigured attempt. These fixtures are infrastructure for 3.16/3.17, not the scenario/stress coverage itself.
 
 Phase 3 offline scheduler scenarios compose those deterministic fixtures with the real scheduler primitives rather than introducing a separate acceptance runtime. Plain DAG coverage proves strict chain ordering, concurrent fan-out/fan-in, timeout isolation, bounded retry before downstream release, cooperative cancellation, and fail-fast propagation. Structured-control coverage composes `RunRouterActivation`, `RunControlEdges`, `RunJoinActivation`, and `RunReadiness` to prove selected-branch activation, inactive-path skipping, and an activation-aware `all-active` join. The suite uses no database, model provider, wall-clock sleeps, or random behavior; timeout timing is controlled with fake timers and concurrency is controlled by manual gates.
@@ -456,4 +459,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 4 / Item 4.16 — Reconstruct the execution frontier after process restart.**
+> **Phase 4 / Item 4.17 — Classify pre-crash running nodes by recovery policy instead of blindly replaying them.**
