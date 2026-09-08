@@ -13,6 +13,13 @@ export {
   type FileContentAddressedBlobStoreSnapshot,
 } from "./content-addressed-blob-store.js";
 export {
+  commitDurableNodeCompletion,
+  type DurableNodeCompletionCommitResult,
+  type DurableNodeCompletionInput,
+  type DurableNodeCompletionTerminalEventInput,
+  type SerializedSqliteCommitPath,
+} from "./durable-node-completion.js";
+export {
   CHECKPOINT_CONTROL_EDGES_TABLE,
   CHECKPOINT_OP_FRONTIER_TABLE,
   CHECKPOINT_ROUTER_SELECTIONS_TABLE,
