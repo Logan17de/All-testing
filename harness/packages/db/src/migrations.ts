@@ -156,9 +156,7 @@ function assertAppliedHistoryMatchesCatalog(
   migrations: readonly SqliteMigration[],
 ): void {
   if (applied.length > migrations.length) {
-    throw new TypeError(
-      "SQLite migration history is newer than this runtime migration catalog.",
-    );
+    throw new TypeError("SQLite migration history is newer than this runtime migration catalog.");
   }
 
   for (let index = 0; index < applied.length; index += 1) {
