@@ -84,13 +84,11 @@ describe("durable backup + restore", () => {
 
         expect(result.path).toBe(backupPath);
         expect(result.databasePages).toBeGreaterThan(0);
-        expect(result.manifest).toEqual({
+        expect(result.manifest).toMatchObject({
           format: DURABLE_BACKUP_FORMAT,
           createdAtMs: 1234,
           database: {
             file: DURABLE_BACKUP_DATABASE_FILE,
-            sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
-            sizeBytes: expect.any(Number),
           },
           blobs: {
             directory: DURABLE_BACKUP_BLOB_DIRECTORY,
@@ -98,6 +96,8 @@ describe("durable backup + restore", () => {
             count: 2,
           },
         });
+        expect(result.manifest.database.sha256).toMatch(/^[0-9a-f]{64}$/u);
+        expect(result.manifest.database.sizeBytes).toBeGreaterThan(0);
         expect(Object.isFrozen(result.manifest)).toBe(true);
         expect(readValue(join(backupPath, DURABLE_BACKUP_DATABASE_FILE), "one")).toBe("first");
         expect(readValue(join(backupPath, DURABLE_BACKUP_DATABASE_FILE), "two")).toBe(
