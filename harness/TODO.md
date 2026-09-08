@@ -131,7 +131,7 @@ Goal: make the scheduler durable without changing Graph/IR semantics.
 - [x] 4.8 Define runs and nullable `parent_run_id`/fork metadata.
 - [x] 4.9 Define node attempts including iteration, attempt, status, timing, input/output refs, errors, usage, and stable logical effect/idempotency ID.
 - [x] 4.10 Define append-only durable events with schema versions.
-- [ ] 4.11 Define sparse checkpoints/frontier state.
+- [x] 4.11 Define sparse checkpoints/frontier state.
 - [ ] 4.12 Add a filesystem content-addressed blob store for large immutable values.
 - [ ] 4.13 Keep short SQLite writes serialized through one clear commit path.
 - [ ] 4.14 Commit node completion + output reference + terminal event atomically.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**4.11 — Define sparse checkpoints/frontier state.**
+**4.12 — Add a filesystem content-addressed blob store for large immutable values.**
