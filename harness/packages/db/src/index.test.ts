@@ -4,11 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  SQLITE_MEMORY_PATH,
-  SqliteDatabase,
-  type SqliteCommitCallback,
-} from "./index.js";
+import { SQLITE_MEMORY_PATH, SqliteDatabase, type SqliteCommitCallback } from "./index.js";
 
 describe("SqliteDatabase", () => {
   it("opens and closes an in-memory node:sqlite connection idempotently", () => {
@@ -200,9 +196,8 @@ describe("SqliteDatabase", () => {
     database.open();
 
     try {
-      const unsafeAsyncWrite = (() => Promise.resolve("async")) as unknown as SqliteCommitCallback<
-        string
-      >;
+      const unsafeAsyncWrite = (() =>
+        Promise.resolve("async")) as unknown as SqliteCommitCallback<string>;
 
       await expect(database.commit(unsafeAsyncWrite)).rejects.toThrow(
         "SQLite commit callbacks must be synchronous",

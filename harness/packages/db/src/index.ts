@@ -67,9 +67,7 @@ export type SqliteDatabaseState = "closed" | "open";
 
 type NonPromise<T> = T extends PromiseLike<unknown> ? never : unknown;
 
-export type SqliteCommitCallback<T> = (
-  connection: DatabaseSync,
-) => T & NonPromise<T>;
+export type SqliteCommitCallback<T> = (connection: DatabaseSync) => T & NonPromise<T>;
 
 export interface SqliteDatabaseOptions {
   readonly path: string;
@@ -226,10 +224,7 @@ export class SqliteDatabase {
   }
 }
 
-function executeSerializedCommit<T>(
-  connection: DatabaseSync,
-  write: SqliteCommitCallback<T>,
-): T {
+function executeSerializedCommit<T>(connection: DatabaseSync, write: SqliteCommitCallback<T>): T {
   connection.exec("BEGIN IMMEDIATE");
 
   try {
