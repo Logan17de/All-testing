@@ -96,7 +96,18 @@ function createDatabase(ir: Readonly<Record<string, unknown>>, runId = "run-1"):
          plugin_pins_json, created_at_ms
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(1, "sem", "registry", "harness.compiler/v1", "sha256", "ir", JSON.stringify(ir), "[]", "[]", 1);
+    .run(
+      1,
+      "sem",
+      "registry",
+      "harness.compiler/v1",
+      "sha256",
+      "ir",
+      JSON.stringify(ir),
+      "[]",
+      "[]",
+      1,
+    );
   connection
     .prepare(
       `INSERT INTO graph_compilations (
@@ -153,8 +164,13 @@ function insertEvent(
   return row.id;
 }
 
-function insertInvocation(database: SqliteDatabase, opIndex: number, logicalEffectId: string): void {
-  database.connection()
+function insertInvocation(
+  database: SqliteDatabase,
+  opIndex: number,
+  logicalEffectId: string,
+): void {
+  database
+    .connection()
     .prepare(
       `INSERT INTO node_invocations (
          run_id, op_index, iteration, logical_effect_id, created_at_ms
@@ -173,7 +189,8 @@ function insertAttempt(
   },
 ): void {
   const completed = input.status === "completed";
-  database.connection()
+  database
+    .connection()
     .prepare(
       `INSERT INTO node_attempts (
          attempt_id, run_id, op_index, iteration, attempt, logical_effect_id,
@@ -301,7 +318,7 @@ describe("reconstructExecutionFrontier", () => {
         `INSERT INTO checkpoint_op_frontier (
            checkpoint_id, op_index, iteration, status, remaining_dependencies,
            attempts_started, attempt_budget_used, ready_order, retry_not_before_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(checkpointId, 0, 0, "completed", 0, 1, 1, null, null);
     connection
@@ -309,7 +326,7 @@ describe("reconstructExecutionFrontier", () => {
         `INSERT INTO checkpoint_op_frontier (
            checkpoint_id, op_index, iteration, status, remaining_dependencies,
            attempts_started, attempt_budget_used, ready_order, retry_not_before_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(checkpointId, 1, 0, "ready", 0, 0, 0, 0, null);
 
