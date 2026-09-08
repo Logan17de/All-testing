@@ -65,6 +65,12 @@ export const SQLITE_MEMORY_PATH = ":memory:";
 
 export type SqliteDatabaseState = "closed" | "open";
 
+type NonPromise<T> = T extends PromiseLike<unknown> ? never : unknown;
+
+export type SqliteCommitCallback<T> = (
+  connection: DatabaseSync,
+) => T & NonPromise<T>;
+
 export interface SqliteDatabaseOptions {
   readonly path: string;
   readonly createParentDirectory?: boolean;
@@ -81,13 +87,18 @@ export interface SqliteDatabaseSnapshot {
  *
  * Connections enforce foreign keys. File-backed databases use WAL mode;
  * `:memory:` databases retain SQLite's in-memory journal mode because WAL is
- * unavailable there. Schema migrations remain a separate primitive, while
- * durable application tables and write serialization remain later Phase 4 items.
+ * unavailable there. Runtime durability writes enter through `commit()`, which
+ * admits callers FIFO and executes one short synchronous `BEGIN IMMEDIATE`
+ * transaction at a time. Startup migrations remain a pre-readiness bootstrap
+ * primitive and therefore use the raw connection directly.
  */
 export class SqliteDatabase {
   private readonly path: string;
   private readonly createParentDirectory: boolean;
   private connectionValue: DatabaseSync | undefined;
+  private writeTail: Promise<void> = Promise.resolve();
+  private pendingWriteCount = 0;
+  private writeActive = false;
 
   constructor(options: SqliteDatabaseOptions) {
     if (options.path.trim().length === 0) {
@@ -109,6 +120,10 @@ export class SqliteDatabase {
   open(): boolean {
     if (this.connectionValue !== undefined) {
       return false;
+    }
+
+    if (this.pendingWriteCount !== 0 || this.writeActive) {
+      throw new TypeError("SQLite database cannot open while serialized writes are pending.");
     }
 
     if (this.path !== SQLITE_MEMORY_PATH && this.createParentDirectory) {
@@ -140,6 +155,12 @@ export class SqliteDatabase {
       return false;
     }
 
+    if (this.pendingWriteCount !== 0 || this.writeActive) {
+      throw new TypeError(
+        "SQLite database cannot close while serialized writes are pending; await drainWrites() first.",
+      );
+    }
+
     this.connectionValue = undefined;
     connection.close();
     return true;
@@ -152,6 +173,94 @@ export class SqliteDatabase {
     }
     return connection;
   }
+
+  /**
+   * Serialize one short durability transaction behind all earlier callers.
+   *
+   * The callback must be synchronous. Async work must happen before entering the
+   * commit path so SQLite locks are never held across an `await`.
+   */
+  commit<T>(write: SqliteCommitCallback<T>): Promise<T> {
+    const connection = this.connection();
+    if (this.writeActive) {
+      throw new TypeError("Nested SQLite commits are not allowed.");
+    }
+
+    this.pendingWriteCount += 1;
+
+    const queuedWrite = this.writeTail.then(() => {
+      if (this.connectionValue !== connection) {
+        throw new TypeError("SQLite connection changed before a queued commit could run.");
+      }
+
+      this.writeActive = true;
+      try {
+        return executeSerializedCommit(connection, write);
+      } finally {
+        this.writeActive = false;
+      }
+    });
+
+    const trackedWrite = queuedWrite.then(
+      (value) => {
+        this.pendingWriteCount -= 1;
+        return value;
+      },
+      (error: unknown) => {
+        this.pendingWriteCount -= 1;
+        throw error;
+      },
+    );
+
+    this.writeTail = trackedWrite.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    return trackedWrite;
+  }
+
+  /** Resolve after every currently queued serialized write has settled. */
+  drainWrites(): Promise<void> {
+    return this.writeTail;
+  }
+}
+
+function executeSerializedCommit<T>(
+  connection: DatabaseSync,
+  write: SqliteCommitCallback<T>,
+): T {
+  connection.exec("BEGIN IMMEDIATE");
+
+  try {
+    const value = write(connection);
+    if (isPromiseLike(value)) {
+      throw new TypeError(
+        "SQLite commit callbacks must be synchronous; perform async work before commit().",
+      );
+    }
+
+    connection.exec("COMMIT");
+    return value;
+  } catch (error) {
+    try {
+      connection.exec("ROLLBACK");
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "SQLite commit failed and its rollback also failed.",
+      );
+    }
+    throw error;
+  }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  if ((typeof value !== "object" || value === null) && typeof value !== "function") {
+    return false;
+  }
+
+  return "then" in value && typeof (value as { readonly then?: unknown }).then === "function";
 }
 
 function assertForeignKeysEnabled(connection: DatabaseSync): void {
