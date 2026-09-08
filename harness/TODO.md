@@ -127,7 +127,7 @@ Goal: make the scheduler durable without changing Graph/IR semantics.
 - [x] 4.4 Add SQLite through Node 24 `node:sqlite`; no ORM initially.
 - [x] 4.5 Add a tiny ordered SQL migration runner + `schema_migrations`.
 - [x] 4.6 Enable foreign keys and WAL mode.
-- [ ] 4.7 Define durable graph/source and compiled-plan identity records.
+- [x] 4.7 Define durable graph/source and compiled-plan identity records.
 - [ ] 4.8 Define runs and nullable `parent_run_id`/fork metadata.
 - [ ] 4.9 Define node attempts including iteration, attempt, status, timing, input/output refs, errors, usage, and stable logical effect/idempotency ID.
 - [ ] 4.10 Define append-only durable events with schema versions.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**4.7 — Define durable graph/source and compiled-plan identity records.**
+**4.8 — Define runs and nullable `parent_run_id`/fork metadata.**
