@@ -1,4 +1,4 @@
-name: Zet Harness 4.21 Closeout
+name: Zet Harness 4.21 File-backed SQLite
 
 on:
   push:
@@ -11,9 +11,9 @@ permissions:
   contents: write
 
 jobs:
-  closeout:
+  fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
     steps:
       - name: Checkout real Harness branch
         uses: actions/checkout@v4
@@ -21,53 +21,68 @@ jobs:
           ref: zet-harness-v1
           fetch-depth: 0
 
-      - name: Advance roadmap
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Patch SQLite baseline
+        working-directory: harness
+        shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          todo = Path("harness/TODO.md")
-          text = todo.read_text()
-          old = "- [ ] 4.21 Add the lightweight baseline: startup latency, idle RSS, direct runtime dependency count, compiler overhead, scheduler overhead, SQLite commit latency."
-          new = "- [x] 4.21 Add the lightweight baseline: startup latency, idle RSS, direct runtime dependency count, compiler overhead, scheduler overhead, SQLite commit latency."
+          benchmark = Path("scripts/lightweight-baseline.bench.ts")
+          text = benchmark.read_text()
+          old = 'const database = new SqliteDatabase({ path: ":memory:" });'
+          new = '''const databaseDirectory = mkdtempSync(join(tmpdir(), "zet-harness-baseline-sqlite-"));
+          temporaryDirectories.push(databaseDirectory);
+          const database = new SqliteDatabase({ path: join(databaseDirectory, "baseline.sqlite") });'''
           if old not in text:
-              raise SystemExit("TODO 4.21 anchor not found")
-          todo.write_text(text.replace(old, new, 1))
+              raise SystemExit("SQLite baseline database anchor not found")
+          benchmark.write_text(text.replace(old, new, 1))
 
-          plan = Path("harness/PLAN.md")
+          baseline = Path("BASELINE.md")
+          text = baseline.read_text()
+          old = "- **SQLite commit latency** — uses `SqliteDatabase.commit()` with its serialized `BEGIN IMMEDIATE` transaction path and one prepared insert."
+          new = "- **SQLite commit latency** — uses a temporary file-backed WAL database and `SqliteDatabase.commit()` with its serialized `BEGIN IMMEDIATE` transaction path and one prepared insert."
+          if old not in text:
+              raise SystemExit("BASELINE SQLite bullet anchor not found")
+          baseline.write_text(text.replace(old, new, 1))
+
+          plan = Path("PLAN.md")
           text = plan.read_text()
-          replacements = {
-              "           ├─ 4.21 lightweight performance baseline                            ▶ CURRENT":
-                  "           ├─ 4.21 lightweight performance baseline                            ✅",
-              "           └─ 4.22 CI baseline check                                            ⏳":
-                  "           └─ 4.22 CI baseline check                                            ▶ CURRENT",
-              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.21 current** |":
-                  "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.22 current** |",
-              "> **Phase 4 / Item 4.21 — Add the lightweight baseline: startup latency, idle RSS, direct runtime dependency count, compiler overhead, scheduler overhead, and SQLite commit latency.**":
-                  "> **Phase 4 / Item 4.22 — Record/check the baseline in CI without making noisy machine-specific thresholds brittle.**",
-          }
-          for old, new in replacements.items():
-              if old not in text:
-                  raise SystemExit(f"PLAN anchor not found: {old}")
-              text = text.replace(old, new, 1)
-
-          anchor = "Phase 3 deterministic scheduler fixtures live behind the explicit `@zet-harness/scheduler/testing` subpath rather than the production scheduler export."
-          paragraph = (
-              "Phase 4.21 adds a reproducible lightweight baseline command (`npm run baseline`) without adding production dependencies or hard performance thresholds. "
-              "Fresh runtime child processes measure startup through module load, SQLite open/migrations, and HTTP readiness, then report idle RSS; the same command records the direct runtime dependency count from `apps/runtime/package.json`. "
-              "A deterministic 64-op chain measures the real Graph JSON validation/normalization/canonicalization/lowering/compiler-identity path and the real `PlainDagRun` scheduler path, while SQLite timing exercises the serialized `SqliteDatabase.commit()` `BEGIN IMMEDIATE` path with a prepared insert. "
-              "Timing benchmarks use short warmup/sample windows and runtime startup/RSS report sample count, median, p95, minimum, and maximum. The command has been exercised successfully on hosted Ubuntu and Windows runners, whose materially different startup timings demonstrate why 4.22 must compare recorded baselines without brittle universal machine thresholds.\n\n"
-          )
-          if paragraph.strip() not in text:
-              if anchor not in text:
-                  raise SystemExit("PLAN 4.21 paragraph anchor not found")
-              text = text.replace(anchor, paragraph + anchor, 1)
-          plan.write_text(text)
+          old = "while SQLite timing exercises the serialized `SqliteDatabase.commit()` `BEGIN IMMEDIATE` path with a prepared insert."
+          new = "while SQLite timing exercises the serialized `SqliteDatabase.commit()` `BEGIN IMMEDIATE` path against a temporary file-backed WAL database with a prepared insert."
+          if old not in text:
+              raise SystemExit("PLAN SQLite baseline anchor not found")
+          plan.write_text(text.replace(old, new, 1))
           PY
 
+      - name: Clean install
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Format and verify
+        working-directory: harness
+        run: |
+          npx prettier --write scripts/lightweight-baseline.bench.ts BASELINE.md PLAN.md
+          npm run typecheck
+          npm run lint
+          npm run format:check
+          npm run baseline
+
+      - name: Push fix
+        working-directory: harness
+        shell: bash
+        run: |
           git diff --check
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
-          git add harness/TODO.md harness/PLAN.md
-          git commit -m "docs: mark Harness 4.21 complete"
+          git add scripts/lightweight-baseline.bench.ts BASELINE.md PLAN.md
+          git commit -m "fix(perf): measure file-backed SQLite commits"
           git push origin HEAD:zet-harness-v1
