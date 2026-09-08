@@ -57,7 +57,12 @@ jobs:
         run: npm run lint
 
       - name: Format check
-        run: npm run format:check
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          npx prettier --write apps/runtime/src/runtime-daemon.test.ts packages/db/src/migrations.ts packages/db/src/migrations.test.ts
+          git diff -- apps/runtime/src/runtime-daemon.test.ts packages/db/src/migrations.ts packages/db/src/migrations.test.ts
+          exit 1
 
       - name: Tests
         run: npm test
