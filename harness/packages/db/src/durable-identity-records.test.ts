@@ -156,13 +156,7 @@ describe("durable graph/compiler identity records", () => {
 
   it("makes semantic hash + registry hash + compiler version the unique compile identity", () => {
     withDatabase((connection) => {
-      insertPlan(
-        connection,
-        "sha256:sem",
-        "sha256:registry",
-        "harness.compiler/v1",
-        "sha256:ir-a",
-      );
+      insertPlan(connection, "sha256:sem", "sha256:registry", "harness.compiler/v1", "sha256:ir-a");
 
       expect(() =>
         insertPlan(
