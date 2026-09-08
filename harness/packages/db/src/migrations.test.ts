@@ -2,11 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  SCHEMA_MIGRATIONS_TABLE,
-  runSqliteMigrations,
-  type SqliteMigration,
-} from "./index.js";
+import { SCHEMA_MIGRATIONS_TABLE, runSqliteMigrations, type SqliteMigration } from "./index.js";
 
 const migrations: readonly SqliteMigration[] = Object.freeze([
   Object.freeze({
@@ -47,7 +43,9 @@ describe("runSqliteMigrations", () => {
           .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
           .get(SCHEMA_MIGRATIONS_TABLE),
       ).toEqual({ name: SCHEMA_MIGRATIONS_TABLE });
-      expect(connection.prepare(`SELECT COUNT(*) AS count FROM ${SCHEMA_MIGRATIONS_TABLE}`).get()).toEqual({
+      expect(
+        connection.prepare(`SELECT COUNT(*) AS count FROM ${SCHEMA_MIGRATIONS_TABLE}`).get(),
+      ).toEqual({
         count: 0,
       });
     });
@@ -90,7 +88,9 @@ describe("runSqliteMigrations", () => {
       });
 
       expect(result).toEqual({ appliedVersions: [], currentVersion: 2 });
-      expect(connection.prepare(`SELECT COUNT(*) AS count FROM ${SCHEMA_MIGRATIONS_TABLE}`).get()).toEqual({
+      expect(
+        connection.prepare(`SELECT COUNT(*) AS count FROM ${SCHEMA_MIGRATIONS_TABLE}`).get(),
+      ).toEqual({
         count: 2,
       });
     });
@@ -112,10 +112,14 @@ describe("runSqliteMigrations", () => {
       expect(() => runSqliteMigrations(connection, failing, { now: () => 10 })).toThrow();
       expect(
         connection
-          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'should_rollback'")
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'should_rollback'",
+          )
           .get(),
       ).toBeUndefined();
-      expect(connection.prepare(`SELECT COUNT(*) AS count FROM ${SCHEMA_MIGRATIONS_TABLE}`).get()).toEqual({
+      expect(
+        connection.prepare(`SELECT COUNT(*) AS count FROM ${SCHEMA_MIGRATIONS_TABLE}`).get(),
+      ).toEqual({
         count: 0,
       });
     });
@@ -167,15 +171,17 @@ describe("runSqliteMigrations", () => {
 
   it("rejects an invalid migration clock without starting the migration transaction", () => {
     withDatabase((connection) => {
-      expect(() => runSqliteMigrations(connection, migrations.slice(0, 1), { now: () => -1 })).toThrow(
-        "migration clock must return a non-negative safe integer",
-      );
+      expect(() =>
+        runSqliteMigrations(connection, migrations.slice(0, 1), { now: () => -1 }),
+      ).toThrow("migration clock must return a non-negative safe integer");
       expect(
         connection
           .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'items'")
           .get(),
       ).toBeUndefined();
-      expect(connection.prepare(`SELECT COUNT(*) AS count FROM ${SCHEMA_MIGRATIONS_TABLE}`).get()).toEqual({
+      expect(
+        connection.prepare(`SELECT COUNT(*) AS count FROM ${SCHEMA_MIGRATIONS_TABLE}`).get(),
+      ).toEqual({
         count: 0,
       });
     });
