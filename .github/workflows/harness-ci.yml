@@ -1,4 +1,4 @@
-name: Zet Harness 4.18 Roadmap Closeout
+name: Zet Harness 4.19 Health Checks
 
 on:
   push:
@@ -11,9 +11,9 @@ permissions:
   contents: write
 
 jobs:
-  closeout:
+  implement:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Checkout real Harness branch
         uses: actions/checkout@v4
@@ -21,60 +21,532 @@ jobs:
           ref: zet-harness-v1
           fetch-depth: 0
 
-      - name: Advance roadmap to 4.19
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Clean install
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+
+      - name: Apply 4.19 implementation
         run: |
+          cat > harness/apps/runtime/src/runtime-health.ts <<'EOF'
+          import {
+            SCHEMA_MIGRATIONS_TABLE,
+            type SqliteDatabase,
+            type SqliteMigration,
+          } from "@zet-harness/db";
+
+          export const RUNTIME_HEALTH_SERVICE = "zet-harness-runtime" as const;
+
+          export type RuntimeHealthStatus = "ok" | "unhealthy";
+          export type RuntimeHealthRuntimeState = "idle" | "running" | "stopped";
+          export type RuntimeHealthDatabaseState = "closed" | "open";
+          export type RuntimeHealthDatabaseQueryStatus = "ok" | "error";
+
+          export interface RuntimeHealthResponse {
+            readonly status: RuntimeHealthStatus;
+            readonly service: typeof RUNTIME_HEALTH_SERVICE;
+            readonly checks?: unknown;
+          }
+
+          export type RuntimeHealthProvider = () => RuntimeHealthResponse;
+
+          export interface RuntimeMigrationHealthCheck {
+            readonly status: RuntimeHealthStatus;
+            readonly appliedCount: number;
+            readonly expectedCount: number;
+            readonly appliedVersion: number | null;
+            readonly expectedVersion: number | null;
+          }
+
+          export interface RuntimeHealthReport extends RuntimeHealthResponse {
+            readonly checks: {
+              readonly runtime: {
+                readonly status: RuntimeHealthStatus;
+                readonly state: RuntimeHealthRuntimeState;
+              };
+              readonly database: {
+                readonly status: RuntimeHealthStatus;
+                readonly state: RuntimeHealthDatabaseState;
+                readonly query: RuntimeHealthDatabaseQueryStatus;
+                readonly migrations: RuntimeMigrationHealthCheck;
+              };
+            };
+          }
+
+          export interface InspectRuntimeHealthOptions {
+            readonly runtimeState: RuntimeHealthRuntimeState;
+            readonly database: SqliteDatabase;
+            readonly migrations: readonly SqliteMigration[];
+          }
+
+          /**
+           * Inspect only cheap local readiness signals.
+           *
+           * The probe performs no writes and intentionally avoids SQLite
+           * `quick_check`/`integrity_check` or blob-tree scans on the request path.
+           * Backup/restore owns deep integrity verification; health checks only
+           * confirm the live connection can answer and its tiny migration history
+           * still exactly matches the code-owned runtime catalog.
+           */
+          export function inspectRuntimeHealth(options: InspectRuntimeHealthOptions): RuntimeHealthReport {
+            const runtimeStatus: RuntimeHealthStatus =
+              options.runtimeState === "running" ? "ok" : "unhealthy";
+            const databaseSnapshot = options.database.snapshot();
+            const expectedVersion = options.migrations.at(-1)?.version ?? null;
+
+            let queryStatus: RuntimeHealthDatabaseQueryStatus = "error";
+            let migrationCheck: RuntimeMigrationHealthCheck = Object.freeze({
+              status: "unhealthy",
+              appliedCount: 0,
+              expectedCount: options.migrations.length,
+              appliedVersion: null,
+              expectedVersion,
+            });
+
+            if (databaseSnapshot.state === "open") {
+              const connection = options.database.connection();
+
+              try {
+                const row = connection.prepare("SELECT 1 AS ok").get();
+                if (row?.ok === 1) {
+                  queryStatus = "ok";
+                }
+              } catch {
+                queryStatus = "error";
+              }
+
+              try {
+                const rows = connection
+                  .prepare(`SELECT version, name FROM ${SCHEMA_MIGRATIONS_TABLE} ORDER BY version ASC`)
+                  .all();
+                const appliedVersion = readAppliedVersion(rows);
+                const historyMatches =
+                  rows.length === options.migrations.length &&
+                  rows.every((row, index) => {
+                    const expected = options.migrations[index];
+                    return (
+                      expected !== undefined &&
+                      row.version === expected.version &&
+                      row.name === expected.name
+                    );
+                  });
+
+                migrationCheck = Object.freeze({
+                  status: historyMatches ? "ok" : "unhealthy",
+                  appliedCount: rows.length,
+                  expectedCount: options.migrations.length,
+                  appliedVersion,
+                  expectedVersion,
+                });
+              } catch {
+                migrationCheck = Object.freeze({
+                  status: "unhealthy",
+                  appliedCount: 0,
+                  expectedCount: options.migrations.length,
+                  appliedVersion: null,
+                  expectedVersion,
+                });
+              }
+            }
+
+            const databaseStatus: RuntimeHealthStatus =
+              databaseSnapshot.state === "open" &&
+              queryStatus === "ok" &&
+              migrationCheck.status === "ok"
+                ? "ok"
+                : "unhealthy";
+            const status: RuntimeHealthStatus =
+              runtimeStatus === "ok" && databaseStatus === "ok" ? "ok" : "unhealthy";
+
+            return Object.freeze({
+              status,
+              service: RUNTIME_HEALTH_SERVICE,
+              checks: Object.freeze({
+                runtime: Object.freeze({
+                  status: runtimeStatus,
+                  state: options.runtimeState,
+                }),
+                database: Object.freeze({
+                  status: databaseStatus,
+                  state: databaseSnapshot.state,
+                  query: queryStatus,
+                  migrations: migrationCheck,
+                }),
+              }),
+            });
+          }
+
+          function readAppliedVersion(rows: readonly Record<string, unknown>[]): number | null {
+            const lastRow = rows.at(-1);
+            if (lastRow === undefined) {
+              return null;
+            }
+
+            return typeof lastRow.version === "number" && Number.isSafeInteger(lastRow.version)
+              ? lastRow.version
+              : null;
+          }
+          EOF
+
+          cat > harness/apps/runtime/src/runtime-health.test.ts <<'EOF'
+          import {
+            SCHEMA_MIGRATIONS_TABLE,
+            SQLITE_MEMORY_PATH,
+            SqliteDatabase,
+            runSqliteMigrations,
+            type SqliteMigration,
+          } from "@zet-harness/db";
+          import { describe, expect, it } from "vitest";
+
+          import { inspectRuntimeHealth } from "./runtime-health.js";
+
+          const migrations: readonly SqliteMigration[] = [
+            {
+              version: 1,
+              name: "health_probe",
+              sql: "CREATE TABLE health_probe(value TEXT NOT NULL)",
+            },
+          ];
+
+          describe("inspectRuntimeHealth", () => {
+            it("reports a running runtime with a responsive database and exact migration catalog as healthy", () => {
+              const database = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
+              database.open();
+
+              try {
+                runSqliteMigrations(database.connection(), migrations, { now: () => 1 });
+
+                expect(
+                  inspectRuntimeHealth({
+                    runtimeState: "running",
+                    database,
+                    migrations,
+                  }),
+                ).toEqual({
+                  status: "ok",
+                  service: "zet-harness-runtime",
+                  checks: {
+                    runtime: { status: "ok", state: "running" },
+                    database: {
+                      status: "ok",
+                      state: "open",
+                      query: "ok",
+                      migrations: {
+                        status: "ok",
+                        appliedCount: 1,
+                        expectedCount: 1,
+                        appliedVersion: 1,
+                        expectedVersion: 1,
+                      },
+                    },
+                  },
+                });
+              } finally {
+                database.close();
+              }
+            });
+
+            it("reports migration drift without leaking database errors", () => {
+              const database = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
+              database.open();
+
+              try {
+                runSqliteMigrations(database.connection(), migrations, { now: () => 1 });
+                database.connection().prepare(`DELETE FROM ${SCHEMA_MIGRATIONS_TABLE}`).run();
+
+                expect(
+                  inspectRuntimeHealth({
+                    runtimeState: "running",
+                    database,
+                    migrations,
+                  }),
+                ).toEqual({
+                  status: "unhealthy",
+                  service: "zet-harness-runtime",
+                  checks: {
+                    runtime: { status: "ok", state: "running" },
+                    database: {
+                      status: "unhealthy",
+                      state: "open",
+                      query: "ok",
+                      migrations: {
+                        status: "unhealthy",
+                        appliedCount: 0,
+                        expectedCount: 1,
+                        appliedVersion: null,
+                        expectedVersion: 1,
+                      },
+                    },
+                  },
+                });
+              } finally {
+                database.close();
+              }
+            });
+
+            it("reports closed database and non-running lifecycle states as unhealthy without opening resources", () => {
+              const database = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
+
+              expect(
+                inspectRuntimeHealth({
+                  runtimeState: "idle",
+                  database,
+                  migrations,
+                }),
+              ).toEqual({
+                status: "unhealthy",
+                service: "zet-harness-runtime",
+                checks: {
+                  runtime: { status: "unhealthy", state: "idle" },
+                  database: {
+                    status: "unhealthy",
+                    state: "closed",
+                    query: "error",
+                    migrations: {
+                      status: "unhealthy",
+                      appliedCount: 0,
+                      expectedCount: 1,
+                      appliedVersion: null,
+                      expectedVersion: 1,
+                    },
+                  },
+                },
+              });
+              expect(database.snapshot().state).toBe("closed");
+            });
+          });
+          EOF
+
           python - <<'PY'
           from pathlib import Path
 
-          todo = Path("harness/TODO.md")
-          todo_text = todo.read_text()
-          old_todo = "- [ ] 4.18 Add backup/restore using SQLite/file-level facilities."
-          new_todo = "- [x] 4.18 Add backup/restore using SQLite/file-level facilities."
-          if old_todo not in todo_text:
-              raise SystemExit("TODO 4.18 marker not found")
-          todo.write_text(todo_text.replace(old_todo, new_todo, 1))
+          http = Path("harness/apps/runtime/src/runtime-http-server.ts")
+          text = http.read_text()
+          old = 'import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";\n\n'
+          new = old + 'import {\n  RUNTIME_HEALTH_SERVICE,\n  type RuntimeHealthProvider,\n  type RuntimeHealthResponse,\n} from "./runtime-health.js";\n'
+          if old not in text:
+              raise SystemExit("runtime-http-server import anchor not found")
+          text = text.replace(old, new, 1)
 
-          plan = Path("harness/PLAN.md")
-          text = plan.read_text()
+          old = '  private readonly eventStream: RuntimeEventStream;\n  private readonly eventClients = new Map<ServerResponse, () => void>();'
+          new = '  private readonly eventStream: RuntimeEventStream;\n  private readonly healthProvider: RuntimeHealthProvider;\n  private readonly eventClients = new Map<ServerResponse, () => void>();'
+          if old not in text:
+              raise SystemExit("runtime-http-server field anchor not found")
+          text = text.replace(old, new, 1)
 
-          old_tree = "           └─ 4.18 SQLite/file-level backup + restore                          ▶ CURRENT"
-          new_tree = "           ├─ 4.18 SQLite/file-level backup + restore                          ✅\n           └─ 4.19 runtime/database health checks                              ▶ CURRENT"
-          if old_tree not in text:
-              raise SystemExit("PLAN 4.18 tree marker not found")
-          text = text.replace(old_tree, new_tree, 1)
+          old = '  constructor(options: RuntimeHttpServerOptions = {}, eventStream = new RuntimeEventStream()) {\n    this.host = options.host ?? DEFAULT_RUNTIME_HOST;\n    this.requestedPort = options.port ?? DEFAULT_RUNTIME_PORT;\n    this.eventStream = eventStream;'
+          new = '  constructor(\n    options: RuntimeHttpServerOptions = {},\n    eventStream = new RuntimeEventStream(),\n    healthProvider: RuntimeHealthProvider = defaultRuntimeHealthProvider,\n  ) {\n    this.host = options.host ?? DEFAULT_RUNTIME_HOST;\n    this.requestedPort = options.port ?? DEFAULT_RUNTIME_PORT;\n    this.eventStream = eventStream;\n    this.healthProvider = healthProvider;'
+          if old not in text:
+              raise SystemExit("runtime-http-server constructor anchor not found")
+          text = text.replace(old, new, 1)
 
-          old_phase = "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.18 current** |"
-          new_phase = "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.19 current** |"
-          if old_phase not in text:
-              raise SystemExit("PLAN phase-map 4.18 marker not found")
-          text = text.replace(old_phase, new_phase, 1)
+          old = '''      writeJson(response, 200, {
+        status: "ok",
+        service: "zet-harness-runtime",
+      });
+      return;'''
+          new = '''      const health = this.readHealth();
+      writeJson(response, health.status === "ok" ? 200 : 503, health);
+      return;'''
+          if old not in text:
+              raise SystemExit("runtime-http-server health body anchor not found")
+          text = text.replace(old, new, 1)
 
-          anchor = "Phase 4.17 adds pure `classifyPreCrashRunningAttempts(...)` classification over the 4.16 reconstructed frontier. It consumes only the frozen Execution IR recovery policy: `rerun` is the sole immediately rerun-eligible action, while `reuse`, `reconcile`, and `manual` become explicit `hold-for-reuse`, `hold-for-reconciliation`, and `hold-for-manual-review` outcomes. A durable attempt still marked `running` has no committed terminal result, so `reuse` never silently promotes uncertain work to success. The classifier preserves op/iteration/attempt/logical-effect identity and rejects impossible missing-op, non-executable, `not-applicable`, unknown-policy, and duplicate-running-attempt states. It does not mutate scheduler state, write SQLite, spend retry budget, or re-derive effect/idempotency safety; compiler stage 2.14 remains authoritative for those cross-field promises, and the classifier itself does not execute the chosen recovery action.\n"
-          paragraph = "\nPhase 4.18 adds a dependency-free durable backup bundle combining SQLite's native online backup with the immutable filesystem blob store. A backup is staged as a directory containing `database.sqlite`, `blobs/`, and a versioned `zet-harness.backup/v1` manifest recording creation time, database SHA-256/size, the blob algorithm, and verified blob count. The runtime first drains already-queued serialized writes, then SQLite owns database snapshot consistency; current cross-store capture remains safe because blob bytes are published before durable SQLite references, are immutable after publication, and are not garbage-collected yet. Only the canonical `sha256/` tree is copied, so in-flight root temp files are excluded, and every copied blob is verified by content address before the bundle is renamed into place. Restore verifies the manifest, database digest, `PRAGMA quick_check`, and every blob; it refuses overwrite/merge destinations, stages both stores, and publishes blobs before the SQLite file so a failed restore cannot expose a database that references missing restored bytes. Restore is an explicit clean-destination/offline operation. No schema migration, archive framework, or cloud dependency is added.\n"
+          old = '  private openEventStream(request: IncomingMessage, response: ServerResponse, url: URL): void {'
+          new = '''  private readHealth(): RuntimeHealthResponse {
+    try {
+      return this.healthProvider();
+    } catch {
+      return Object.freeze({
+        status: "unhealthy",
+        service: RUNTIME_HEALTH_SERVICE,
+        checks: Object.freeze({
+          health: Object.freeze({ status: "unhealthy" }),
+        }),
+      });
+    }
+  }
+
+  private openEventStream(request: IncomingMessage, response: ServerResponse, url: URL): void {'''
+          if old not in text:
+              raise SystemExit("runtime-http-server method anchor not found")
+          text = text.replace(old, new, 1)
+
+          anchor = 'const formatSseEvent = (event: RuntimeStreamEvent): string =>\n  `id: ${String(event.id)}\\nevent: ${event.type}\\ndata: ${event.data}\\n\\n`;\n'
+          addition = anchor + '\nconst defaultRuntimeHealthProvider: RuntimeHealthProvider = () =>\n  Object.freeze({\n    status: "ok",\n    service: RUNTIME_HEALTH_SERVICE,\n  });\n'
           if anchor not in text:
-              raise SystemExit("PLAN 4.17 architecture paragraph not found")
-          text = text.replace(anchor, anchor + paragraph, 1)
+              raise SystemExit("runtime-http-server health provider anchor not found")
+          text = text.replace(anchor, addition, 1)
+          http.write_text(text)
 
-          old_next = "> **Phase 4 / Item 4.18 — Add backup/restore using SQLite/file-level facilities.**"
-          new_next = "> **Phase 4 / Item 4.19 — Expand `/api/health` with runtime/database checks.**"
-          if old_next not in text:
-              raise SystemExit("PLAN next-action 4.18 marker not found")
-          text = text.replace(old_next, new_next, 1)
+          daemon = Path("harness/apps/runtime/src/runtime-daemon.ts")
+          text = daemon.read_text()
+          old = 'import { RuntimeEventStream, type RuntimeStreamEvent } from "./runtime-event-stream.js";\n'
+          new = old + 'import { inspectRuntimeHealth } from "./runtime-health.js";\n'
+          if old not in text:
+              raise SystemExit("runtime-daemon import anchor not found")
+          text = text.replace(old, new, 1)
+          old = '    this.httpServer = new RuntimeHttpServer(options.api, this.eventStream);'
+          new = '''    this.httpServer = new RuntimeHttpServer(options.api, this.eventStream, () =>
+      inspectRuntimeHealth({
+        runtimeState: this.state,
+        database: this.database,
+        migrations: this.migrations,
+      }),
+    );'''
+          if old not in text:
+              raise SystemExit("runtime-daemon server constructor anchor not found")
+          text = text.replace(old, new, 1)
+          daemon.write_text(text)
 
-          plan.write_text(text)
+          http_test = Path("harness/apps/runtime/src/runtime-http-server.test.ts")
+          text = http_test.read_text()
+          anchor = '''  it("streams live SSE events and starts cursorless clients from now", async () => {'''
+          test = '''  it("returns 503 for unhealthy or failed health providers without leaking exceptions", async () => {
+    const unhealthy = new RuntimeHttpServer(
+      { port: 0 },
+      new RuntimeEventStream(),
+      () => ({
+        status: "unhealthy",
+        service: "zet-harness-runtime",
+        checks: { database: { status: "unhealthy" } },
+      }),
+    );
+    await unhealthy.start();
+
+    try {
+      const snapshot = unhealthy.snapshot();
+      const response = await fetch(
+        `http://${snapshot.host}:${String(snapshot.port)}/api/health`,
+      );
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        status: "unhealthy",
+        service: "zet-harness-runtime",
+        checks: { database: { status: "unhealthy" } },
+      });
+    } finally {
+      await unhealthy.stop();
+    }
+
+    const failed = new RuntimeHttpServer(
+      { port: 0 },
+      new RuntimeEventStream(),
+      () => {
+        throw new Error("sensitive database detail");
+      },
+    );
+    await failed.start();
+
+    try {
+      const snapshot = failed.snapshot();
+      const response = await fetch(`http://${snapshot.host}:${String(snapshot.port)}/api/health`);
+      expect(response.status).toBe(503);
+      const body = await response.text();
+      expect(body).not.toContain("sensitive database detail");
+      expect(JSON.parse(body)).toEqual({
+        status: "unhealthy",
+        service: "zet-harness-runtime",
+        checks: { health: { status: "unhealthy" } },
+      });
+    } finally {
+      await failed.stop();
+    }
+  });
+
+'''
+          if anchor not in text:
+              raise SystemExit("runtime-http-server test anchor not found")
+          text = text.replace(anchor, test + anchor, 1)
+          http_test.write_text(text)
+
+          daemon_test = Path("harness/apps/runtime/src/runtime-daemon.test.ts")
+          text = daemon_test.read_text()
+          anchor = '''    expect(snapshot.database).toEqual({
+      state: "open",
+      path: SQLITE_MEMORY_PATH,
+      inMemory: true,
+    });
+
+    expect(daemon.publishEvent("runtime.test", { ok: true })).toEqual({'''
+          replacement = '''    expect(snapshot.database).toEqual({
+      state: "open",
+      path: SQLITE_MEMORY_PATH,
+      inMemory: true,
+    });
+
+    const healthResponse = await fetch(
+      `http://${snapshot.api.host}:${String(snapshot.api.port)}/api/health`,
+    );
+    expect(healthResponse.status).toBe(200);
+    await expect(healthResponse.json()).resolves.toEqual({
+      status: "ok",
+      service: "zet-harness-runtime",
+      checks: {
+        runtime: { status: "ok", state: "running" },
+        database: {
+          status: "ok",
+          state: "open",
+          query: "ok",
+          migrations: {
+            status: "ok",
+            appliedCount: 5,
+            expectedCount: 5,
+            appliedVersion: 5,
+            expectedVersion: 5,
+          },
+        },
+      },
+    });
+
+    expect(daemon.publishEvent("runtime.test", { ok: true })).toEqual({'''
+          if anchor not in text:
+              raise SystemExit("runtime-daemon health test anchor not found")
+          text = text.replace(anchor, replacement, 1)
+          daemon_test.write_text(text)
+
+          index = Path("harness/apps/runtime/src/index.ts")
+          text = index.read_text()
+          addition = '''export {
+  RUNTIME_HEALTH_SERVICE,
+  inspectRuntimeHealth,
+  type InspectRuntimeHealthOptions,
+  type RuntimeHealthDatabaseQueryStatus,
+  type RuntimeHealthDatabaseState,
+  type RuntimeHealthProvider,
+  type RuntimeHealthReport,
+  type RuntimeHealthResponse,
+  type RuntimeHealthRuntimeState,
+  type RuntimeHealthStatus,
+  type RuntimeMigrationHealthCheck,
+} from "./runtime-health.js";
+'''
+          if 'from "./runtime-health.js";' not in text:
+              text = addition + text
+          index.write_text(text)
           PY
 
-      - name: Validate closeout diff
+      - name: Format and verify 4.19
+        working-directory: harness
+        run: |
+          npx prettier --write apps/runtime/src/runtime-health.ts apps/runtime/src/runtime-health.test.ts apps/runtime/src/runtime-http-server.ts apps/runtime/src/runtime-http-server.test.ts apps/runtime/src/runtime-daemon.ts apps/runtime/src/runtime-daemon.test.ts apps/runtime/src/index.ts
+          npm run typecheck --workspace @zet-harness/runtime
+          npm run lint --workspace @zet-harness/runtime
+          npm run test --workspace @zet-harness/runtime
+          npm run format:check
+
+      - name: Commit implementation
         run: |
           git diff --check
-          grep -F -- "- [x] 4.18 Add backup/restore using SQLite/file-level facilities." harness/TODO.md
-          grep -F -- "4.19 runtime/database health checks" harness/PLAN.md
-          grep -F -- "Phase 4 / Item 4.19" harness/PLAN.md
-
-      - name: Commit closeout
-        run: |
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
-          git add harness/PLAN.md harness/TODO.md
-          git commit -m "docs: mark Harness 4.18 complete"
+          git add harness/apps/runtime/src/runtime-health.ts harness/apps/runtime/src/runtime-health.test.ts harness/apps/runtime/src/runtime-http-server.ts harness/apps/runtime/src/runtime-http-server.test.ts harness/apps/runtime/src/runtime-daemon.ts harness/apps/runtime/src/runtime-daemon.test.ts harness/apps/runtime/src/index.ts
+          git commit -m "feat(runtime): expand health checks"
           git push origin HEAD:zet-harness-v1
