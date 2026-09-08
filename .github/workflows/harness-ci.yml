@@ -1,4 +1,4 @@
-name: Zet Harness 4.21 Baseline Fix
+name: Zet Harness 4.21 Baseline Matrix
 
 on:
   push:
@@ -8,18 +8,23 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  fix:
-    runs-on: ubuntu-latest
+  baseline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     steps:
       - name: Checkout real Harness branch
         uses: actions/checkout@v4
         with:
           ref: zet-harness-v1
-          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -29,58 +34,10 @@ jobs:
       - name: Pin npm
         run: npm install --global npm@12.0.2 --no-audit --no-fund
 
-      - name: Patch baseline tooling
-        working-directory: harness
-        shell: bash
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          benchmark = Path("scripts/lightweight-baseline.bench.ts")
-          text = benchmark.read_text()
-          text = text.replace('import { performance } from "node:perf_hooks";\n', '')
-          benchmark.write_text(text)
-
-          Path("scripts/tsconfig.json").write_text('''{
-            "extends": "../tsconfig.base.json",
-            "compilerOptions": {
-              "noEmit": true,
-              "types": ["node", "vitest"]
-            },
-            "include": ["./*.ts"]
-          }
-          ''')
-
-          package_path = Path("package.json")
-          package = json.loads(package_path.read_text())
-          package["scripts"]["typecheck"] = "npm run typecheck --workspaces --if-present && tsc --noEmit -p tsconfig.json && tsc --noEmit -p scripts/tsconfig.json"
-          package_path.write_text(json.dumps(package, indent=2) + "\n")
-          PY
-
       - name: Clean install
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Format benchmark
+      - name: Run lightweight baseline
         working-directory: harness
-        run: npx prettier --write package.json scripts/lightweight-baseline.bench.ts scripts/tsconfig.json
-
-      - name: Verify and benchmark
-        working-directory: harness
-        run: |
-          npm run typecheck
-          npm run lint
-          npm run format:check
-          npm run baseline
-
-      - name: Push fix
-        working-directory: harness
-        shell: bash
-        run: |
-          git diff --check
-          git config user.name "Logesh"
-          git config user.email "loganlogesh17@gmail.com"
-          git add package.json scripts/lightweight-baseline.bench.ts scripts/tsconfig.json
-          git commit -m "fix(perf): verify lightweight baseline"
-          git push origin HEAD:zet-harness-v1
+        run: npm run baseline
