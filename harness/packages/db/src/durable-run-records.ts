@@ -4,12 +4,7 @@ import type { SqliteMigration } from "./migrations.js";
 export const RUNS_TABLE = "runs" as const;
 
 export type DurableRunStatus =
-  | "pending"
-  | "running"
-  | "waiting"
-  | "completed"
-  | "failed"
-  | "cancelled";
+  "pending" | "running" | "waiting" | "completed" | "failed" | "cancelled";
 
 /**
  * Durable identity/current-state record for one scheduler run.
