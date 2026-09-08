@@ -12,6 +12,12 @@ export {
   type DurableGraphSourceRecord,
 } from "./durable-identity-records.js";
 export {
+  DURABLE_RUNS_MIGRATION,
+  RUNS_TABLE,
+  type DurableRunRecord,
+  type DurableRunStatus,
+} from "./durable-run-records.js";
+export {
   SCHEMA_MIGRATIONS_TABLE,
   runSqliteMigrations,
   type SqliteMigration,
