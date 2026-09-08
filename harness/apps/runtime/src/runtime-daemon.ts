@@ -2,8 +2,10 @@ import { resolve } from "node:path";
 
 import {
   SqliteDatabase,
+  runSqliteMigrations,
   type SqliteDatabaseOptions,
   type SqliteDatabaseSnapshot,
+  type SqliteMigration,
 } from "@zet-harness/db";
 
 import { RuntimeEventStream, type RuntimeStreamEvent } from "./runtime-event-stream.js";
@@ -14,12 +16,14 @@ import {
 } from "./runtime-http-server.js";
 
 export const DEFAULT_RUNTIME_DATABASE_PATH = resolve("data", "zet-harness.sqlite");
+export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([]);
 
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
 export interface RuntimeDaemonOptions {
   readonly api?: RuntimeHttpServerOptions;
   readonly database?: SqliteDatabaseOptions;
+  readonly migrations?: readonly SqliteMigration[];
 }
 
 export interface RuntimeDaemonSnapshot {
@@ -32,12 +36,14 @@ export interface RuntimeDaemonSnapshot {
  * Long-lived runtime lifecycle.
  *
  * The daemon owns the process-local event stream, loopback HTTP transport, and
- * native SQLite connection. Schema/migration/WAL policy remains later Phase 4 work.
+ * native SQLite connection. Ordered SQL migrations run before API readiness;
+ * foreign-key/WAL policy and durable application tables remain later Phase 4 work.
  */
 export class RuntimeDaemon {
   private state: RuntimeDaemonState = "idle";
   private readonly eventStream = new RuntimeEventStream();
   private readonly database: SqliteDatabase;
+  private readonly migrations: readonly SqliteMigration[];
   private readonly httpServer: RuntimeHttpServer;
   private readonly stoppedPromise: Promise<void>;
   private readonly resolveStopped: () => void;
@@ -45,6 +51,7 @@ export class RuntimeDaemon {
 
   constructor(options: RuntimeDaemonOptions = {}) {
     this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
+    this.migrations = options.migrations ?? RUNTIME_DATABASE_MIGRATIONS;
     this.httpServer = new RuntimeHttpServer(options.api, this.eventStream);
 
     let resolveStopped!: () => void;
@@ -69,7 +76,7 @@ export class RuntimeDaemon {
     return this.eventStream.publish(type, data);
   }
 
-  /** Start only after SQLite is open and the loopback API has successfully bound. */
+  /** Start only after SQLite migrations and the loopback API are ready. */
   async start(): Promise<boolean> {
     if (this.state === "stopped") {
       throw new TypeError("Runtime daemon cannot restart after it has stopped.");
@@ -80,6 +87,7 @@ export class RuntimeDaemon {
 
     this.database.open();
     try {
+      runSqliteMigrations(this.database.connection(), this.migrations);
       await this.httpServer.start();
     } catch (error) {
       this.database.close();
