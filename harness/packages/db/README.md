@@ -7,5 +7,5 @@ Lightweight persistence primitives for Zet Harness.
 - `drainWrites()` is the explicit shutdown boundary; `close()` refuses to discard pending serialized writes.
 - Startup migrations are the deliberate exception because they run before runtime readiness and concurrency begins.
 - `FileContentAddressedBlobStore` owns large immutable byte values addressed as canonical `sha256:<digest>` references.
-- Blob bytes are published atomically and verified on reuse; node-completion/output/event atomicity remains Phase 4.14.
+- Blob bytes are published atomically and verified on reuse; Phase 4.14 will use the serialized commit path to make node completion + output reference + terminal event one atomic durability boundary.
 - The package intentionally uses Node.js built-ins and `node:sqlite` rather than an ORM or external storage service.
