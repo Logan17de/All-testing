@@ -212,11 +212,13 @@ function parseExecutionIr(json: string): RecoveryExecutionIrV1 {
   if (value.format !== "harness.ir/v1") {
     throw new TypeError("Stored Execution IR must use format 'harness.ir/v1'.");
   }
-  if (!Array.isArray(value.ops) || !Array.isArray(value.controlEdges)) {
+  const ops = value.ops;
+  const controlEdges = value.controlEdges;
+  if (!Array.isArray(ops) || !Array.isArray(controlEdges)) {
     throw new TypeError("Stored Execution IR must contain ops and controlEdges arrays.");
   }
 
-  value.ops.forEach((rawOp, opIndex) => {
+  ops.forEach((rawOp, opIndex) => {
     if (!isObject(rawOp)) {
       throw new TypeError(`Stored Execution IR op ${String(opIndex)} must be an object.`);
     }
@@ -232,7 +234,7 @@ function parseExecutionIr(json: string): RecoveryExecutionIrV1 {
         typeof dependency !== "number" ||
         !Number.isSafeInteger(dependency) ||
         dependency < 0 ||
-        dependency >= value.ops.length ||
+        dependency >= ops.length ||
         dependency === opIndex ||
         dependency <= previous
       ) {
@@ -272,9 +274,7 @@ function parseExecutionIr(json: string): RecoveryExecutionIrV1 {
       if (rawOp.control.kind === "router") {
         if (
           !Array.isArray(rawOp.control.branches) ||
-          rawOp.control.branches.some(
-            (branch) => typeof branch !== "string" || branch.length === 0,
-          )
+          rawOp.control.branches.some((branch) => typeof branch !== "string" || branch.length === 0)
         ) {
           throw new TypeError(
             `Stored Execution IR router op ${String(opIndex)} has invalid branches.`,
@@ -284,7 +284,7 @@ function parseExecutionIr(json: string): RecoveryExecutionIrV1 {
     }
   });
 
-  value.controlEdges.forEach((rawEdge, edgeIndex) => {
+  controlEdges.forEach((rawEdge, edgeIndex) => {
     if (
       !isObject(rawEdge) ||
       !isObject(rawEdge.from) ||
@@ -295,8 +295,8 @@ function parseExecutionIr(json: string): RecoveryExecutionIrV1 {
       !Number.isSafeInteger(rawEdge.to.op) ||
       rawEdge.from.op < 0 ||
       rawEdge.to.op < 0 ||
-      rawEdge.from.op >= value.ops.length ||
-      rawEdge.to.op >= value.ops.length
+      rawEdge.from.op >= ops.length ||
+      rawEdge.to.op >= ops.length
     ) {
       throw new TypeError(
         `Stored Execution IR control edge ${String(edgeIndex)} references an invalid op.`,
@@ -439,7 +439,9 @@ function assertControlEdge(
   label: string,
 ): void {
   if (ir.controlEdges[state.edgeIndex] === undefined) {
-    throw new RangeError(`${label} references unavailable control edge ${String(state.edgeIndex)}.`);
+    throw new RangeError(
+      `${label} references unavailable control edge ${String(state.edgeIndex)}.`,
+    );
   }
   if (!Number.isSafeInteger(state.iteration) || state.iteration < 0) {
     throw new TypeError(`${label} has an invalid iteration.`);
@@ -675,9 +677,7 @@ function replayFrontierEvents(
         nullableInteger(row, "iteration") !== null ||
         nullableInteger(row, "attempt", 1) !== null
       ) {
-        throw new TypeError(
-          `Frontier control-edge event ${String(eventId)} must be run scoped.`,
-        );
+        throw new TypeError(`Frontier control-edge event ${String(eventId)} must be run scoped.`);
       }
       const payload = parseJsonObject(payloadJson, "Control-edge frontier event payload");
       applyControlEdge(
@@ -868,8 +868,7 @@ function frozenRouterSelections(
 ): readonly RecoveredRouterSelection[] {
   return Object.freeze(
     [...selections.values()].sort(
-      (left, right) =>
-        left.iteration - right.iteration || left.routerOpIndex - right.routerOpIndex,
+      (left, right) => left.iteration - right.iteration || left.routerOpIndex - right.routerOpIndex,
     ),
   );
 }
@@ -933,12 +932,7 @@ export function reconstructExecutionFrontier(
     controlEdges,
     routerSelections,
   );
-  const preCrashRunningAttempts = reconcileDurableAttempts(
-    connection,
-    runId,
-    executionIr,
-    ops,
-  );
+  const preCrashRunningAttempts = reconcileDurableAttempts(connection, runId, executionIr, ops);
 
   const recoveredOps = frozenOps(executionIr, ops);
   const readyQueue = buildReadyQueue(recoveredOps);
