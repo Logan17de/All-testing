@@ -211,4 +211,99 @@ describe("PlainDagRun", () => {
       "Plain DAG run cannot execute op 0 with executionMode 'none'.",
     );
   });
+
+  it("keeps downstream work blocked until the completion barrier succeeds", async () => {
+    const plan = ir([op("root", []), op("child", [0])], 2);
+    const scheduler = new SchedulerConcurrency(2);
+    const commitStarted = deferred();
+    const commitGate = deferred();
+    const events: string[] = [];
+
+    const run = new PlainDagRun(
+      plan,
+      scheduler.createRun(plan),
+      ({ op: opIndex }) => {
+        events.push(`execute:${String(opIndex)}`);
+      },
+      {
+        completionBarrier: async ({ op: opIndex }) => {
+          events.push(`commit:start:${String(opIndex)}`);
+          if (opIndex === 0) {
+            commitStarted.resolve();
+            await commitGate.promise;
+          }
+          events.push(`commit:end:${String(opIndex)}`);
+        },
+      },
+    );
+
+    const runPromise = run.execute();
+    await commitStarted.promise;
+
+    expect(events).toEqual(["execute:0", "commit:start:0"]);
+    expect(run.snapshot().readiness.ops).toEqual([
+      { op: 0, status: "running" },
+      { op: 1, status: "pending" },
+    ]);
+    expect(run.snapshot().readiness.remainingDependencies).toEqual([0, 1]);
+
+    commitGate.resolve();
+    await runPromise;
+
+    expect(events.indexOf("execute:1")).toBeGreaterThan(events.indexOf("commit:end:0"));
+    expect(run.snapshot().readiness.ops).toEqual([
+      { op: 0, status: "completed" },
+      { op: 1, status: "completed" },
+    ]);
+  });
+
+  it("treats completion barrier failure as terminal instead of retrying successful work", async () => {
+    const root = op("root", []);
+    const plan = ir(
+      [
+        {
+          ...root,
+          behavior: {
+            ...root.behavior,
+            retry: { maxAttempts: 3, backoffMs: 0 },
+          },
+        },
+        op("child", [0]),
+      ],
+      1,
+    );
+    const scheduler = new SchedulerConcurrency(1);
+    const commitError = new Error("durable completion commit failed");
+    let rootExecutions = 0;
+    let completionAttempts = 0;
+
+    const run = new PlainDagRun(
+      plan,
+      scheduler.createRun(plan),
+      ({ op: opIndex }) => {
+        if (opIndex === 0) {
+          rootExecutions += 1;
+        }
+      },
+      {
+        completionBarrier: ({ op: opIndex }) => {
+          if (opIndex === 0) {
+            completionAttempts += 1;
+            throw commitError;
+          }
+        },
+      },
+    );
+
+    await expect(run.execute()).rejects.toBe(commitError);
+
+    expect(rootExecutions).toBe(1);
+    expect(completionAttempts).toBe(1);
+    expect(run.snapshot().attempts).toEqual([1, 0]);
+    expect(run.snapshot().readiness.ops).toEqual([
+      { op: 0, status: "failed" },
+      { op: 1, status: "pending" },
+    ]);
+    expect(run.snapshot().readiness.remainingDependencies).toEqual([0, 1]);
+  });
 });

@@ -77,6 +77,22 @@ export interface PlainDagOpExecution {
 /** Runtime-owned adapter invoked for one already-admitted plain DAG op attempt. */
 export type PlainDagOpExecutor = (execution: PlainDagOpExecution) => void | Promise<void>;
 
+/**
+ * Scheduler identity exposed after executor success but before completion.
+ *
+ * A durable runtime can use this boundary to commit the successful attempt
+ * before the scheduler marks the op completed or releases its dependents.
+ */
+export interface PlainDagCompletionBarrierContext {
+  readonly op: number;
+  readonly operation: ExecutionIrOpV1;
+  readonly attempt: number;
+}
+
+export type PlainDagCompletionBarrier = (
+  context: PlainDagCompletionBarrierContext,
+) => void | Promise<void>;
+
 export interface PlainDagRetryBackoffContext {
   readonly op: number;
   readonly operation: ExecutionIrOpV1;
@@ -111,6 +127,12 @@ export interface PlainDagRetryHooks {
 
 export interface PlainDagRunOptions {
   readonly retry?: PlainDagRetryHooks;
+  /**
+   * Optional post-execution gate that must resolve before completion becomes
+   * scheduler-visible. Durable runtimes use this for the atomic completion
+   * commit; rejection is terminal and never re-executes the successful node.
+   */
+  readonly completionBarrier?: PlainDagCompletionBarrier;
 }
 
 export interface PlainDagRunSnapshot {
@@ -530,6 +552,31 @@ export class PlainDagRun {
 
       if (this.signal.aborted) {
         return;
+      }
+
+      if (this.options.completionBarrier !== undefined) {
+        try {
+          await this.options.completionBarrier(
+            Object.freeze({
+              op,
+              operation,
+              attempt,
+            }),
+          );
+        } catch (error) {
+          if (this.signal.aborted) {
+            return;
+          }
+          if (this.readiness.getOpState(op).status === "running") {
+            this.readiness.failRunningOp(op);
+          }
+          this.recordFailure(error);
+          return;
+        }
+
+        if (this.signal.aborted) {
+          return;
+        }
       }
 
       this.readiness.completeRunningOp(op);
