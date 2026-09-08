@@ -51,7 +51,10 @@ function isErrorCode(error: unknown, code: string): boolean {
   );
 }
 
-function parseBlobId(blobId: string): { readonly blobId: ContentAddressedBlobId; readonly digest: string } {
+function parseBlobId(blobId: ContentAddressedBlobId): {
+  readonly blobId: ContentAddressedBlobId;
+  readonly digest: string;
+} {
   const match = CONTENT_ADDRESSED_BLOB_ID_PATTERN.exec(blobId);
   const digest = match?.[1];
   if (digest === undefined) {
@@ -60,7 +63,7 @@ function parseBlobId(blobId: string): { readonly blobId: ContentAddressedBlobId;
     );
   }
 
-  return Object.freeze({ blobId: blobId as ContentAddressedBlobId, digest });
+  return Object.freeze({ blobId, digest });
 }
 
 function assertSizeBytes(sizeBytes: number): void {
@@ -243,8 +246,7 @@ export class FileContentAddressedBlobStore {
     path: string,
     lookupInput: ContentAddressedBlobRef | NormalizedBlobLookup,
   ): Promise<ContentAddressedBlobRef> {
-    const lookup =
-      "digest" in lookupInput ? lookupInput : normalizeBlobLookup(lookupInput as ContentAddressedBlobRef);
+    const lookup = "digest" in lookupInput ? lookupInput : normalizeBlobLookup(lookupInput);
     const handle = await open(path, "r");
     const hash = createHash(CONTENT_ADDRESSED_BLOB_ALGORITHM);
     const buffer = Buffer.allocUnsafe(VERIFY_BUFFER_BYTES);

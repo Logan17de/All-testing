@@ -57,7 +57,7 @@ describe("FileContentAddressedBlobStore", () => {
 
   it("hashes streaming chunks incrementally and supports the empty blob", async () => {
     await withStore(async (store) => {
-      async function* content(): AsyncGenerator<Uint8Array> {
+      function* content(): Generator<Uint8Array> {
         yield Buffer.from("stream-");
         yield Buffer.from("value");
       }
@@ -134,24 +134,20 @@ describe("FileContentAddressedBlobStore", () => {
 
   it("rejects malformed IDs and invalid reference sizes before path resolution", async () => {
     await withStore(async (store) => {
+      await expect(store.readBytes("sha256:../../escape")).rejects.toThrow(TypeError);
       await expect(
-        store.readBytes("sha256:../../escape" as ContentAddressedBlobId),
-      ).rejects.toThrow(TypeError);
-      await expect(
-        store.verify(
-          {
-            blobId:
-              "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-            sizeBytes: -1,
-          },
-        ),
+        store.verify({
+          blobId:
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+          sizeBytes: -1,
+        }),
       ).rejects.toThrow(TypeError);
     });
   });
 
   it("removes private temp files when a streaming producer fails", async () => {
     await withStore(async (store, root) => {
-      async function* broken(): AsyncGenerator<Uint8Array> {
+      function* broken(): Generator<Uint8Array> {
         yield Buffer.from("partial");
         throw new TypeError("producer failed");
       }
