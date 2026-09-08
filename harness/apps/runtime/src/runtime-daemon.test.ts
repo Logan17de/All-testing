@@ -1,19 +1,28 @@
 import { once } from "node:events";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { SQLITE_MEMORY_PATH } from "@zet-harness/db";
+import {
+  SCHEMA_MIGRATIONS_TABLE,
+  SQLITE_MEMORY_PATH,
+  SqliteDatabase,
+  type SqliteMigration,
+} from "@zet-harness/db";
 import { describe, expect, it } from "vitest";
 
 import { RuntimeDaemon } from "./runtime-daemon.js";
 
-const createDaemon = (): RuntimeDaemon =>
+const createDaemon = (migrations?: readonly SqliteMigration[]): RuntimeDaemon =>
   new RuntimeDaemon({
     api: { port: 0 },
     database: { path: SQLITE_MEMORY_PATH },
+    migrations,
   });
 
 describe("RuntimeDaemon", () => {
-  it("becomes running only after SQLite and the loopback API are ready", async () => {
+  it("becomes running only after SQLite migrations and the loopback API are ready", async () => {
     const daemon = createDaemon();
 
     expect(daemon.snapshot()).toEqual({
@@ -42,6 +51,71 @@ describe("RuntimeDaemon", () => {
       id: 1,
       type: "runtime.test",
       data: '{"ok":true}',
+    });
+
+    await daemon.stop();
+  });
+
+  it("persists ordered migration history before announcing runtime readiness", async () => {
+    const root = mkdtempSync(join(tmpdir(), "zet-harness-runtime-migration-"));
+    const path = join(root, "runtime.sqlite");
+    const migrations: readonly SqliteMigration[] = [
+      {
+        version: 1,
+        name: "runtime_probe",
+        sql: "CREATE TABLE runtime_probe(value TEXT NOT NULL)",
+      },
+    ];
+    const daemon = new RuntimeDaemon({
+      api: { port: 0 },
+      database: { path },
+      migrations,
+    });
+
+    try {
+      expect(await daemon.start()).toBe(true);
+      expect(daemon.snapshot().state).toBe("running");
+      expect(existsSync(path)).toBe(true);
+      await daemon.stop();
+
+      const database = new SqliteDatabase({ path });
+      database.open();
+      try {
+        expect(
+          database
+            .connection()
+            .prepare(`SELECT version, name FROM ${SCHEMA_MIGRATIONS_TABLE} ORDER BY version`)
+            .all(),
+        ).toEqual([{ version: 1, name: "runtime_probe" }]);
+        expect(
+          database
+            .connection()
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runtime_probe'")
+            .get(),
+        ).toEqual({ name: "runtime_probe" });
+      } finally {
+        database.close();
+      }
+    } finally {
+      await daemon.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("closes SQLite and leaves HTTP unbound when migration startup fails", async () => {
+    const daemon = createDaemon([
+      {
+        version: 1,
+        name: "broken",
+        sql: "CREATE TABLE broken(value TEXT); INSERT INTO missing_table(value) VALUES ('x')",
+      },
+    ]);
+
+    await expect(daemon.start()).rejects.toThrow();
+    expect(daemon.snapshot()).toEqual({
+      state: "idle",
+      api: { state: "idle", host: "127.0.0.1", port: null, eventClients: 0 },
+      database: { state: "closed", path: SQLITE_MEMORY_PATH, inMemory: true },
     });
 
     await daemon.stop();
