@@ -141,7 +141,7 @@ function readAppliedMigrations(connection: DatabaseSync): readonly AppliedMigrat
     const version = row.version;
     const name = row.name;
 
-    if (!Number.isSafeInteger(version) || typeof name !== "string") {
+    if (typeof version !== "number" || !Number.isSafeInteger(version) || typeof name !== "string") {
       throw new TypeError(
         `SQLite migration history row ${String(index)} has an invalid version or name.`,
       );
