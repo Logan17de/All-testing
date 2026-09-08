@@ -29,7 +29,7 @@ jobs:
       - name: Pin npm
         run: npm install --global npm@12.0.2 --no-audit --no-fund
 
-      - name: Patch baseline project boundary
+      - name: Patch baseline tooling
         working-directory: harness
         shell: bash
         run: |
@@ -62,7 +62,11 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Verify
+      - name: Format benchmark
+        working-directory: harness
+        run: npx prettier --write package.json scripts/lightweight-baseline.bench.ts scripts/tsconfig.json
+
+      - name: Verify and benchmark
         working-directory: harness
         run: |
           npm run typecheck
@@ -78,5 +82,5 @@ jobs:
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
           git add package.json scripts/lightweight-baseline.bench.ts scripts/tsconfig.json
-          git commit -m "fix(perf): typecheck lightweight baseline"
+          git commit -m "fix(perf): verify lightweight baseline"
           git push origin HEAD:zet-harness-v1
