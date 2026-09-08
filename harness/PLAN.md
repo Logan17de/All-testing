@@ -108,7 +108,10 @@ Phase 4  Runtime daemon + SQLite           🚧 WE ARE HERE
            ├─ 4.16 restart frontier reconstruction                            ✅
            ├─ 4.17 pre-crash recovery-policy classification                   ✅
            ├─ 4.18 SQLite/file-level backup + restore                          ✅
-           └─ 4.19 runtime/database health checks                              ▶ CURRENT
+           ├─ 4.19 runtime/database health checks                              ✅
+           ├─ 4.20 kill/restart fault-injection tests                          ▶ CURRENT
+           ├─ 4.21 lightweight performance baseline                            ⏳
+           └─ 4.22 CI baseline check                                            ⏳
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
 Phase 7  Visual graph + inspector          ⏳  ← Harness v0.1 boundary
@@ -126,7 +129,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ✅ Complete |
-| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.19 current** |
+| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.20 current** |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ⏳ **v0.1 finish line** |
@@ -394,6 +397,8 @@ Phase 4.17 adds pure `classifyPreCrashRunningAttempts(...)` classification over 
 
 Phase 4.18 adds a dependency-free durable backup bundle combining SQLite's native online backup with the immutable filesystem blob store. A backup is staged as a directory containing `database.sqlite`, `blobs/`, and a versioned `zet-harness.backup/v1` manifest recording creation time, database SHA-256/size, the blob algorithm, and verified blob count. The runtime first drains already-queued serialized writes, then SQLite owns database snapshot consistency; current cross-store capture remains safe because blob bytes are published before durable SQLite references, are immutable after publication, and are not garbage-collected yet. Only the canonical `sha256/` tree is copied, so in-flight root temp files are excluded, and every copied blob is verified by content address before the bundle is renamed into place. Restore verifies the manifest, database digest, `PRAGMA quick_check`, and every blob; it refuses overwrite/merge destinations, stages both stores, and publishes blobs before the SQLite file so a failed restore cannot expose a database that references missing restored bytes. Restore is an explicit clean-destination/offline operation. No schema migration, archive framework, or cloud dependency is added.
 
+Phase 4.19 turns `GET /api/health` into a cheap daemon-owned readiness check rather than a static process response. `RuntimeDaemon` supplies a synchronous health provider while the `node:http` layer owns only transport and maps healthy reports to HTTP `200` and unhealthy reports to `503`. The probe requires the runtime lifecycle to be `running`, the owned SQLite connection to be open, a read-only `SELECT 1` to succeed, and the ordered `schema_migrations(version,name)` history to exactly match the code-owned runtime migration catalog. Provider exceptions become a stable sanitized unhealthy response instead of leaking internal database details. The request path intentionally performs no writes, `PRAGMA quick_check`/`integrity_check`, blob-tree scans, provider/network checks, or recovery work; deep SQLite/blob integrity remains the explicit backup/diagnostic boundary. No migration or dependency is added.
+
 Phase 3 deterministic scheduler fixtures live behind the explicit `@zet-harness/scheduler/testing` subpath rather than the production scheduler export. Scheduler-level mock nodes are deterministic Execution IR ops, preserving the compiler/plugin boundary instead of inventing fake `NodeDefinition` semantics. The testing surface supplies minimal IR/op builders, clock-free manual gates, and a `DeterministicPlainDagExecutor` scripted by stable `sourceNodeId` and one-based scheduler attempt. It records frozen ordered invocation/trace snapshots, exposes actual/max concurrent mock executions, can complete/fail/wait on a gate/wait cooperatively for abort, and can report adapter-internal retries through the real shared retry budget. Unscripted nodes complete immediately; explicitly scripted nodes fail loudly if execution reaches an unconfigured attempt. These fixtures are infrastructure for 3.16/3.17, not the scenario/stress coverage itself.
 
 Phase 3 offline scheduler scenarios compose those deterministic fixtures with the real scheduler primitives rather than introducing a separate acceptance runtime. Plain DAG coverage proves strict chain ordering, concurrent fan-out/fan-in, timeout isolation, bounded retry before downstream release, cooperative cancellation, and fail-fast propagation. Structured-control coverage composes `RunRouterActivation`, `RunControlEdges`, `RunJoinActivation`, and `RunReadiness` to prove selected-branch activation, inactive-path skipping, and an activation-aware `all-active` join. The suite uses no database, model provider, wall-clock sleeps, or random behavior; timeout timing is controlled with fake timers and concurrency is controlled by manual gates.
@@ -465,4 +470,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 4 / Item 4.19 — Expand `/api/health` with runtime/database checks.**
+> **Phase 4 / Item 4.20 — Add random/fault-injection kill/restart tests around node and commit transitions.**
