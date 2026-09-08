@@ -1,6 +1,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import {
+  RUNTIME_HEALTH_SERVICE,
+  type RuntimeHealthProvider,
+  type RuntimeHealthResponse,
+} from "./runtime-health.js";
+import {
   RuntimeEventCursorError,
   RuntimeEventStream,
   type RuntimeEventStreamUnsubscribe,
@@ -70,21 +75,33 @@ const parseReconnectCursor = (request: IncomingMessage, url: URL): number | null
 const formatSseEvent = (event: RuntimeStreamEvent): string =>
   `id: ${String(event.id)}\nevent: ${event.type}\ndata: ${event.data}\n\n`;
 
+const defaultRuntimeHealthProvider: RuntimeHealthProvider = () =>
+  Object.freeze({
+    status: "ok",
+    service: RUNTIME_HEALTH_SERVICE,
+  });
+
 /** Tiny dependency-free loopback HTTP surface with process-local SSE replay. */
 export class RuntimeHttpServer {
   private readonly host: string;
   private readonly requestedPort: number;
   private readonly eventStream: RuntimeEventStream;
+  private readonly healthProvider: RuntimeHealthProvider;
   private readonly eventClients = new Map<ServerResponse, () => void>();
   private state: RuntimeHttpServerState = "idle";
   private boundPort: number | null = null;
   private server: Server | undefined;
   private stopPromise: Promise<boolean> | undefined;
 
-  constructor(options: RuntimeHttpServerOptions = {}, eventStream = new RuntimeEventStream()) {
+  constructor(
+    options: RuntimeHttpServerOptions = {},
+    eventStream = new RuntimeEventStream(),
+    healthProvider: RuntimeHealthProvider = defaultRuntimeHealthProvider,
+  ) {
     this.host = options.host ?? DEFAULT_RUNTIME_HOST;
     this.requestedPort = options.port ?? DEFAULT_RUNTIME_PORT;
     this.eventStream = eventStream;
+    this.healthProvider = healthProvider;
 
     if (this.host.length === 0) {
       throw new TypeError("Runtime HTTP host must not be empty.");
@@ -183,10 +200,8 @@ export class RuntimeHttpServer {
         return;
       }
 
-      writeJson(response, 200, {
-        status: "ok",
-        service: "zet-harness-runtime",
-      });
+      const health = this.readHealth();
+      writeJson(response, health.status === "ok" ? 200 : 503, health);
       return;
     }
 
@@ -205,6 +220,20 @@ export class RuntimeHttpServer {
     }
 
     writeJson(response, 404, { error: "not_found" });
+  }
+
+  private readHealth(): RuntimeHealthResponse {
+    try {
+      return this.healthProvider();
+    } catch {
+      return Object.freeze({
+        status: "unhealthy",
+        service: RUNTIME_HEALTH_SERVICE,
+        checks: Object.freeze({
+          health: Object.freeze({ status: "unhealthy" }),
+        }),
+      });
+    }
   }
 
   private openEventStream(request: IncomingMessage, response: ServerResponse, url: URL): void {

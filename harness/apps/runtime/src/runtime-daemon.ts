@@ -14,6 +14,7 @@ import {
 } from "@zet-harness/db";
 
 import { RuntimeEventStream, type RuntimeStreamEvent } from "./runtime-event-stream.js";
+import { inspectRuntimeHealth } from "./runtime-health.js";
 import {
   RuntimeHttpServer,
   type RuntimeHttpServerOptions,
@@ -65,7 +66,13 @@ export class RuntimeDaemon {
   constructor(options: RuntimeDaemonOptions = {}) {
     this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
     this.migrations = options.migrations ?? RUNTIME_DATABASE_MIGRATIONS;
-    this.httpServer = new RuntimeHttpServer(options.api, this.eventStream);
+    this.httpServer = new RuntimeHttpServer(options.api, this.eventStream, () =>
+      inspectRuntimeHealth({
+        runtimeState: this.state,
+        database: this.database,
+        migrations: this.migrations,
+      }),
+    );
 
     let resolveStopped!: () => void;
     this.stoppedPromise = new Promise<void>((resolve) => {

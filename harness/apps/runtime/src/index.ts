@@ -1,4 +1,17 @@
 export {
+  RUNTIME_HEALTH_SERVICE,
+  inspectRuntimeHealth,
+  type InspectRuntimeHealthOptions,
+  type RuntimeHealthDatabaseQueryStatus,
+  type RuntimeHealthDatabaseState,
+  type RuntimeHealthProvider,
+  type RuntimeHealthReport,
+  type RuntimeHealthResponse,
+  type RuntimeHealthRuntimeState,
+  type RuntimeHealthStatus,
+  type RuntimeMigrationHealthCheck,
+} from "./runtime-health.js";
+export {
   RuntimeDaemon,
   type RuntimeDaemonSnapshot,
   type RuntimeDaemonState,

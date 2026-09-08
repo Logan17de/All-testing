@@ -61,6 +61,30 @@ describe("RuntimeDaemon", () => {
       inMemory: true,
     });
 
+    const healthResponse = await fetch(
+      `http://${snapshot.api.host}:${String(snapshot.api.port)}/api/health`,
+    );
+    expect(healthResponse.status).toBe(200);
+    await expect(healthResponse.json()).resolves.toEqual({
+      status: "ok",
+      service: "zet-harness-runtime",
+      checks: {
+        runtime: { status: "ok", state: "running" },
+        database: {
+          status: "ok",
+          state: "open",
+          query: "ok",
+          migrations: {
+            status: "ok",
+            appliedCount: 5,
+            expectedCount: 5,
+            appliedVersion: 5,
+            expectedVersion: 5,
+          },
+        },
+      },
+    });
+
     expect(daemon.publishEvent("runtime.test", { ok: true })).toEqual({
       id: 1,
       type: "runtime.test",

@@ -62,6 +62,48 @@ describe("RuntimeHttpServer", () => {
     expect(await server.stop()).toBe(false);
   });
 
+  it("returns 503 for unhealthy or failed health providers without leaking exceptions", async () => {
+    const unhealthy = new RuntimeHttpServer({ port: 0 }, new RuntimeEventStream(), () => ({
+      status: "unhealthy",
+      service: "zet-harness-runtime",
+      checks: { database: { status: "unhealthy" } },
+    }));
+    await unhealthy.start();
+
+    try {
+      const snapshot = unhealthy.snapshot();
+      const response = await fetch(`http://${snapshot.host}:${String(snapshot.port)}/api/health`);
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        status: "unhealthy",
+        service: "zet-harness-runtime",
+        checks: { database: { status: "unhealthy" } },
+      });
+    } finally {
+      await unhealthy.stop();
+    }
+
+    const failed = new RuntimeHttpServer({ port: 0 }, new RuntimeEventStream(), () => {
+      throw new Error("sensitive database detail");
+    });
+    await failed.start();
+
+    try {
+      const snapshot = failed.snapshot();
+      const response = await fetch(`http://${snapshot.host}:${String(snapshot.port)}/api/health`);
+      expect(response.status).toBe(503);
+      const body = await response.text();
+      expect(body).not.toContain("sensitive database detail");
+      expect(JSON.parse(body)).toEqual({
+        status: "unhealthy",
+        service: "zet-harness-runtime",
+        checks: { health: { status: "unhealthy" } },
+      });
+    } finally {
+      await failed.stop();
+    }
+  });
+
   it("streams live SSE events and starts cursorless clients from now", async () => {
     const events = new RuntimeEventStream();
     const server = new RuntimeHttpServer({ port: 0 }, events);
