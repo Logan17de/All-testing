@@ -211,15 +211,9 @@ describe("durable event records", () => {
       const firstRunId = createRun(connection, "events-a");
       const secondRunId = createRun(connection, "events-b");
 
-      expect(
-        appendEvent(connection, { runId: firstRunId, occurredAtMs: 100 }),
-      ).toBe(1);
-      expect(
-        appendEvent(connection, { runId: secondRunId, occurredAtMs: 1 }),
-      ).toBe(2);
-      expect(
-        appendEvent(connection, { runId: firstRunId, occurredAtMs: 50 }),
-      ).toBe(3);
+      expect(appendEvent(connection, { runId: firstRunId, occurredAtMs: 100 })).toBe(1);
+      expect(appendEvent(connection, { runId: secondRunId, occurredAtMs: 1 })).toBe(2);
+      expect(appendEvent(connection, { runId: firstRunId, occurredAtMs: 50 })).toBe(3);
 
       expect(
         connection
@@ -349,9 +343,7 @@ describe("durable event records", () => {
       const runId = createRun(connection, "envelope");
 
       expect(() => appendEvent(connection, { runId, eventType: "" })).toThrow();
-      expect(() =>
-        appendEvent(connection, { runId, eventSchemaVersion: 0 }),
-      ).toThrow();
+      expect(() => appendEvent(connection, { runId, eventSchemaVersion: 0 })).toThrow();
       expect(() => appendEvent(connection, { runId, occurredAtMs: -1 })).toThrow();
       expect(() => appendEvent(connection, { runId, payloadJson: "" })).toThrow();
       expect(() => appendEvent(connection, { runId: "missing-run" })).toThrow();
@@ -374,9 +366,7 @@ describe("durable event records", () => {
           .run(eventId),
       ).toThrow("durable_events is append-only");
       expect(() =>
-        connection
-          .prepare(`DELETE FROM ${DURABLE_EVENTS_TABLE} WHERE event_id = ?`)
-          .run(eventId),
+        connection.prepare(`DELETE FROM ${DURABLE_EVENTS_TABLE} WHERE event_id = ?`).run(eventId),
       ).toThrow("durable_events is append-only");
 
       expect(
