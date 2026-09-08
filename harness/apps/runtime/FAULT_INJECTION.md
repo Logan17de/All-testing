@@ -12,3 +12,5 @@ The suite uses deterministic seeded crash cuts rather than wall-clock races so e
 The randomized portion is intentionally seeded and deterministic. Seeds select among those crash boundaries, then the database is closed and reopened before assertions. The tests do not use timing sleeps, process signals, or probabilistic expectations.
 
 This item does not add new recovery semantics, background checkpointing, effect reconciliation, or a filesystem/SQLite distributed transaction. It verifies the Phase 4 contracts already established by serialized commits, atomic completion, downstream durability gating, frontier reconstruction, and pre-crash recovery classification.
+
+Roadmap status: **4.20 complete; 4.21 lightweight baseline is current.**
