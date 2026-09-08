@@ -1,4 +1,4 @@
-name: Zet Harness 4.20 Fault Injection
+name: Zet Harness 4.20 Format
 
 on:
   push:
@@ -6,29 +6,20 @@ on:
       - zet-harness-format-probe-413
     paths:
       - ".github/workflows/harness-ci.yml"
-      - ".github/scripts/apply-harness-420.sh"
 
 permissions:
   contents: write
 
 jobs:
-  implement:
+  format:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     steps:
-      - name: Checkout helper branch
+      - name: Checkout real Harness branch
         uses: actions/checkout@v4
         with:
-          ref: zet-harness-format-probe-413
+          ref: zet-harness-v1
           fetch-depth: 0
-
-      - name: Preserve patch script
-        run: cp .github/scripts/apply-harness-420.sh /tmp/apply-harness-420.sh
-
-      - name: Checkout real Harness branch
-        run: |
-          git fetch origin zet-harness-v1
-          git checkout -B zet-harness-v1 origin/zet-harness-v1
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -42,5 +33,14 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Apply and verify 4.20
-        run: bash /tmp/apply-harness-420.sh
+      - name: Format and push
+        working-directory: harness
+        run: |
+          npx prettier --write apps/runtime/src/runtime-fault-recovery.test.ts
+          npm run format:check
+          git diff --check
+          git config user.name "Logesh"
+          git config user.email "loganlogesh17@gmail.com"
+          git add apps/runtime/src/runtime-fault-recovery.test.ts
+          git commit -m "style(runtime): format crash recovery tests"
+          git push origin HEAD:zet-harness-v1
