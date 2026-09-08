@@ -57,7 +57,11 @@ jobs:
         run: npm run lint
 
       - name: Format check
-        run: npm run format:check
+        shell: bash
+        run: |
+          npx prettier --write packages/db/src/durable-identity-records.test.ts
+          git diff -- packages/db/src/durable-identity-records.test.ts
+          exit 1
 
       - name: Tests
         run: npm test
