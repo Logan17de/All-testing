@@ -75,7 +75,7 @@ function assertSizeBytes(sizeBytes: number): void {
 function createBlobRef(digest: string, sizeBytes: number): ContentAddressedBlobRef {
   assertSizeBytes(sizeBytes);
   return Object.freeze({
-    blobId: `${CONTENT_ADDRESSED_BLOB_ID_PREFIX}${digest}` as ContentAddressedBlobId,
+    blobId: `${CONTENT_ADDRESSED_BLOB_ID_PREFIX}${digest}`,
     sizeBytes,
   });
 }
