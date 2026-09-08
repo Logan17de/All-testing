@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  DURABLE_EVENTS_TABLE,
+  NODE_ATTEMPTS_TABLE,
+  NODE_INVOCATIONS_TABLE,
   SCHEMA_MIGRATIONS_TABLE,
   SQLITE_MEMORY_PATH,
   SqliteDatabase,
@@ -12,7 +15,7 @@ import {
 } from "@zet-harness/db";
 import { describe, expect, it } from "vitest";
 
-import { RuntimeDaemon } from "./runtime-daemon.js";
+import { RUNTIME_DATABASE_MIGRATIONS, RuntimeDaemon } from "./runtime-daemon.js";
 
 const createDaemon = (migrations?: readonly SqliteMigration[]): RuntimeDaemon =>
   new RuntimeDaemon({
@@ -22,6 +25,15 @@ const createDaemon = (migrations?: readonly SqliteMigration[]): RuntimeDaemon =>
   });
 
 describe("RuntimeDaemon", () => {
+  it("keeps the default runtime migration catalog complete and ordered", () => {
+    expect(RUNTIME_DATABASE_MIGRATIONS.map(({ version, name }) => ({ version, name }))).toEqual([
+      { version: 1, name: "durable_graph_and_compiled_plan_identity" },
+      { version: 2, name: "durable_runs_and_fork_lineage" },
+      { version: 3, name: "durable_node_attempts_and_effect_identity" },
+      { version: 4, name: "append_only_versioned_durable_events" },
+    ]);
+  });
+
   it("becomes running only after SQLite migrations and the loopback API are ready", async () => {
     const daemon = createDaemon();
 
@@ -54,6 +66,45 @@ describe("RuntimeDaemon", () => {
     });
 
     await daemon.stop();
+  });
+
+  it("installs the full default durable schema before runtime readiness", async () => {
+    const root = mkdtempSync(join(tmpdir(), "zet-harness-runtime-default-schema-"));
+    const path = join(root, "runtime.sqlite");
+    const daemon = new RuntimeDaemon({ api: { port: 0 }, database: { path } });
+
+    try {
+      expect(await daemon.start()).toBe(true);
+      await daemon.stop();
+
+      const database = new SqliteDatabase({ path });
+      database.open();
+      try {
+        expect(
+          database
+            .connection()
+            .prepare(`SELECT version, name FROM ${SCHEMA_MIGRATIONS_TABLE} ORDER BY version`)
+            .all(),
+        ).toEqual(RUNTIME_DATABASE_MIGRATIONS.map(({ version, name }) => ({ version, name })));
+        expect(
+          database
+            .connection()
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?) ORDER BY name",
+            )
+            .all(DURABLE_EVENTS_TABLE, NODE_ATTEMPTS_TABLE, NODE_INVOCATIONS_TABLE),
+        ).toEqual([
+          { name: DURABLE_EVENTS_TABLE },
+          { name: NODE_ATTEMPTS_TABLE },
+          { name: NODE_INVOCATIONS_TABLE },
+        ]);
+      } finally {
+        database.close();
+      }
+    } finally {
+      await daemon.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("persists ordered migration history before announcing runtime readiness", async () => {

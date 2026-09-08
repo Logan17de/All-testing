@@ -3,6 +3,11 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export {
+  DURABLE_EVENTS_MIGRATION,
+  DURABLE_EVENTS_TABLE,
+  type DurableEventRecord,
+} from "./durable-event-records.js";
+export {
   COMPILED_PLANS_TABLE,
   DURABLE_GRAPH_IDENTITY_MIGRATION,
   GRAPH_COMPILATIONS_TABLE,
