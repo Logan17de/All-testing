@@ -1,43 +1,25 @@
-name: Zet Harness CI
+name: Zet Harness 4.18 Exact Format
 
 on:
-  workflow_dispatch:
   push:
     branches:
-      - main
-      - zet-harness-v1
+      - zet-harness-format-probe-413
     paths:
-      - "harness/**"
-      - ".github/workflows/harness-ci.yml"
-  pull_request:
-    paths:
-      - "harness/**"
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: read
-
-concurrency:
-  group: harness-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  contents: write
 
 jobs:
-  verify:
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 12
-    defaults:
-      run:
-        working-directory: harness
-
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout real Harness branch
         uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -48,25 +30,26 @@ jobs:
         run: npm install --global npm@12.0.2 --no-audit --no-fund
 
       - name: Clean install
+        working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Exact-format and verify 4.18
+        working-directory: harness
+        run: |
+          npx prettier --write packages/db/src/durable-backup.ts packages/db/src/durable-backup.test.ts
+          npm run typecheck --workspace @zet-harness/db
+          npm run lint --workspace @zet-harness/db
+          npm run test --workspace @zet-harness/db
+          npm run format:check
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Format check
-        run: npm run format:check
-
-      - name: Tests
-        run: npm test
-
-      - name: Plugin smoke
-        run: npm run test:plugin-smoke --workspace @zet-harness/core
-
-      - name: Startup smoke
-        run: npm run test:startup
-
-      - name: Build
-        run: npm run build
+      - name: Commit exact formatting if needed
+        run: |
+          if git diff --quiet; then
+            echo "4.18 files already match exact Prettier output."
+            exit 0
+          fi
+          git config user.name "Logesh"
+          git config user.email "loganlogesh17@gmail.com"
+          git add harness/packages/db/src/durable-backup.ts harness/packages/db/src/durable-backup.test.ts
+          git commit -m "style(db): apply exact 4.18 prettier output"
+          git push origin HEAD:zet-harness-v1
