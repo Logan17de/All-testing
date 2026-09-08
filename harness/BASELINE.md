@@ -19,4 +19,6 @@ Measured surfaces:
 
 Vitest benchmark output supplies timing statistics for compiler, scheduler, and SQLite measurements. Runtime startup/RSS samples are emitted as one machine-readable line beginning with `ZET_BASELINE_RUNTIME` and include sample count, median, p95, minimum, and maximum.
 
+The command is verified on hosted Ubuntu and Windows runners. Observed measurements are samples from the machine that executed the command, not portable performance guarantees or fixed acceptance thresholds.
+
 This item records **measurement methodology only**. It intentionally does not fail CI based on absolute timing or memory thresholds. Hosted runners, developer machines, antivirus, filesystem implementation, CPU frequency scaling, and concurrent system load can all move these values materially. Phase 4.22 owns recording/checking the baseline in CI with comparison rules that avoid brittle machine-specific limits.
