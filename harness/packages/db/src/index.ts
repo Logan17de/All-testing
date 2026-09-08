@@ -3,6 +3,16 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export {
+  CONTENT_ADDRESSED_BLOB_ALGORITHM,
+  CONTENT_ADDRESSED_BLOB_ID_PREFIX,
+  ContentAddressedBlobIntegrityError,
+  FileContentAddressedBlobStore,
+  type ContentAddressedBlobId,
+  type ContentAddressedBlobRef,
+  type FileContentAddressedBlobStoreOptions,
+  type FileContentAddressedBlobStoreSnapshot,
+} from "./content-addressed-blob-store.js";
+export {
   CHECKPOINT_CONTROL_EDGES_TABLE,
   CHECKPOINT_OP_FRONTIER_TABLE,
   CHECKPOINT_ROUTER_SELECTIONS_TABLE,
