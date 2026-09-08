@@ -207,9 +207,7 @@ export class FileContentAddressedBlobStore {
     return this.verifyBlobPath(this.pathForDigest(lookup.digest), lookup);
   }
 
-  async readBytes(
-    refOrId: ContentAddressedBlobRef | ContentAddressedBlobId,
-  ): Promise<Uint8Array> {
+  async readBytes(refOrId: ContentAddressedBlobRef | ContentAddressedBlobId): Promise<Uint8Array> {
     const lookup = normalizeBlobLookup(refOrId);
     const bytes = await readFile(this.pathForDigest(lookup.digest));
     const actualDigest = createHash(CONTENT_ADDRESSED_BLOB_ALGORITHM).update(bytes).digest("hex");
@@ -293,10 +291,7 @@ export class FileContentAddressedBlobStore {
       );
     }
 
-    if (
-      lookup.expectedSizeBytes !== undefined &&
-      actualSizeBytes !== lookup.expectedSizeBytes
-    ) {
+    if (lookup.expectedSizeBytes !== undefined && actualSizeBytes !== lookup.expectedSizeBytes) {
       throw new ContentAddressedBlobIntegrityError(
         lookup.blobId,
         `Content-addressed blob '${lookup.blobId}' size ${String(actualSizeBytes)} does not match expected ${String(lookup.expectedSizeBytes)}.`,

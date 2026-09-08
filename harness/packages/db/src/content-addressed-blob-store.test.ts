@@ -12,8 +12,7 @@ import {
   type ContentAddressedBlobId,
 } from "./content-addressed-blob-store.js";
 
-const createRoot = async (): Promise<string> =>
-  mkdtemp(join(tmpdir(), "zet-harness-blob-store-"));
+const createRoot = async (): Promise<string> => mkdtemp(join(tmpdir(), "zet-harness-blob-store-"));
 
 const digestOf = (bytes: Uint8Array): string =>
   createHash(CONTENT_ADDRESSED_BLOB_ALGORITHM).update(bytes).digest("hex");
@@ -81,9 +80,7 @@ describe("FileContentAddressedBlobStore", () => {
   it("deduplicates concurrent identical writers without exposing a partial final blob", async () => {
     await withStore(async (store, root) => {
       const bytes = Buffer.from("same immutable payload");
-      const refs = await Promise.all(
-        Array.from({ length: 12 }, async () => store.putBytes(bytes)),
-      );
+      const refs = await Promise.all(Array.from({ length: 12 }, async () => store.putBytes(bytes)));
 
       expect(new Set(refs.map((ref) => ref.blobId)).size).toBe(1);
       expect(new Set(refs.map((ref) => ref.sizeBytes))).toEqual(new Set([bytes.byteLength]));
@@ -137,8 +134,7 @@ describe("FileContentAddressedBlobStore", () => {
       await expect(store.readBytes("sha256:../../escape")).rejects.toThrow(TypeError);
       await expect(
         store.verify({
-          blobId:
-            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+          blobId: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
           sizeBytes: -1,
         }),
       ).rejects.toThrow(TypeError);
