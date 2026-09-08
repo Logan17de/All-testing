@@ -7,7 +7,11 @@ import type {
 } from "./runtime-recovery.js";
 import { classifyPreCrashRunningAttempts } from "./runtime-recovery-policy.js";
 
-function op(sourceNodeId: string, recovery: string, executionMode = "in-process"): RecoveryExecutionIrOp {
+function op(
+  sourceNodeId: string,
+  recovery: string,
+  executionMode = "in-process",
+): RecoveryExecutionIrOp {
   return {
     sourceNodeId,
     dependencies: [],

@@ -1,15 +1,9 @@
-import type {
-  PreCrashRunningAttempt,
-  RecoveredExecutionFrontier,
-} from "./runtime-recovery.js";
+import type { PreCrashRunningAttempt, RecoveredExecutionFrontier } from "./runtime-recovery.js";
 
 export type PreCrashRecoveryPolicy = "rerun" | "reuse" | "reconcile" | "manual";
 
 export type PreCrashRecoveryAction =
-  | "rerun"
-  | "hold-for-reuse"
-  | "hold-for-reconciliation"
-  | "hold-for-manual-review";
+  "rerun" | "hold-for-reuse" | "hold-for-reconciliation" | "hold-for-manual-review";
 
 export interface PreCrashRecoveryClassification extends PreCrashRunningAttempt {
   readonly sourceNodeId: string;
