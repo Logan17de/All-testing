@@ -110,8 +110,8 @@ Phase 4  Runtime daemon + SQLite           🚧 WE ARE HERE
            ├─ 4.18 SQLite/file-level backup + restore                          ✅
            ├─ 4.19 runtime/database health checks                              ✅
            ├─ 4.20 kill/restart fault-injection tests                          ✅
-           ├─ 4.21 lightweight performance baseline                            ▶ CURRENT
-           └─ 4.22 CI baseline check                                            ⏳
+           ├─ 4.21 lightweight performance baseline                            ✅
+           └─ 4.22 CI baseline check                                            ▶ CURRENT
 Phase 5  Effects + permissions + humans    ⏳
 Phase 6  Model + tool adapters             ⏳
 Phase 7  Visual graph + inspector          ⏳  ← Harness v0.1 boundary
@@ -129,7 +129,7 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **1 — Plugin API + universal node contract** | freeze the tiny public extension boundary, plugin lifecycle, registry, node manifests, built-in/external plugin parity | ✅ Complete |
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ✅ Complete |
-| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.21 current** |
+| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.22 current** |
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ⏳ **v0.1 finish line** |
@@ -401,6 +401,8 @@ Phase 4.19 turns `GET /api/health` into a cheap daemon-owned readiness check rat
 
 Phase 4.20 adds deterministic file-backed crash/fault-injection coverage over the durability boundaries already defined by 4.13–4.17. The suite closes and reopens the real SQLite database at seeded crash cuts before node completion commit, during an injected terminal-event failure inside the atomic completion transaction, after completion commit but before explicit frontier publication, and after recognized frontier events are durable. It proves that failed completion transactions remain fully rolled back after restart, pre-commit running attempts are surfaced once for recovery-policy classification, committed output references survive restart without being mistaken for scheduler frontier state, and downstream work remains blocked until explicit durable frontier state makes it ready. Thirty-six deterministic seeds vary those cut points without wall-clock sleeps or probabilistic expectations, so failures remain reproducible across Linux and Windows. This test item adds no new recovery semantics and does not reinterpret opaque terminal events as scheduler events.
 
+Phase 4.21 adds a reproducible lightweight baseline command (`npm run baseline`) without adding production dependencies or hard performance thresholds. Fresh runtime child processes measure startup through module load, SQLite open/migrations, and HTTP readiness, then report idle RSS; the same command records the direct runtime dependency count from `apps/runtime/package.json`. A deterministic 64-op chain measures the real Graph JSON validation/normalization/canonicalization/lowering/compiler-identity path and the real `PlainDagRun` scheduler path, while SQLite timing exercises the serialized `SqliteDatabase.commit()` `BEGIN IMMEDIATE` path with a prepared insert. Timing benchmarks use short warmup/sample windows and runtime startup/RSS report sample count, median, p95, minimum, and maximum. The command has been exercised successfully on hosted Ubuntu and Windows runners, whose materially different startup timings demonstrate why 4.22 must compare recorded baselines without brittle universal machine thresholds.
+
 Phase 3 deterministic scheduler fixtures live behind the explicit `@zet-harness/scheduler/testing` subpath rather than the production scheduler export. Scheduler-level mock nodes are deterministic Execution IR ops, preserving the compiler/plugin boundary instead of inventing fake `NodeDefinition` semantics. The testing surface supplies minimal IR/op builders, clock-free manual gates, and a `DeterministicPlainDagExecutor` scripted by stable `sourceNodeId` and one-based scheduler attempt. It records frozen ordered invocation/trace snapshots, exposes actual/max concurrent mock executions, can complete/fail/wait on a gate/wait cooperatively for abort, and can report adapter-internal retries through the real shared retry budget. Unscripted nodes complete immediately; explicitly scripted nodes fail loudly if execution reaches an unconfigured attempt. These fixtures are infrastructure for 3.16/3.17, not the scenario/stress coverage itself.
 
 Phase 3 offline scheduler scenarios compose those deterministic fixtures with the real scheduler primitives rather than introducing a separate acceptance runtime. Plain DAG coverage proves strict chain ordering, concurrent fan-out/fan-in, timeout isolation, bounded retry before downstream release, cooperative cancellation, and fail-fast propagation. Structured-control coverage composes `RunRouterActivation`, `RunControlEdges`, `RunJoinActivation`, and `RunReadiness` to prove selected-branch activation, inactive-path skipping, and an activation-aware `all-active` join. The suite uses no database, model provider, wall-clock sleeps, or random behavior; timeout timing is controlled with fake timers and concurrency is controlled by manual gates.
@@ -472,4 +474,4 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 4 / Item 4.21 — Add the lightweight baseline: startup latency, idle RSS, direct runtime dependency count, compiler overhead, scheduler overhead, and SQLite commit latency.**
+> **Phase 4 / Item 4.22 — Record/check the baseline in CI without making noisy machine-specific thresholds brittle.**
