@@ -137,7 +137,7 @@ Goal: make the scheduler durable without changing Graph/IR semantics.
 - [x] 4.14 Commit node completion + output reference + terminal event atomically.
 - [x] 4.15 Make downstream work runnable only after the durable completion commit succeeds.
 - [x] 4.16 Reconstruct the execution frontier after process restart.
-- [ ] 4.17 Classify pre-crash running nodes by recovery policy instead of blindly replaying them.
+- [x] 4.17 Classify pre-crash running nodes by recovery policy instead of blindly replaying them.
 - [ ] 4.18 Add backup/restore using SQLite/file-level facilities.
 - [ ] 4.19 Expand `/api/health` with runtime/database checks.
 - [ ] 4.20 Add random/fault-injection kill/restart tests around node and commit transitions.
