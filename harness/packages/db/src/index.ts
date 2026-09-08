@@ -12,6 +12,14 @@ export {
   type DurableGraphSourceRecord,
 } from "./durable-identity-records.js";
 export {
+  DURABLE_NODE_ATTEMPTS_MIGRATION,
+  NODE_ATTEMPTS_TABLE,
+  NODE_INVOCATIONS_TABLE,
+  type DurableNodeAttemptRecord,
+  type DurableNodeAttemptStatus,
+  type DurableNodeInvocationRecord,
+} from "./durable-node-attempt-records.js";
+export {
   DURABLE_RUNS_MIGRATION,
   RUNS_TABLE,
   type DurableRunRecord,
