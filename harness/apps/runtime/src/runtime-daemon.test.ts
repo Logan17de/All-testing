@@ -8,6 +8,7 @@ import {
   DURABLE_EVENTS_TABLE,
   NODE_ATTEMPTS_TABLE,
   NODE_INVOCATIONS_TABLE,
+  RUN_CHECKPOINTS_TABLE,
   SCHEMA_MIGRATIONS_TABLE,
   SQLITE_MEMORY_PATH,
   SqliteDatabase,
@@ -31,6 +32,7 @@ describe("RuntimeDaemon", () => {
       { version: 2, name: "durable_runs_and_fork_lineage" },
       { version: 3, name: "durable_node_attempts_and_effect_identity" },
       { version: 4, name: "append_only_versioned_durable_events" },
+      { version: 5, name: "sparse_checkpoint_frontier_state" },
     ]);
   });
 
@@ -90,13 +92,19 @@ describe("RuntimeDaemon", () => {
           database
             .connection()
             .prepare(
-              "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?) ORDER BY name",
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?) ORDER BY name",
             )
-            .all(DURABLE_EVENTS_TABLE, NODE_ATTEMPTS_TABLE, NODE_INVOCATIONS_TABLE),
+            .all(
+              DURABLE_EVENTS_TABLE,
+              NODE_ATTEMPTS_TABLE,
+              NODE_INVOCATIONS_TABLE,
+              RUN_CHECKPOINTS_TABLE,
+            ),
         ).toEqual([
           { name: DURABLE_EVENTS_TABLE },
           { name: NODE_ATTEMPTS_TABLE },
           { name: NODE_INVOCATIONS_TABLE },
+          { name: RUN_CHECKPOINTS_TABLE },
         ]);
       } finally {
         database.close();

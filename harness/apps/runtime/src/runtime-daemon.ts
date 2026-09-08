@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 
 import {
+  DURABLE_CHECKPOINTS_MIGRATION,
   DURABLE_EVENTS_MIGRATION,
   DURABLE_GRAPH_IDENTITY_MIGRATION,
   DURABLE_NODE_ATTEMPTS_MIGRATION,
@@ -25,6 +26,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_RUNS_MIGRATION,
   DURABLE_NODE_ATTEMPTS_MIGRATION,
   DURABLE_EVENTS_MIGRATION,
+  DURABLE_CHECKPOINTS_MIGRATION,
 ]);
 
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
@@ -47,8 +49,8 @@ export interface RuntimeDaemonSnapshot {
  * The daemon owns the process-local event stream, loopback HTTP transport, and
  * native SQLite connection. Ordered SQL migrations run before API readiness.
  * The default catalog installs durable graph/plan identity, runs, node attempts,
- * and the append-only event journal. Checkpoints and durable scheduler wiring
- * remain later Phase 4 work.
+ * the append-only event journal, and sparse checkpoint/frontier storage. Durable
+ * scheduler wiring and restart reconstruction remain later Phase 4 work.
  */
 export class RuntimeDaemon {
   private state: RuntimeDaemonState = "idle";

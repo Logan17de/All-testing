@@ -3,6 +3,19 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export {
+  CHECKPOINT_CONTROL_EDGES_TABLE,
+  CHECKPOINT_OP_FRONTIER_TABLE,
+  CHECKPOINT_ROUTER_SELECTIONS_TABLE,
+  DURABLE_CHECKPOINTS_MIGRATION,
+  RUN_CHECKPOINTS_TABLE,
+  type DurableCheckpointControlEdgeRecord,
+  type DurableCheckpointControlEdgeStatus,
+  type DurableCheckpointOpFrontierRecord,
+  type DurableCheckpointOpStatus,
+  type DurableCheckpointRouterSelectionRecord,
+  type DurableRunCheckpointRecord,
+} from "./durable-checkpoint-records.js";
+export {
   DURABLE_EVENTS_MIGRATION,
   DURABLE_EVENTS_TABLE,
   type DurableEventRecord,
