@@ -15,7 +15,7 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: harness-ci-${{ github.workflow }}-${{ github.ref }}
@@ -38,69 +38,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Close 4.5 roadmap
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace_once(text: str, old: str, new: str, label: str) -> str:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"Expected exactly one {label} match, found {count}")
-              return text.replace(old, new, 1)
-
-          todo_path = Path("TODO.md")
-          todo = todo_path.read_text(encoding="utf-8")
-          todo = replace_once(
-              todo,
-              "- [ ] 4.5 Add a tiny ordered SQL migration runner + `schema_migrations`.",
-              "- [x] 4.5 Add a tiny ordered SQL migration runner + `schema_migrations`.",
-              "TODO 4.5 checkbox",
-          )
-          todo = replace_once(
-              todo,
-              "**4.5 — Add a tiny ordered SQL migration runner + `schema_migrations`.**",
-              "**4.6 — Enable foreign keys and WAL mode.**",
-              "TODO next action",
-          )
-          todo_path.write_text(todo, encoding="utf-8")
-
-          plan_path = Path("PLAN.md")
-          plan = plan_path.read_text(encoding="utf-8")
-          plan = replace_once(
-              plan,
-              "           └─ 4.5 ordered SQL migration runner                        ▶ CURRENT",
-              "           ├─ 4.5 ordered SQL migration runner                        ✅\n           └─ 4.6 foreign keys + WAL                                  ▶ CURRENT",
-              "PLAN phase tree",
-          )
-          plan = replace_once(
-              plan,
-              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.5 current** |",
-              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.6 current** |",
-              "PLAN phase map",
-          )
-          old_db_note = "Foreign-key enforcement is deliberately disabled in 4.4 despite Node's default so 4.6 remains the single owner of foreign-key/WAL policy. No migration tables, application schema, WAL mode, or durable event tables are introduced yet."
-          new_db_note = "Foreign-key enforcement remains deliberately disabled so 4.6 stays the single owner of foreign-key/WAL policy. Phase 4.5 adds a code-owned ordered SQL migration runner over the live `DatabaseSync` connection. It creates only `schema_migrations(version, name, applied_at_ms)`, requires a strictly increasing positive safe-integer catalog, treats existing migration history as an exact prefix of the runtime catalog, and applies each pending migration plus its history row in one `BEGIN IMMEDIATE` transaction with rollback on failure. Runtime startup runs migrations before binding/announcing API readiness and closes SQLite again on migration failure. The default runtime migration catalog is intentionally empty until application durability tables land. Filesystem migration discovery, schema checksums, foreign-key enablement, WAL mode, and application tables remain out of 4.5; 4.6 specifically owns foreign-key/WAL policy."
-          plan = replace_once(plan, old_db_note, new_db_note, "PLAN migration note")
-          plan = replace_once(
-              plan,
-              "> **Phase 4 / Item 4.5 — Add a tiny ordered SQL migration runner + `schema_migrations`.**",
-              "> **Phase 4 / Item 4.6 — Enable foreign keys and WAL mode.**",
-              "PLAN next action",
-          )
-          plan_path.write_text(plan, encoding="utf-8")
-          PY
-
-          if ! git diff --quiet -- TODO.md PLAN.md; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add TODO.md PLAN.md
-            git commit -m "docs: complete sqlite migration runner"
-            git push origin HEAD:zet-harness-v1
-          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
