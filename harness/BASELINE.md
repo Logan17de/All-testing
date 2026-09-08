@@ -15,7 +15,7 @@ Measured surfaces:
 - **direct runtime dependency count** — reads `apps/runtime/package.json` and reports total direct dependencies, split into Harness workspace dependencies and external packages;
 - **compiler overhead** — real Graph JSON v1 validation, normalization, UI stripping, canonicalization, Execution IR lowering, and compiler identity hashing for one deterministic 64-op chain;
 - **scheduler overhead** — executes the same 64-op no-op chain through `PlainDagRun` with the normal concurrency coordinator;
-- **SQLite commit latency** — uses `SqliteDatabase.commit()` with its serialized `BEGIN IMMEDIATE` transaction path and one prepared insert.
+- **SQLite commit latency** — uses a temporary file-backed WAL database and `SqliteDatabase.commit()` with its serialized `BEGIN IMMEDIATE` transaction path and one prepared insert.
 
 Vitest benchmark output supplies timing statistics for compiler, scheduler, and SQLite measurements. Runtime startup/RSS samples are emitted as one machine-readable line beginning with `ZET_BASELINE_RUNTIME` and include sample count, median, p95, minimum, and maximum.
 

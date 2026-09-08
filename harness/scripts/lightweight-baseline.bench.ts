@@ -194,7 +194,9 @@ async function collectRuntimeSamples(): Promise<void> {
 }
 
 let compiledIr: ExecutionIrV1;
-const database = new SqliteDatabase({ path: ":memory:" });
+const databaseDirectory = mkdtempSync(join(tmpdir(), "zet-harness-baseline-sqlite-"));
+temporaryDirectories.push(databaseDirectory);
+const database = new SqliteDatabase({ path: join(databaseDirectory, "baseline.sqlite") });
 let insertSequence = 0;
 let insertStatement: ReturnType<ReturnType<SqliteDatabase["connection"]>["prepare"]>;
 
