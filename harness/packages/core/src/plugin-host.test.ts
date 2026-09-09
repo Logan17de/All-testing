@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PLUGIN_API_VERSION,
+  type CapabilityRequirement,
   type HarnessPlugin,
   type NodeDefinition,
   type PluginContext,
@@ -9,7 +10,7 @@ import {
 
 import { PluginHost } from "./plugin-host.js";
 
-function makeNode(type: string): NodeDefinition {
+function makeNode(type: string, requiredCapabilities: readonly string[] = []): NodeDefinition {
   return {
     manifest: {
       type,
@@ -29,7 +30,7 @@ function makeNode(type: string): NodeDefinition {
         idempotency: "not-applicable",
         recovery: "rerun",
         executionMode: "in-process",
-        requiredCapabilities: [],
+        requiredCapabilities,
       },
     },
     execute(request) {
@@ -38,13 +39,18 @@ function makeNode(type: string): NodeDefinition {
   };
 }
 
-function makePlugin(id: string, activate: HarnessPlugin["activate"]): HarnessPlugin {
+function makePlugin(
+  id: string,
+  activate: HarnessPlugin["activate"],
+  capabilities?: readonly CapabilityRequirement[],
+): HarnessPlugin {
   return {
     manifest: {
       id,
       name: id,
       version: "1",
       apiVersion: PLUGIN_API_VERSION,
+      ...(capabilities === undefined ? {} : { capabilities }),
     },
     activate,
   };
@@ -194,5 +200,53 @@ describe("PluginHost lifecycle", () => {
     );
 
     await host.dispose();
+  });
+
+  it("does not let a plugin expand its inspected capability ceiling during activation", async () => {
+    const host = new PluginHost();
+    const capabilities: CapabilityRequirement[] = [{ id: "fs:read" }];
+    const plugin = makePlugin(
+      "test.self-grant",
+      (context) => {
+        capabilities.push({ id: "fs:write" });
+        context.nodes.register(makeNode("test.self-grant.write", ["fs:write"]));
+      },
+      capabilities,
+    );
+
+    await expect(host.activate(plugin)).rejects.toThrow(
+      /requires capability 'fs:write'.*did not declare.*PluginManifest\.capabilities/,
+    );
+
+    expect(host.size).toBe(0);
+    expect(host.nodes.has("test.self-grant.write", "1")).toBe(false);
+  });
+
+  it("keeps inspected plugin and node capability metadata immutable after activation", async () => {
+    const host = new PluginHost();
+    const capabilities: CapabilityRequirement[] = [{ id: "fs:read" }];
+    const requiredCapabilities = ["fs:read"];
+    const node = makeNode("test.snapshot-capabilities.read", requiredCapabilities);
+    const plugin = makePlugin(
+      "test.snapshot-capabilities",
+      (context) => {
+        context.nodes.register(node);
+      },
+      capabilities,
+    );
+
+    await host.activate(plugin);
+
+    capabilities[0] = { id: "fs:write" };
+    requiredCapabilities[0] = "fs:write";
+
+    const storedPlugin = host.listManifests()[0];
+    const storedNode = host.nodes.requireManifest("test.snapshot-capabilities.read", "1");
+
+    expect(storedPlugin?.capabilities).toEqual([{ id: "fs:read" }]);
+    expect(storedNode.behavior.requiredCapabilities).toEqual(["fs:read"]);
+    expect(Object.isFrozen(storedPlugin)).toBe(true);
+    expect(Object.isFrozen(storedPlugin?.capabilities)).toBe(true);
+    expect(Object.isFrozen(storedNode.behavior.requiredCapabilities)).toBe(true);
   });
 });
