@@ -1,4 +1,4 @@
-name: Zet Harness 4.22 Benchmark JSON Probe
+name: Zet Harness 4.22 Benchmark Median Matrix
 
 on:
   push:
@@ -12,7 +12,13 @@ permissions:
 
 jobs:
   probe:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     steps:
       - name: Checkout real Harness branch
@@ -32,9 +38,9 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Generate benchmark JSON
+      - name: Capture benchmark medians
         working-directory: harness
         run: |
           npm run build --workspace @zet-harness/runtime
           npx vitest bench scripts/lightweight-baseline.bench.ts --outputJson=baseline-report.json
-          node -e "const r=require('./baseline-report.json'); console.log(JSON.stringify(r,null,2))"
+          node -e "const r=require('./baseline-report.json'); const b=r.files[0].groups[0].benchmarks; console.log('ZET_BENCH_MEDIANS '+JSON.stringify(Object.fromEntries(b.map(x=>[x.name,{median:x.median,p75:x.p75,rme:x.rme,sampleCount:x.sampleCount}]))))"
