@@ -54,26 +54,28 @@ function uniqueCapabilityIds(values: readonly CapabilityId[]): readonly Capabili
  * The policy is default-deny. Explicit denial wins over a grant when the same
  * capability appears in both sets. Inputs are copied into immutable snapshots
  * so later caller mutation cannot alter an already-created authority decision.
+ * Mutable lookup sets live in JavaScript private slots: freezing an object or
+ * using TypeScript `private` alone would still expose Set.add/delete at runtime.
  *
- * This class only defines permission semantics. Phase 5.6 will apply it to
- * graph/node capability requirements at compile time, and Phase 5.7 will
- * re-check actual capability use at invocation time.
+ * This class only defines permission semantics. Graph compilation and runtime
+ * invocation consume it as host authority; plugin/model declarations are demand,
+ * never grants. Host policy objects must not be handed to plugin/model code.
  */
 export class CapabilityPermissionPolicy {
   readonly grantedCapabilities: readonly CapabilityId[];
   readonly deniedCapabilities: readonly CapabilityId[];
   readonly effectiveCapabilities: readonly CapabilityId[];
 
-  private readonly granted: ReadonlySet<CapabilityId>;
-  private readonly denied: ReadonlySet<CapabilityId>;
+  readonly #granted: ReadonlySet<CapabilityId>;
+  readonly #denied: ReadonlySet<CapabilityId>;
 
   constructor(config: CapabilityPermissionPolicyConfig = {}) {
     this.grantedCapabilities = uniqueCapabilityIds(config.granted ?? []);
     this.deniedCapabilities = uniqueCapabilityIds(config.denied ?? []);
-    this.granted = new Set(this.grantedCapabilities);
-    this.denied = new Set(this.deniedCapabilities);
+    this.#granted = new Set(this.grantedCapabilities);
+    this.#denied = new Set(this.deniedCapabilities);
     this.effectiveCapabilities = Object.freeze(
-      this.grantedCapabilities.filter((capability) => !this.denied.has(capability)),
+      this.grantedCapabilities.filter((capability) => !this.#denied.has(capability)),
     );
 
     Object.freeze(this);
@@ -82,7 +84,7 @@ export class CapabilityPermissionPolicy {
   evaluate(capability: CapabilityId): CapabilityPermissionEvaluation {
     assertCapabilityId(capability);
 
-    if (this.denied.has(capability)) {
+    if (this.#denied.has(capability)) {
       return Object.freeze({
         capability,
         decision: "deny",
@@ -90,7 +92,7 @@ export class CapabilityPermissionPolicy {
       });
     }
 
-    if (this.granted.has(capability)) {
+    if (this.#granted.has(capability)) {
       return Object.freeze({ capability, decision: "allow" });
     }
 

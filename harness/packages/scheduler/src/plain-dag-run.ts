@@ -192,6 +192,9 @@ export interface PlainDagRunOptions {
   readonly effectRetry?: PlainDagEffectRetryOptions;
   /**
    * Host-owned authority re-evaluated for every scheduler invocation attempt.
+   * Its evaluator and receiver are pinned at construction, not its decisions:
+   * later options/method replacement cannot grant authority, while the original
+   * evaluator can still observe host-owned revocation state on every attempt.
    * Omission is fail-closed only for ops that actually require capabilities.
    */
   readonly capabilityAuthority?: PlainDagCapabilityAuthority;
@@ -402,6 +405,9 @@ function waitForSettlementOrAbort(
  * across attempts, so a revoked capability blocks a retry before it consumes a
  * new scheduler attempt or reaches executor/effect code. Graph deny remains a
  * one-way runtime restriction, while capability-free ops need no authority.
+ * 5.8 pins the host-selected evaluator in a private slot. Plugin/model data,
+ * retained options, and replaced authority methods cannot select a new grant
+ * source after construction. Decisions still come from that evaluator per attempt.
  *
  * Retry waits are liveness tasks, not active execution tasks. They keep the run
  * alive while backoff is pending but never block dispatch of unrelated ready work.
@@ -431,6 +437,7 @@ export class PlainDagRun {
   private readonly attempts: number[];
   private readonly attemptBudgetUsed: number[];
   private readonly repeatAuthorizations: Array<boolean | undefined>;
+  readonly #evaluateCapability: PlainDagCapabilityAuthority["evaluate"] | undefined;
   private started = false;
   private settled = false;
   private hasFailure = false;
@@ -443,6 +450,8 @@ export class PlainDagRun {
     private readonly options: PlainDagRunOptions = {},
   ) {
     assertPlainExecutableDag(ir);
+    const authority = options.capabilityAuthority;
+    this.#evaluateCapability = authority?.evaluate.bind(authority);
     this.readiness = new RunReadiness(ir);
     this.attempts = ir.ops.map(() => 0);
     this.attemptBudgetUsed = ir.ops.map(() => 0);
@@ -786,7 +795,7 @@ export class PlainDagRun {
         );
       }
 
-      const evaluation = this.options.capabilityAuthority?.evaluate(capability);
+      const evaluation = this.#evaluateCapability?.(capability);
       if (evaluation?.decision === "allow") {
         continue;
       }

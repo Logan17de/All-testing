@@ -79,7 +79,8 @@ function validateManifest(manifest: PluginManifest): void {
  * capabilities are therefore an immutable audit ceiling for node requirements,
  * never an authority grant. The activation context exposes registration and
  * cleanup surfaces only; no capability-grant mutator or authority object is
- * handed to plugin code.
+ * handed to plugin code. The context and registration facade are frozen before
+ * activation; user configuration remains data, not host permission policy.
  */
 export class PluginHost {
   private readonly active = new Map<string, ActivePlugin>();
@@ -151,6 +152,8 @@ export class PluginHost {
         disposers.push(disposer);
       },
     };
+    Object.freeze(context.nodes);
+    Object.freeze(context);
 
     try {
       await plugin.activate(context);
