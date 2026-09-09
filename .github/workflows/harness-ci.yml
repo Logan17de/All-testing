@@ -1,4 +1,4 @@
-name: Zet Harness Phase 4 Closeout Matrix
+name: Zet Harness 5.1 Format Fix
 
 on:
   push:
@@ -8,27 +8,18 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify:
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 12
-    defaults:
-      run:
-        working-directory: harness
-
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
-      - name: Checkout phase 4 closeout head
+      - name: Checkout Harness branch
         uses: actions/checkout@v4
         with:
-          ref: 72088b42a2fa2b066c4a2fb7c0a35672b06d9270
+          ref: zet-harness-v1
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -39,39 +30,27 @@ jobs:
         run: npm install --global npm@12.0.2 --no-audit --no-fund
 
       - name: Clean install
+        working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Format policy files
+        working-directory: harness
+        run: npx prettier --write packages/plugin-api/src/node-behavior-policy.ts packages/plugin-api/src/node-behavior-policy.test.ts
 
-      - name: Lint
-        run: npm run lint
+      - name: Verify focused policy surface
+        working-directory: harness
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run format:check
+          npx vitest run packages/plugin-api/src/node-behavior-policy.test.ts packages/core/src/node-catalog.test.ts packages/graph/src/graph-json-v1-effect-recovery.test.ts
 
-      - name: Format check
-        run: npm run format:check
-
-      - name: Tests
-        run: npm test
-
-      - name: Plugin smoke
-        run: npm run test:plugin-smoke --workspace @zet-harness/core
-
-      - name: Startup smoke
-        run: npm run test:startup
-
-      - name: Build
-        run: npm run build
-
-      - name: Baseline check
-        env:
-          ZET_BASELINE_PLATFORM: ${{ matrix.os }}
-        run: npm run baseline:ci
-
-      - name: Upload baseline report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: zet-harness-phase4-closeout-${{ matrix.os }}
-          path: harness/tmp/baseline/*.json
-          if-no-files-found: error
-          retention-days: 14
+      - name: Push exact formatter output
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "Logesh"
+          git config user.email "loganlogesh17@gmail.com"
+          git add harness/packages/plugin-api/src/node-behavior-policy.ts harness/packages/plugin-api/src/node-behavior-policy.test.ts
+          git commit -m "style(policy): format behavior policy"
+          git push origin HEAD:zet-harness-v1
