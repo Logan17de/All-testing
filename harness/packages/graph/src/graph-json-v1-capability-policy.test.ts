@@ -6,6 +6,7 @@ import { checkGraphJsonV1Acyclicity } from "./graph-json-v1-acyclicity.js";
 import {
   checkGraphJsonV1CapabilityPolicy,
   validateGraphJsonV1CapabilityPolicy,
+  type GraphCapabilityAuthority,
 } from "./graph-json-v1-capability-policy.js";
 import { validateGraphJsonV1LoopBounds } from "./graph-json-v1-loop-bounds.js";
 import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "./graph-json-v1.js";
@@ -55,6 +56,25 @@ const resolver: NodeManifestResolver = {
   },
 };
 
+function authority(
+  granted: readonly string[] = [],
+  denied: readonly string[] = [],
+): GraphCapabilityAuthority {
+  const grantedSet = new Set(granted);
+  const deniedSet = new Set(denied);
+
+  return {
+    evaluate(capability) {
+      if (deniedSet.has(capability)) {
+        return { decision: "deny", denialReason: "explicitly-denied" };
+      }
+      return grantedSet.has(capability)
+        ? { decision: "allow" }
+        : { decision: "deny", denialReason: "not-granted" };
+    },
+  };
+}
+
 function node(id: string, type: string, config: GraphJsonV1["nodes"][number]["config"] = {}) {
   return { id, type, version: "1.0.0", config } as const;
 }
@@ -78,7 +98,7 @@ function graph(
 }
 
 describe("Graph JSON v1 capability/policy validation", () => {
-  it("accepts externally granted graph and node requirements and computes effective authority", () => {
+  it("accepts host-authorized graph and node requirements and computes effective authority", () => {
     const value = graph([node("call", "network")], {
       capabilities: {
         required: ["project:read"],
@@ -87,9 +107,16 @@ describe("Graph JSON v1 capability/policy validation", () => {
     });
 
     expect(
-      checkGraphJsonV1CapabilityPolicy(value, resolver, {
-        granted: ["project:read", "telemetry:emit", "network:https", "unrequested:grant"],
-      }),
+      checkGraphJsonV1CapabilityPolicy(
+        value,
+        resolver,
+        authority([
+          "project:read",
+          "telemetry:emit",
+          "network:https",
+          "unrequested:grant",
+        ]),
+      ),
     ).toEqual({
       valid: true,
       requiredCapabilities: ["project:read", "network:https"],
@@ -104,7 +131,7 @@ describe("Graph JSON v1 capability/policy validation", () => {
       capabilities: { required: ["admin:dangerous"] },
     });
 
-    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, { granted: [] }).diagnostics).toEqual([
+    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, authority()).diagnostics).toEqual([
       expect.objectContaining({
         code: "GRAPH_CAPABILITY_REQUIRED_UNAVAILABLE",
         capability: "admin:dangerous",
@@ -113,14 +140,56 @@ describe("Graph JSON v1 capability/policy validation", () => {
     ]);
   });
 
+  it("maps a host explicit deny to the frozen required-denied diagnostic", () => {
+    const value = graph([node("plain", "ordinary")], {
+      capabilities: { required: ["project:write"] },
+    });
+
+    expect(
+      checkGraphJsonV1CapabilityPolicy(
+        value,
+        resolver,
+        authority(["project:write"], ["project:write"]),
+      ).diagnostics,
+    ).toEqual([
+      expect.objectContaining({
+        code: "GRAPH_CAPABILITY_REQUIRED_DENIED",
+        capability: "project:write",
+        policyField: "required",
+        message:
+          "Graph-required capability 'project:write' is explicitly denied by external compile authority.",
+      }),
+    ]);
+  });
+
   it("requires manifest-declared node capabilities even when graph policy omits them", () => {
     const value = graph([node("read", "filesystem")]);
 
-    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, { granted: [] }).diagnostics).toEqual([
+    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, authority()).diagnostics).toEqual([
       expect.objectContaining({
         code: "GRAPH_CAPABILITY_REQUIRED_UNAVAILABLE",
         capability: "fs:read",
         nodeId: "read",
+      }),
+    ]);
+  });
+
+  it("enforces host explicit denial of a manifest-required node capability", () => {
+    const value = graph([node("call", "network")]);
+
+    expect(
+      checkGraphJsonV1CapabilityPolicy(
+        value,
+        resolver,
+        authority(["network:https"], ["network:https"]),
+      ).diagnostics,
+    ).toEqual([
+      expect.objectContaining({
+        code: "GRAPH_CAPABILITY_REQUIRED_DENIED",
+        capability: "network:https",
+        nodeId: "call",
+        message:
+          "Node 'call' requires capability 'network:https', but external compile authority explicitly denies it.",
       }),
     ]);
   });
@@ -130,7 +199,20 @@ describe("Graph JSON v1 capability/policy validation", () => {
       capabilities: { optional: ["telemetry:emit"] },
     });
 
-    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, { granted: [] })).toEqual({
+    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, authority())).toEqual({
+      valid: true,
+      requiredCapabilities: [],
+      optionalCapabilities: ["telemetry:emit"],
+      effectiveCapabilities: [],
+      diagnostics: [],
+    });
+    expect(
+      checkGraphJsonV1CapabilityPolicy(
+        value,
+        resolver,
+        authority(["telemetry:emit"], ["telemetry:emit"]),
+      ),
+    ).toEqual({
       valid: true,
       requiredCapabilities: [],
       optionalCapabilities: ["telemetry:emit"],
@@ -145,7 +227,8 @@ describe("Graph JSON v1 capability/policy validation", () => {
     });
 
     expect(
-      checkGraphJsonV1CapabilityPolicy(value, resolver, { granted: ["network:https"] }).diagnostics,
+      checkGraphJsonV1CapabilityPolicy(value, resolver, authority(["network:https"]))
+        .diagnostics,
     ).toEqual([
       expect.objectContaining({
         code: "GRAPH_CAPABILITY_REQUIRED_DENIED",
@@ -166,7 +249,8 @@ describe("Graph JSON v1 capability/policy validation", () => {
     });
 
     expect(
-      checkGraphJsonV1CapabilityPolicy(value, resolver, { granted: ["same", "other"] }).diagnostics,
+      checkGraphJsonV1CapabilityPolicy(value, resolver, authority(["same", "other"]))
+        .diagnostics,
     ).toEqual([
       expect.objectContaining({
         code: "GRAPH_CAPABILITY_INTENT_DUPLICATE",
@@ -196,10 +280,27 @@ describe("Graph JSON v1 capability/policy validation", () => {
     ]);
   });
 
+  it("evaluates each authority capability at most once per validation pass", () => {
+    const value = graph([node("call", "network")], {
+      capabilities: { required: ["network:https"] },
+    });
+    let evaluations = 0;
+    const oneShotAuthority: GraphCapabilityAuthority = {
+      evaluate(capability) {
+        expect(capability).toBe("network:https");
+        evaluations += 1;
+        return { decision: "allow" };
+      },
+    };
+
+    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, oneShotAuthority).valid).toBe(true);
+    expect(evaluations).toBe(1);
+  });
+
   it("rejects unresolved manifests as a stage prerequisite failure", () => {
     const value = graph([node("missing", "not-registered")]);
 
-    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, { granted: [] })).toMatchObject({
+    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, authority())).toMatchObject({
       valid: false,
       diagnostics: [
         {
@@ -216,7 +317,7 @@ describe("Graph JSON v1 capability/policy validation", () => {
     });
 
     expect(validateGraphJsonV1LoopBounds(value, resolver)).toBe(true);
-    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, { granted: [] }).diagnostics).toEqual([
+    expect(checkGraphJsonV1CapabilityPolicy(value, resolver, authority()).diagnostics).toEqual([
       expect.objectContaining({
         code: "GRAPH_POLICY_LOOP_BOUND_EXCEEDS_MAX_NODE_EXECUTIONS",
         nodeId: "loop",
@@ -234,7 +335,7 @@ describe("Graph JSON v1 capability/policy validation", () => {
       { maxNodeExecutions: 5 },
     );
 
-    expect(validateGraphJsonV1CapabilityPolicy(value, resolver, { granted: [] })).toBe(true);
+    expect(validateGraphJsonV1CapabilityPolicy(value, resolver, authority())).toBe(true);
   });
 
   it("does not let a valid bound weaken 2.10 cycle rejection", () => {
@@ -257,7 +358,7 @@ describe("Graph JSON v1 capability/policy validation", () => {
       ],
     );
 
-    expect(validateGraphJsonV1CapabilityPolicy(value, resolver, { granted: [] })).toBe(true);
+    expect(validateGraphJsonV1CapabilityPolicy(value, resolver, authority())).toBe(true);
     expect(checkGraphJsonV1Acyclicity(value)).toMatchObject({
       valid: false,
       diagnostics: [{ code: "GRAPH_CYCLE_DETECTED", nodeIds: ["loop", "body"] }],
