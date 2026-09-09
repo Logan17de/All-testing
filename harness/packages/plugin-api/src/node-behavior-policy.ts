@@ -8,11 +8,7 @@ export type NodeBehaviorPolicyViolationCode =
   | "NODE_BEHAVIOR_RECOVERY_UNSAFE";
 
 export type NodeBehaviorPolicyField =
-  | "primitiveFamily"
-  | "effect"
-  | "idempotency"
-  | "recovery"
-  | "executionMode";
+  "primitiveFamily" | "effect" | "idempotency" | "recovery" | "executionMode";
 
 export interface NodeBehaviorPolicyViolation {
   readonly code: NodeBehaviorPolicyViolationCode;

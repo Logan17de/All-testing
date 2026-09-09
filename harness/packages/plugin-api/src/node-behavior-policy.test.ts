@@ -109,9 +109,7 @@ describe("NodeBehavior cross-field policy", () => {
   });
 
   it("reserves reconcile recovery for external writes", () => {
-    expect(codes(behavior({ recovery: "reconcile" }))).toEqual([
-      "NODE_BEHAVIOR_RECOVERY_INVALID",
-    ]);
+    expect(codes(behavior({ recovery: "reconcile" }))).toEqual(["NODE_BEHAVIOR_RECOVERY_INVALID"]);
     expect(
       validateNodeBehaviorPolicy(
         behavior({
