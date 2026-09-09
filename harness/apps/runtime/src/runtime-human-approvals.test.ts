@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { get as httpGet } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,6 +15,30 @@ import { RuntimeRedactionRegistry, canonicalRuntimeJson } from "./runtime-redact
 const databases: SqliteDatabase[] = [];
 const servers: RuntimeHttpServer[] = [];
 const directories: string[] = [];
+
+// Fetch normalizes Host to the URL. Native HTTP is required to test a forged wire header.
+function rawGet(
+  url: string,
+  headers: Record<string, string>,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpGet(url, { headers }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        resolve({ status: response.statusCode ?? 0, body });
+      });
+      response.on("error", reject);
+    });
+    request.on("error", reject);
+    request.setTimeout(5_000, () => {
+      request.destroy(new Error("Raw HTTP test request timed out."));
+    });
+  });
+}
 
 function fixture(
   options: {
@@ -373,9 +398,9 @@ describe("protected approval HTTP surface", () => {
       { host: "evil.example", "x-forwarded-host": "127.0.0.1" },
     ];
     for (const headers of hostileHeaders) {
-      const response = await fetch(`${base}/api/session`, { headers });
-      expect(response.status).toBe(403);
-      expect(await response.text()).not.toContain("csrfToken");
+      const response = await rawGet(`${base}/api/session`, headers);
+      expect(response.status, JSON.stringify(headers)).toBe(403);
+      expect(response.body).not.toContain("csrfToken");
     }
     const allowed = await fetch(`${base}/api/approvals`, {
       headers: { origin: "http://localhost:3000" },
