@@ -46,9 +46,10 @@ export function generateLogicalEffectId(): string {
  * deliberately absent from this API so retry attempts cannot accidentally mint
  * new effect identities.
  *
- * Fresh runs naturally create fresh identities. Recorded replay/fork semantics
- * remain a later Phase 9 decision; this helper does not rewrite or reinterpret an
- * invocation row that already exists.
+ * Identity stability is not retry authorization; Phase 5.3 owns effect-aware
+ * repeat safety. Fresh runs naturally create fresh identities. Recorded
+ * replay/fork semantics remain a later Phase 9 decision; this helper does not
+ * rewrite or reinterpret an invocation row that already exists.
  */
 export function ensureDurableNodeInvocation(
   database: SerializedSqliteCommitPath,
