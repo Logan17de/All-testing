@@ -1,4 +1,4 @@
-name: Zet Harness 5.2 Format Fix
+name: Zet Harness 5.2 Roadmap Closeout
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  format:
+  closeout:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -33,25 +33,59 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Format 5.2 identity files
-        working-directory: harness
-        run: npx prettier --write packages/db/src/durable-node-invocation.ts packages/db/src/durable-node-invocation.test.ts
-
-      - name: Verify focused 5.2 surface
-        working-directory: harness
+      - name: Advance Phase 5 roadmap to 5.3
+        shell: bash
         run: |
-          npm run typecheck
-          npm run lint
-          npm run format:check
-          npm run build --workspace @zet-harness/db
-          npx vitest run packages/db/src/durable-node-invocation.test.ts
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Push exact formatter output
+          todo_path = Path("harness/TODO.md")
+          todo = todo_path.read_text()
+          replacements = {
+              "- [ ] 5.1 Define and enforce cross-field effect/idempotency/recovery invariants over the Phase 1 node enums.":
+                  "- [x] 5.1 Define and enforce cross-field effect/idempotency/recovery invariants over the Phase 1 node enums.",
+              "- [ ] 5.2 Generate a stable logical effect/idempotency ID that survives retry attempts.":
+                  "- [x] 5.2 Generate a stable logical effect/idempotency ID that survives retry attempts.",
+              "**5.1 — Define and enforce cross-field effect/idempotency/recovery invariants over the Phase 1 node enums.**":
+                  "**5.3 — Add effect-aware retry rules; never infer that an uncertain external write is safe to repeat.**",
+          }
+          for old, new in replacements.items():
+              if todo.count(old) != 1:
+                  raise SystemExit(f"TODO replacement count for {old!r}: {todo.count(old)}")
+              todo = todo.replace(old, new)
+          todo_path.write_text(todo)
+
+          plan_path = Path("harness/PLAN.md")
+          plan = plan_path.read_text()
+          replacements = {
+              "Phase 5  Effects + permissions + humans    🚧 WE ARE HERE\n           └─ 5.1 effect/idempotency/recovery invariants                       ▶ CURRENT":
+                  "Phase 5  Effects + permissions + humans    🚧 WE ARE HERE\n           ├─ 5.1 effect/idempotency/recovery invariants                       ✅\n           ├─ 5.2 stable logical effect/idempotency identity                   ✅\n           └─ 5.3 effect-aware retry rules                                     ▶ CURRENT",
+              "| **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | 🚧 In progress — **5.1 current** |":
+                  "| **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | 🚧 In progress — **5.3 current** |",
+          }
+          for old, new in replacements.items():
+              if plan.count(old) != 1:
+                  raise SystemExit(f"PLAN replacement count for {old!r}: {plan.count(old)}")
+              plan = plan.replace(old, new)
+
+          anchor = "The storage layer also does not decide whether an external effect is safe to retry or whether the stable identity is passed to an integration as an idempotency key; Phase 5 owns those effect semantics. Phase 4.10 adds migration v4 with an append-only `durable_events` journal."
+          replacement = "The storage layer also does not decide whether an external effect is safe to retry or whether the stable identity is passed to an integration as an idempotency key; Phase 5 owns those effect semantics.\n\nPhase 5.1 centralizes the Phase 1 `NodeBehavior` cross-field effect/idempotency/recovery contract in the dependency-free plugin API. `NodeCatalog` rejects contradictory manifests before registration and the compiler delegates its corresponding semantic diagnostics to that same policy source, so determinism remains separate from repeat safety and unknown external writes cannot quietly become automatic reruns. Phase 5.2 turns the 4.9 relational identity slot into a runtime lifecycle primitive: `ensureDurableNodeInvocation(...)` enters the serialized SQLite commit path, creates one opaque versioned `zet-effect-v1:<uuid>` only for the first `(run, op, iteration)` invocation, and returns the persisted row thereafter. Scheduler attempt number is deliberately absent, so retries, concurrent callers, and process restarts reuse the same logical effect identity. Fresh runs create fresh identities; Phase 9 still owns whether recorded replay/fork carries an existing identity or begins a new one. Effect-aware retry permission remains 5.3 rather than being inferred from the existence of this stable ID.\n\nPhase 4.10 adds migration v4 with an append-only `durable_events` journal."
+          if plan.count(anchor) != 1:
+              raise SystemExit(f"PLAN architecture anchor count: {plan.count(anchor)}")
+          plan = plan.replace(anchor, replacement)
+          plan_path.write_text(plan)
+          PY
+
+          cd harness
+          npx prettier --write TODO.md PLAN.md
+          npm run format:check
+
+      - name: Push roadmap closeout
         shell: bash
         run: |
           git diff --check
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
-          git add harness/packages/db/src/durable-node-invocation.ts harness/packages/db/src/durable-node-invocation.test.ts
-          git commit -m "style(db): format logical effect identity"
+          git add harness/TODO.md harness/PLAN.md
+          git commit -m "docs: advance Harness roadmap to 5.3"
           git push origin HEAD:zet-harness-v1
