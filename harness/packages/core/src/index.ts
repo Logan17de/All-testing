@@ -1,4 +1,12 @@
 export {
+  CapabilityPermissionPolicy,
+  type CapabilityPermissionBatchResult,
+  type CapabilityPermissionDecision,
+  type CapabilityPermissionDenialReason,
+  type CapabilityPermissionEvaluation,
+  type CapabilityPermissionPolicyConfig,
+} from "./capability-permission-policy.js";
+export {
   NodeCatalog,
   type NodeCatalogPluginPin,
   type NodeCatalogResolution,
