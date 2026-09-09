@@ -36,5 +36,5 @@ jobs:
         working-directory: harness
         run: |
           npm run build --workspace @zet-harness/runtime
-          npx vitest bench scripts/lightweight-baseline.bench.ts --reporter=json --outputFile=baseline-report.json
+          npx vitest bench scripts/lightweight-baseline.bench.ts --outputJson=baseline-report.json
           node -e "const r=require('./baseline-report.json'); console.log(JSON.stringify(r,null,2))"
