@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./durable-node-invocation": {
+      "types": "./src/durable-node-invocation.ts",
+      "default": "./dist/durable-node-invocation.js"
     }
   },
   "scripts": {
