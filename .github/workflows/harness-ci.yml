@@ -40,8 +40,8 @@ jobs:
           from pathlib import Path
           path = Path("harness/apps/runtime/src/runtime-fault-recovery.test.ts")
           text = path.read_text()
-          old = "    }\n  });\n});"
-          new = "    }\n  }, 20_000);\n});"
+          old = "    }\n  });\n});\n"
+          new = "    }\n  }, 20_000);\n});\n"
           if not text.endswith(old):
               raise SystemExit("expected final seeded-test closing anchor not found")
           path.write_text(text[:-len(old)] + new)
