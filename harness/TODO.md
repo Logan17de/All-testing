@@ -156,7 +156,7 @@ Goal: make side effects and privilege boundaries explicit before broad real-worl
 - [x] 5.2 Generate a stable logical effect/idempotency ID that survives retry attempts.
 - [x] 5.3 Add effect-aware retry rules; never infer that an uncertain external write is safe to repeat.
 - [x] 5.4 Add reconciliation/manual-review outcomes for ambiguous external writes.
-- [ ] 5.5 Add capability-based permission policy.
+- [x] 5.5 Add capability-based permission policy.
 - [ ] 5.6 Enforce graph/node capabilities at compile time.
 - [ ] 5.7 Re-check actual capability use at invocation time.
 - [ ] 5.8 Ensure a model/plugin cannot grant itself capabilities.
