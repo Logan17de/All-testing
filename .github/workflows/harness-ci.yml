@@ -1,4 +1,4 @@
-name: Zet Harness 4.22 File-native Reports
+name: Zet Harness 4.22 Finalize
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  fix:
+  finalize:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -33,77 +33,25 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Make baseline reports file-native
+      - name: Remove obsolete wrapper and format
         working-directory: harness
         shell: bash
         run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
+          rm -f scripts/run-lightweight-baseline-ci.ts
+          npx prettier --write package.json baselines/lightweight-baseline-v1.json scripts/lightweight-baseline.bench.ts scripts/check-lightweight-baseline.test.ts scripts/check-lightweight-baseline.ts
 
-          bench = Path("scripts/lightweight-baseline.bench.ts")
-          text = bench.read_text()
-          old = 'import { mkdtempSync, readFileSync, rmSync } from "node:fs";'
-          new = 'import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";'
-          if old not in text:
-              raise SystemExit("fs import anchor not found")
-          text = text.replace(old, new, 1)
-
-          old = 'const runtimePackagePath = resolve(root, "apps/runtime/package.json");'
-          new = old + '\nconst runtimeReportPath = resolve(root, "tmp/baseline/runtime.json");'
-          if old not in text:
-              raise SystemExit("runtime path anchor not found")
-          text = text.replace(old, new, 1)
-
-          old = '''  console.log(
-            `ZET_BASELINE_RUNTIME ${JSON.stringify({
-              startupMs: summarize(startupMs),
-              idleRssBytes: summarize(idleRssBytes),
-              directRuntimeDependencies: {
-                total: dependencies.length,
-                workspace: workspaceDependencies.length,
-                external: externalDependencies.length,
-                names: dependencies.sort(),
-              },
-            })}`,
-          );'''
-          new = '''  const runtimeReport = {
-            startupMs: summarize(startupMs),
-            idleRssBytes: summarize(idleRssBytes),
-            directRuntimeDependencies: {
-              total: dependencies.length,
-              workspace: workspaceDependencies.length,
-              external: externalDependencies.length,
-              names: dependencies.sort(),
-            },
-          };
-          mkdirSync(dirname(runtimeReportPath), { recursive: true });
-          writeFileSync(runtimeReportPath, `${JSON.stringify(runtimeReport, null, 2)}\\n`);
-          console.log(`ZET_BASELINE_RUNTIME ${JSON.stringify(runtimeReport)}`);'''
-          if old not in text:
-              raise SystemExit("runtime report block anchor not found")
-          bench.write_text(text.replace(old, new, 1))
-
-          package = Path("package.json")
-          data = json.loads(package.read_text())
-          data["scripts"]["baseline:ci"] = "npm run baseline && node --experimental-strip-types scripts/check-lightweight-baseline.ts"
-          package.write_text(json.dumps(data, indent=2) + "\n")
-
-          runner = Path("scripts/run-lightweight-baseline-ci.ts")
-          if runner.exists():
-              runner.unlink()
-          PY
-
-      - name: Format and verify
+      - name: Verify
         working-directory: harness
         env:
           ZET_BASELINE_PLATFORM: ubuntu-latest
         run: |
-          npx prettier --write package.json baselines/lightweight-baseline-v1.json scripts/lightweight-baseline.bench.ts scripts/check-lightweight-baseline.test.ts scripts/check-lightweight-baseline.ts
           npm run typecheck
           npm run lint
           npm run format:check
           npm run baseline:ci
+          test -f tmp/baseline/runtime.json
+          test -f tmp/baseline/bench.json
+          test -f tmp/baseline/check.json
 
       - name: Push correction
         working-directory: harness
@@ -113,5 +61,5 @@ jobs:
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
           git add -A package.json baselines/lightweight-baseline-v1.json scripts
-          git commit -m "fix(perf): persist baseline reports directly"
+          git commit -m "fix(perf): finalize file-native baseline guard"
           git push origin HEAD:zet-harness-v1
