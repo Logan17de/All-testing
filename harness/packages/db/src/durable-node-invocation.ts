@@ -6,6 +6,7 @@ import {
   type DurableNodeInvocationRecord,
 } from "./durable-node-attempt-records.js";
 
+// Versioned and opaque so external adapters never need to parse execution coordinates.
 export const LOGICAL_EFFECT_ID_PREFIX = "zet-effect-v1:" as const;
 
 export interface DurableNodeInvocationIdentityInput {
