@@ -32,18 +32,18 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
           path = Path('harness/packages/scheduler/src/invocation-capability-policy.test.ts')
           text = path.read_text()
-          before = '''    const evaluate = vi.fn((capability: string) => ({
-              decision: capability === "fs:read" || capability === "network:http" ? "allow" : "deny",
-            })) satisfies PlainDagCapabilityAuthority["evaluate"];'''
-          after = '''    const evaluateImpl: PlainDagCapabilityAuthority["evaluate"] = (capability) => ({
+          pattern = re.compile(r'''    const evaluate = vi\.fn\(\(capability: string\) => \(\{\n\s+decision: capability === "fs:read" \|\| capability === "network:http" \? "allow" : "deny",\n\s+\}\)\) satisfies PlainDagCapabilityAuthority\["evaluate"\];''')
+          replacement = '''    const evaluateImpl: PlainDagCapabilityAuthority["evaluate"] = (capability) => ({
               decision: capability === "fs:read" || capability === "network:http" ? "allow" : "deny",
             });
             const evaluate = vi.fn(evaluateImpl);'''
-          if text.count(before) != 1:
-              raise SystemExit('contextual typing anchor mismatch')
-          path.write_text(text.replace(before, after))
+          text, count = pattern.subn(replacement, text)
+          if count != 1:
+              raise SystemExit(f'contextual typing anchor mismatch: {count}')
+          path.write_text(text)
           PY
       - name: Format changed files
         working-directory: harness
