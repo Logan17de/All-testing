@@ -1,0 +1,50 @@
+name: Harness 5.7 Implementation
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - .github/workflows/harness-5-7-implement.yml
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+      - name: Install
+        working-directory: harness
+        run: npm ci --no-audit --no-fund
+      - name: Apply 5.7
+        run: node .github/scripts/harness-5-7-implement.mjs
+      - name: Format changed files
+        working-directory: harness
+        run: npx prettier --write packages/scheduler/src/plain-dag-run.ts packages/scheduler/src/index.ts packages/scheduler/src/invocation-capability-policy.test.ts scripts/capability-invocation-enforcement.test.ts
+      - name: Typecheck
+        working-directory: harness
+        run: npm run typecheck
+      - name: Lint
+        working-directory: harness
+        run: npm run lint
+      - name: Tests
+        working-directory: harness
+        run: npm test
+      - name: Commit and remove helper
+        shell: bash
+        run: |
+          rm .github/workflows/harness-5-7-implement.yml .github/scripts/harness-5-7-implement.mjs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/packages/scheduler/src/plain-dag-run.ts harness/packages/scheduler/src/index.ts harness/packages/scheduler/src/invocation-capability-policy.test.ts harness/scripts/capability-invocation-enforcement.test.ts .github/workflows/harness-5-7-implement.yml .github/scripts/harness-5-7-implement.mjs
+          git commit -m "feat(scheduler): recheck capabilities at invocation"
+          git push origin HEAD:zet-harness-v1
