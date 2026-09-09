@@ -1,5 +1,6 @@
 import {
   PLUGIN_API_VERSION,
+  type CapabilityId,
   type HarnessPlugin,
   type JsonValue,
   type PluginContext,
@@ -7,10 +8,11 @@ import {
   type PluginManifest,
 } from "@zet-harness/plugin-api";
 
+import { snapshotPluginManifest } from "./immutable-manifest.js";
 import { NodeCatalog } from "./node-catalog.js";
 
 interface ActivePlugin {
-  readonly plugin: HarnessPlugin;
+  readonly manifest: PluginManifest;
   readonly disposers: PluginDisposer[];
 }
 
@@ -53,8 +55,15 @@ function validateManifest(manifest: PluginManifest): void {
     );
   }
 
+  const seenCapabilities = new Set<CapabilityId>();
   for (const capability of manifest.capabilities ?? []) {
     assertNonEmpty(capability.id, "capabilities[].id");
+    if (seenCapabilities.has(capability.id)) {
+      throw new Error(
+        `Plugin "${manifest.id}" declares capability "${capability.id}" more than once.`,
+      );
+    }
+    seenCapabilities.add(capability.id);
   }
 }
 
@@ -65,6 +74,12 @@ function validateManifest(manifest: PluginManifest): void {
  * after `activate` succeeds; partial activation is rolled back immediately.
  * Node registrations flow through the same host-owned `NodeCatalog` for every
  * plugin origin and are automatically attached to the activation cleanup stack.
+ *
+ * The host snapshots plugin metadata before activation. A plugin's declared
+ * capabilities are therefore an immutable audit ceiling for node requirements,
+ * never an authority grant. The activation context exposes registration and
+ * cleanup surfaces only; no capability-grant mutator or authority object is
+ * handed to plugin code.
  */
 export class PluginHost {
   private readonly active = new Map<string, ActivePlugin>();
@@ -85,13 +100,14 @@ export class PluginHost {
   }
 
   listManifests(): readonly PluginManifest[] {
-    return [...this.active.values()].map(({ plugin }) => plugin.manifest);
+    return [...this.active.values()].map(({ manifest }) => manifest);
   }
 
   async activate(plugin: HarnessPlugin, config?: JsonValue): Promise<void> {
-    validateManifest(plugin.manifest);
+    const manifest = snapshotPluginManifest(plugin.manifest);
+    validateManifest(manifest);
 
-    const pluginId = plugin.manifest.id;
+    const pluginId = manifest.id;
     if (this.active.has(pluginId) || this.activating.has(pluginId)) {
       throw new Error(`Plugin "${pluginId}" is already active or activating.`);
     }
@@ -99,6 +115,7 @@ export class PluginHost {
     this.activating.add(pluginId);
 
     const disposers: PluginDisposer[] = [];
+    const capabilityCeiling = Object.freeze((manifest.capabilities ?? []).map(({ id }) => id));
     let activationOpen = true;
 
     const assertActivationOpen = (action: string): void => {
@@ -113,10 +130,14 @@ export class PluginHost {
         register: (definition): void => {
           assertActivationOpen("register a node");
           disposers.push(
-            this.nodes.register(definition, {
-              id: plugin.manifest.id,
-              version: plugin.manifest.version,
-            }),
+            this.nodes.register(
+              definition,
+              {
+                id: manifest.id,
+                version: manifest.version,
+              },
+              capabilityCeiling,
+            ),
           );
         },
       },
@@ -134,7 +155,7 @@ export class PluginHost {
     try {
       await plugin.activate(context);
       activationOpen = false;
-      this.active.set(pluginId, { plugin, disposers });
+      this.active.set(pluginId, { manifest, disposers });
     } catch (activationError) {
       activationOpen = false;
       const cleanupErrors = await disposeStack(disposers);
