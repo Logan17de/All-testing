@@ -32,15 +32,17 @@ jobs:
 
           plan_path = Path("harness/PLAN.md")
           plan = plan_path.read_text()
-
-          old_tree = """           ├─ 5.5 capability-based permission policy                           ✅
-           └─ 5.6 compile-time graph/node capability enforcement                ▶ CURRENT"""
-          new_tree = """           ├─ 5.5 capability-based permission policy                           ✅
-           ├─ 5.6 compile-time graph/node capability enforcement                ✅
-           └─ 5.7 invocation-time capability re-check                           ▶ CURRENT"""
-          if old_tree not in plan:
-              raise SystemExit("PLAN Phase 5 tree marker not found")
-          plan = plan.replace(old_tree, new_tree, 1)
+          lines = plan.splitlines()
+          current = "└─ 5.6 compile-time graph/node capability enforcement"
+          for index, line in enumerate(lines):
+              if current in line and "▶ CURRENT" in line:
+                  indent = line[: len(line) - len(line.lstrip())]
+                  lines[index] = indent + "├─ 5.6 compile-time graph/node capability enforcement                ✅"
+                  lines.insert(index + 1, indent + "└─ 5.7 invocation-time capability re-check                           ▶ CURRENT")
+                  break
+          else:
+              raise SystemExit("PLAN Phase 5.6 current line not found")
+          plan = "\n".join(lines) + ("\n" if plan.endswith("\n") else "")
 
           old_status = "🚧 In progress — **5.6 current**"
           if old_status not in plan:
