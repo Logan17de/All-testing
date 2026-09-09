@@ -8,7 +8,7 @@ const checkerPath = resolve(root, "scripts/check-lightweight-baseline.ts");
 const runtimePrefix = "ZET_BASELINE_RUNTIME ";
 
 interface CommandResult {
-  stdout: string;
+  output: string;
 }
 
 function runCommand(command: string, args: string[]): Promise<CommandResult> {
@@ -18,20 +18,22 @@ function runCommand(command: string, args: string[]): Promise<CommandResult> {
       env: process.env,
       stdio: ["inherit", "pipe", "pipe"],
     });
-    let stdout = "";
+    let output = "";
 
     child.stdout.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8");
-      stdout += text;
+      output += text;
       process.stdout.write(text);
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      process.stderr.write(chunk);
+      const text = chunk.toString("utf8");
+      output += text;
+      process.stderr.write(text);
     });
     child.on("error", rejectPromise);
     child.on("close", (code, signal) => {
       if (code === 0) {
-        resolvePromise({ stdout });
+        resolvePromise({ output });
         return;
       }
       rejectPromise(
@@ -49,8 +51,9 @@ async function main(): Promise<void> {
     throw new Error("npm_execpath is required to run the cross-platform baseline command.");
   }
 
+  mkdirSync(dirname(runtimeReportPath), { recursive: true });
   const baseline = await runCommand(process.execPath, [npmCli, "run", "baseline"]);
-  const runtimeLine = baseline.stdout
+  const runtimeLine = baseline.output
     .split(/\r?\n/u)
     .find((line) => line.startsWith(runtimePrefix));
   if (runtimeLine === undefined) {
@@ -58,7 +61,6 @@ async function main(): Promise<void> {
   }
 
   const runtime = JSON.parse(runtimeLine.slice(runtimePrefix.length)) as unknown;
-  mkdirSync(dirname(runtimeReportPath), { recursive: true });
   writeFileSync(runtimeReportPath, `${JSON.stringify(runtime, null, 2)}\n`);
 
   await runCommand(process.execPath, ["--experimental-strip-types", checkerPath]);
