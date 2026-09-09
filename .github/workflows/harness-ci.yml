@@ -1,4 +1,4 @@
-name: Zet Harness 4.22 Benchmark Median Matrix
+name: Zet Harness 4.22 Format Fix
 
 on:
   push:
@@ -8,23 +8,18 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  probe:
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
+  fix:
+    runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
       - name: Checkout real Harness branch
         uses: actions/checkout@v4
         with:
           ref: zet-harness-v1
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -38,9 +33,39 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Capture benchmark medians
+      - name: Harden baseline output directory
         working-directory: harness
+        shell: bash
         run: |
-          npm run build --workspace @zet-harness/runtime
-          npx vitest bench scripts/lightweight-baseline.bench.ts --outputJson=baseline-report.json
-          node -e "const r=require('./baseline-report.json'); const b=r.files[0].groups[0].benchmarks; console.log('ZET_BENCH_MEDIANS '+JSON.stringify(Object.fromEntries(b.map(x=>[x.name,{median:x.median,p75:x.p75,rme:x.rme,sampleCount:x.sampleCount}]))))"
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/run-lightweight-baseline-ci.ts")
+          text = path.read_text()
+          old = '  const baseline = await runCommand(process.execPath, [npmCli, "run", "baseline"]);'
+          new = '  mkdirSync(dirname(runtimeReportPath), { recursive: true });\n  const baseline = await runCommand(process.execPath, [npmCli, "run", "baseline"]);'
+          if old not in text:
+              raise SystemExit("baseline runner anchor not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Format and verify
+        working-directory: harness
+        env:
+          ZET_BASELINE_PLATFORM: ubuntu-latest
+        run: |
+          npx prettier --write baselines/lightweight-baseline-v1.json scripts/check-lightweight-baseline.test.ts scripts/check-lightweight-baseline.ts scripts/run-lightweight-baseline-ci.ts
+          npm run typecheck
+          npm run lint
+          npm run format:check
+          npm run baseline:ci
+
+      - name: Push correction
+        working-directory: harness
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "Logesh"
+          git config user.email "loganlogesh17@gmail.com"
+          git add baselines/lightweight-baseline-v1.json scripts/check-lightweight-baseline.test.ts scripts/check-lightweight-baseline.ts scripts/run-lightweight-baseline-ci.ts
+          git commit -m "fix(perf): format and harden baseline guard"
+          git push origin HEAD:zet-harness-v1
