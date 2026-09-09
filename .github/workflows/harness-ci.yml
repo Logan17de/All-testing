@@ -33,7 +33,7 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Harden baseline output directory
+      - name: Harden baseline runner
         working-directory: harness
         shell: bash
         run: |
@@ -41,10 +41,23 @@ jobs:
           from pathlib import Path
           path = Path("scripts/run-lightweight-baseline-ci.ts")
           text = path.read_text()
+
           old = '  const baseline = await runCommand(process.execPath, [npmCli, "run", "baseline"]);'
           new = '  mkdirSync(dirname(runtimeReportPath), { recursive: true });\n  const baseline = await runCommand(process.execPath, [npmCli, "run", "baseline"]);'
           if old not in text:
               raise SystemExit("baseline runner anchor not found")
+          text = text.replace(old, new, 1)
+
+          old = '''    child.stderr.on("data", (chunk: Buffer) => {
+              process.stderr.write(chunk);
+            });'''
+          new = '''    child.stderr.on("data", (chunk: Buffer) => {
+              const text = chunk.toString("utf8");
+              stdout += text;
+              process.stderr.write(text);
+            });'''
+          if old not in text:
+              raise SystemExit("stderr capture anchor not found")
           path.write_text(text.replace(old, new, 1))
           PY
 
