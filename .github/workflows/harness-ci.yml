@@ -1,4 +1,4 @@
-name: Zet Harness 5.9 Format Fix
+name: Zet Harness 5.9 Roadmap Closeout
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  format:
+  closeout:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -33,24 +33,61 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Format secret boundary files
-        working-directory: harness
-        run: npx prettier --write packages/plugin-api/src/secret-contract.test.ts packages/core/src/node-secret-accessor.ts packages/core/src/node-secret-accessor.test.ts
-
-      - name: Verify focused secret boundary
-        working-directory: harness
+      - name: Advance Phase 5 roadmap to 5.10
+        shell: bash
         run: |
-          npm run typecheck
-          npm run lint
-          npm run format:check
-          npx vitest run packages/plugin-api/src/secret-contract.test.ts packages/core/src/node-secret-accessor.test.ts packages/graph/src/graph-json-v1-secret-bindings.test.ts
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Push exact formatter output
+          todo_path = Path("harness/TODO.md")
+          todo = todo_path.read_text()
+          replacements = {
+              "- [ ] 5.8 Ensure a model/plugin cannot grant itself capabilities.":
+                  "- [x] 5.8 Ensure a model/plugin cannot grant itself capabilities.",
+              "- [ ] 5.9 Add secret references/secret provider boundary; never put secret values in Graph JSON, IR, checkpoints, or logs.":
+                  "- [x] 5.9 Add secret references/secret provider boundary; never put secret values in Graph JSON, IR, checkpoints, or logs.",
+              "**5.3 — Add effect-aware retry rules; never infer that an uncertain external write is safe to repeat.**":
+                  "**5.10 — Add first-class approval records.**",
+          }
+          for old, new in replacements.items():
+              if todo.count(old) != 1:
+                  raise SystemExit(f"TODO replacement count for {old!r}: {todo.count(old)}")
+              todo = todo.replace(old, new)
+          todo_path.write_text(todo)
+
+          plan_path = Path("harness/PLAN.md")
+          plan = plan_path.read_text()
+          replacements = {
+              "           ├─ 5.7 invocation-time capability re-check                           ✅\n           └─ 5.8 model/plugin self-grant prevention                            ▶ CURRENT":
+                  "           ├─ 5.7 invocation-time capability re-check                           ✅\n           ├─ 5.8 model/plugin self-grant prevention                            ✅\n           ├─ 5.9 secret reference/provider boundary                            ✅\n           └─ 5.10 first-class approval records                                 ▶ CURRENT",
+              "| **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | 🚧 In progress — **5.8 current** |":
+                  "| **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | 🚧 In progress — **5.10 current** |",
+              "> **Phase 5 / Item 5.7 — Re-check actual capability use at invocation time against host-owned permission authority.**":
+                  "> **Phase 5 / Item 5.10 — Add first-class approval records.**",
+          }
+          for old, new in replacements.items():
+              if plan.count(old) != 1:
+                  raise SystemExit(f"PLAN replacement count for {old!r}: {plan.count(old)}")
+              plan = plan.replace(old, new)
+
+          anchor = "Phase 5.7 keeps authorization live at the scheduler invocation boundary. Each executor attempt re-evaluates the op’s frozen `requiredCapabilities` against current host authority after concurrency admission but before attempt/retry-budget accounting, effect retry proof, timeout setup, or executor code. Capability-free ops require no authority; required capabilities fail closed when authority is absent; graph `deny` remains a one-way runtime restriction. Duplicate demands are collapsed within one invocation, but host decisions are deliberately not cached between attempts so revocation takes effect before a retry can start. Permission rejection is terminal for that invocation and does not consume another attempt. The scheduler consumes only a narrow structural evaluator compatible with the 5.5 `CapabilityPermissionPolicy`; it does not import Core, expand Graph/schema validation, embed grants in IR, or expose stable machine-readable denial transport, which remains 5.14."
+          addition = anchor + "\n\nPhase 5.8 closes the authority-provenance hole at plugin activation. `PluginHost` snapshots a plugin manifest before activation and treats its declared capabilities as an immutable audit ceiling for node requirements, never as authority. Node registrations are checked against that ceiling, plugin code receives no authority object or grant mutator, and later manifest mutation cannot raise the capabilities of already-registered nodes. Host policy remains the only grant source.\n\nPhase 5.9 freezes a dependency-free secret-reference/provider boundary without implementing a concrete vault, environment, or keychain backend. Graph JSON and Execution IR continue to carry opaque secret references only. `SecretValue` keeps resolved plaintext in a JavaScript private slot, redacts ordinary string/JSON coercion, and requires an explicit `revealText()` call at the final integration boundary. `createNodeSecretAccessor(...)` is host-owned and node-scoped: executors can discover only their bound secret port names, cannot enumerate the provider or arbitrary references, resolution is lazy/cached, multiple bindings use `getAll()`, and provider failures are wrapped in safe Harness errors without forwarding provider exception text. Resolved secret material is deliberately not copied into Graph JSON, IR, durable attempt refs, checkpoints, or events. General payload/log redaction and deny-list enforcement remain Phase 5.15, while concrete provider integrations belong with later runtime/adapters."
+          if plan.count(anchor) != 1:
+              raise SystemExit(f"PLAN architecture anchor count: {plan.count(anchor)}")
+          plan = plan.replace(anchor, addition)
+          plan_path.write_text(plan)
+          PY
+
+          cd harness
+          npx prettier --write TODO.md PLAN.md
+          npm run format:check
+
+      - name: Push roadmap closeout
         shell: bash
         run: |
           git diff --check
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
-          git add harness/packages/plugin-api/src/secret-contract.test.ts harness/packages/core/src/node-secret-accessor.ts harness/packages/core/src/node-secret-accessor.test.ts
-          git commit -m "style(secrets): format scoped secret boundary"
+          git add harness/TODO.md harness/PLAN.md
+          git commit -m "docs: advance Harness roadmap to 5.10"
           git push origin HEAD:zet-harness-v1
