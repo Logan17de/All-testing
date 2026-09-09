@@ -22,6 +22,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           todo_path = Path('harness/TODO.md')
           todo = todo_path.read_text()
@@ -33,14 +34,18 @@ jobs:
 
           plan_path = Path('harness/PLAN.md')
           plan = plan_path.read_text()
-          old_tree = '''           ├─ 5.6 compile-time graph/node capability enforcement                ✅
-           └─ 5.7 invocation-time capability re-check                           ▶ CURRENT'''
-          new_tree = '''           ├─ 5.6 compile-time graph/node capability enforcement                ✅
-           ├─ 5.7 invocation-time capability re-check                           ✅
-           └─ 5.8 model/plugin self-grant prevention                            ▶ CURRENT'''
-          if plan.count(old_tree) != 1:
-              raise SystemExit(f'PLAN tree anchor mismatch: {plan.count(old_tree)}')
-          plan = plan.replace(old_tree, new_tree)
+          tree_pattern = re.compile(
+              r'(?m)^(\s*)├─ 5\.6 compile-time graph/node capability enforcement\s+✅\n'
+              r'\1└─ 5\.7 invocation-time capability re-check\s+▶ CURRENT$'
+          )
+          tree_replacement = (
+              r'\1├─ 5.6 compile-time graph/node capability enforcement                ✅\n'
+              r'\1├─ 5.7 invocation-time capability re-check                           ✅\n'
+              r'\1└─ 5.8 model/plugin self-grant prevention                            ▶ CURRENT'
+          )
+          plan, tree_count = tree_pattern.subn(tree_replacement, plan)
+          if tree_count != 1:
+              raise SystemExit(f'PLAN tree anchor mismatch: {tree_count}')
 
           old_phase = '🚧 In progress — **5.7 current**'
           new_phase = '🚧 In progress — **5.8 current**'
