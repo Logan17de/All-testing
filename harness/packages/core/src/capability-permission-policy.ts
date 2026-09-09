@@ -130,8 +130,7 @@ export class CapabilityPermissionPolicy {
     }
 
     return Object.freeze({
-      allowed:
-        explicitlyDeniedCapabilities.length === 0 && notGrantedCapabilities.length === 0,
+      allowed: explicitlyDeniedCapabilities.length === 0 && notGrantedCapabilities.length === 0,
       evaluations,
       allowedCapabilities: Object.freeze(allowedCapabilities),
       explicitlyDeniedCapabilities: Object.freeze(explicitlyDeniedCapabilities),

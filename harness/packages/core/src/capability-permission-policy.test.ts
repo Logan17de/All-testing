@@ -43,9 +43,7 @@ describe("CapabilityPermissionPolicy", () => {
       denied: ["network:https"],
     });
 
-    expect(
-      policy.evaluateAll(["fs:read", "network:https", "shell:run", "fs:read"]),
-    ).toEqual({
+    expect(policy.evaluateAll(["fs:read", "network:https", "shell:run", "fs:read"])).toEqual({
       allowed: false,
       evaluations: [
         { capability: "fs:read", decision: "allow" },
