@@ -42,10 +42,15 @@ function assertPort(port: string): void {
  * code can discover only bound port names and resolve material for those ports;
  * it cannot enumerate the provider or ask for an arbitrary reference. Resolution
  * is lazy and cached per reference for the lifetime of this accessor.
+ *
+ * The optional host observer registers material with a log/payload redactor before
+ * it is exposed to node code. It is captured at construction and never appears on
+ * the node-facing accessor. Observer failure fails closed with a safe error.
  */
 export function createNodeSecretAccessor(
   bindings: readonly NodeSecretBinding[],
   provider: SecretProvider,
+  onResolve?: (value: SecretValue) => void,
 ): NodeSecretAccessor {
   const refsByPort = new Map<string, SecretReference[]>();
 
@@ -86,6 +91,7 @@ export function createNodeSecretAccessor(
             `Secret provider returned an invalid value for port '${port}'.`,
           );
         }
+        onResolve?.(value);
         return value;
       })
       .catch((error: unknown) => {

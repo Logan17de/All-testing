@@ -56,6 +56,10 @@ function tokenHash(token: string): string {
   return digest(`zet-approval-resume/v1\u0000${token}`);
 }
 
+function isStringList(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((item: unknown) => typeof item === "string");
+}
+
 function assertId(value: string): void {
   if (
     typeof value !== "string" ||
@@ -520,9 +524,9 @@ export class RuntimeHumanApprovals {
     const intent = ir.policies?.capabilities;
     if (
       intent === undefined ||
-      !Array.isArray(intent.required) ||
-      !Array.isArray(intent.deny) ||
-      !Array.isArray(gate.behavior.requiredCapabilities)
+      !isStringList(intent.required) ||
+      !isStringList(intent.deny) ||
+      !isStringList(gate.behavior.requiredCapabilities)
     ) {
       throw new RuntimeApprovalError("APPROVAL_UNSUPPORTED_GRAPH");
     }
@@ -530,7 +534,6 @@ export class RuntimeHumanApprovals {
       ? new Set([...intent.required, ...gate.behavior.requiredCapabilities])
       : []) {
       if (
-        typeof capability !== "string" ||
         intent.deny.includes(capability) ||
         this.#evaluate?.(capability).decision !== "allow"
       ) {

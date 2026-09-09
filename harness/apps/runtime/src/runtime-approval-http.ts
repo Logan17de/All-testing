@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { RuntimeApiSecurity, RuntimeApiSecurityError } from "./runtime-api-security.js";
+import { RuntimeApiSecurityError, type RuntimeApiSecurity } from "./runtime-api-security.js";
 import { RuntimeApprovalError } from "./runtime-approval-error.js";
 import type { RuntimeHumanApprovals } from "./runtime-human-approvals.js";
-import { RuntimeRedactionRegistry } from "./runtime-redaction.js";
+import type { RuntimeRedactionRegistry } from "./runtime-redaction.js";
 
 export function writeRuntimeJson(response: ServerResponse, status: number, body: unknown): void {
   const payload = `${JSON.stringify(body)}\n`;
