@@ -14,6 +14,16 @@ const baseBehavior: NodeBehavior = {
   requiredCapabilities: [],
 };
 
+const compileOnlyBehavior: NodeBehavior = {
+  primitiveFamily: "control",
+  determinism: "deterministic",
+  effect: "none",
+  idempotency: "not-applicable",
+  recovery: "not-applicable",
+  executionMode: "none",
+  requiredCapabilities: [],
+};
+
 function behavior(overrides: Partial<NodeBehavior>): NodeBehavior {
   return { ...baseBehavior, ...overrides };
 }
@@ -25,16 +35,7 @@ function codes(value: NodeBehavior): readonly string[] {
 describe("NodeBehavior cross-field policy", () => {
   it("accepts pure executable and compile-time/control behavior shapes", () => {
     expect(validateNodeBehaviorPolicy(baseBehavior)).toBe(true);
-    expect(
-      validateNodeBehaviorPolicy(
-        behavior({
-          primitiveFamily: "control",
-          recovery: "not-applicable",
-          executionMode: "none",
-          retry: undefined,
-        }),
-      ),
-    ).toBe(true);
+    expect(validateNodeBehaviorPolicy(compileOnlyBehavior)).toBe(true);
   });
 
   it("keeps determinism separate from side-effect idempotency", () => {
@@ -91,30 +92,19 @@ describe("NodeBehavior cross-field policy", () => {
   });
 
   it("requires recovery to agree with runtime executability", () => {
-    expect(
-      codes(
-        behavior({
-          primitiveFamily: "control",
-          recovery: "rerun",
-          executionMode: "none",
-          retry: undefined,
-        }),
-      ),
-    ).toEqual(["NODE_BEHAVIOR_RECOVERY_INVALID"]);
+    expect(codes({ ...compileOnlyBehavior, recovery: "rerun" })).toEqual([
+      "NODE_BEHAVIOR_RECOVERY_INVALID",
+    ]);
     expect(codes(behavior({ recovery: "not-applicable" }))).toEqual([
       "NODE_BEHAVIOR_RECOVERY_INVALID",
     ]);
     expect(
-      codes(
-        behavior({
-          primitiveFamily: "effect",
-          effect: "external-read",
-          idempotency: "idempotent",
-          recovery: "not-applicable",
-          executionMode: "none",
-          retry: undefined,
-        }),
-      ),
+      codes({
+        ...compileOnlyBehavior,
+        primitiveFamily: "effect",
+        effect: "external-read",
+        idempotency: "idempotent",
+      }),
     ).toEqual(["NODE_BEHAVIOR_EFFECT_EXECUTION_MODE_INVALID"]);
   });
 
