@@ -1,0 +1,75 @@
+name: Harness 5.6 Roadmap Handoff
+
+on:
+  push:
+    branches: [zet-harness-v1]
+    paths:
+      - .github/workflows/harness-5-6-roadmap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+      - name: Advance 5.6 to 5.7
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          todo_path = Path("harness/TODO.md")
+          todo = todo_path.read_text()
+          old_todo = "- [ ] 5.6 Enforce graph/node capabilities at compile time."
+          new_todo = "- [x] 5.6 Enforce graph/node capabilities at compile time."
+          if old_todo not in todo:
+              raise SystemExit("TODO 5.6 marker not found")
+          todo_path.write_text(todo.replace(old_todo, new_todo, 1))
+
+          plan_path = Path("harness/PLAN.md")
+          plan = plan_path.read_text()
+
+          old_tree = """           ├─ 5.5 capability-based permission policy                           ✅
+           └─ 5.6 compile-time graph/node capability enforcement                ▶ CURRENT"""
+          new_tree = """           ├─ 5.5 capability-based permission policy                           ✅
+           ├─ 5.6 compile-time graph/node capability enforcement                ✅
+           └─ 5.7 invocation-time capability re-check                           ▶ CURRENT"""
+          if old_tree not in plan:
+              raise SystemExit("PLAN Phase 5 tree marker not found")
+          plan = plan.replace(old_tree, new_tree, 1)
+
+          old_status = "🚧 In progress — **5.6 current**"
+          if old_status not in plan:
+              raise SystemExit("PLAN phase-map 5.6 status marker not found")
+          plan = plan.replace(old_status, "🚧 In progress — **5.7 current**", 1)
+
+          paragraph = """Phase 5.6 reuses the existing 2.13 capability/policy validation stage as the sole compile-time enforcement owner. That stage now consumes a narrow host authority evaluator structurally satisfied by the 5.5 `CapabilityPermissionPolicy`, without adding a Graph→Core package dependency. Graph-required requests and manifest-required node capabilities must be host-allowed before compilation proceeds; an explicit host deny maps to the frozen `GRAPH_CAPABILITY_REQUIRED_DENIED` diagnostic, an absent grant maps to `GRAPH_CAPABILITY_REQUIRED_UNAVAILABLE`, graph `deny` can still only reduce authority, and optional requests remain opportunistic. Authority decisions are cached once per capability for a validation pass so a single compile cannot observe policy drift for the same capability. Graph/node/plugin declarations remain capability demand rather than sources of authority. Phase 5.7 re-checks actual capability use at invocation time against the same host policy semantics."""
+          if paragraph not in plan:
+              anchor = "\n\nPhase 4.10 adds migration v4"
+              if anchor not in plan:
+                  raise SystemExit("PLAN Phase 5.6 insertion anchor not found")
+              plan = plan.replace(anchor, "\n\n" + paragraph + anchor, 1)
+
+          old_next = "> **Phase 5 / Item 5.6 — Enforce graph/node capabilities at compile time using the host-owned capability permission policy.**"
+          if old_next in plan:
+              plan = plan.replace(
+                  old_next,
+                  "> **Phase 5 / Item 5.7 — Re-check actual capability use at invocation time against host-owned permission authority.**",
+                  1,
+              )
+
+          plan_path.write_text(plan)
+          PY
+      - name: Commit roadmap handoff and remove helper
+        shell: bash
+        run: |
+          rm .github/workflows/harness-5-6-roadmap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/PLAN.md .github/workflows/harness-5-6-roadmap.yml
+          git commit -m "docs: complete Harness 5.6 compile capability enforcement"
+          git push origin HEAD:zet-harness-v1
