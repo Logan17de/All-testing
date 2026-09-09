@@ -1,3 +1,4 @@
+// Phase 5.6 integration proves the real host policy gates compilation without adding Graph-to-Core coupling.
 import { describe, expect, it } from "vitest";
 
 import { CapabilityPermissionPolicy } from "@zet-harness/core";
