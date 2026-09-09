@@ -26,6 +26,8 @@ export interface NodeBehaviorPolicyResult {
  *
  * This helper is deliberately dependency-free and does not inspect graph state,
  * capabilities, retry counts, executor implementation, or runtime history.
+ * Node registration and compiler validation consume this same result so invalid
+ * behavior metadata has one shared definition across those boundaries.
  * Determinism is intentionally orthogonal to repeat safety: deterministic output
  * does not make an external write safe to repeat, and a nondeterministic read can
  * still be side-effect-idempotent.
