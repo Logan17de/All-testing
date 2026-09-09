@@ -389,20 +389,15 @@ function assertRunningAttemptIdentity(
  * state. This prevents a reconciliation observation from being mistaken for an
  * already-committed node completion.
  */
-export function commitAmbiguousExternalWriteRecoveryOutcome(
+export async function commitAmbiguousExternalWriteRecoveryOutcome(
   database: SerializedSqliteCommitPath,
   input: CommitAmbiguousExternalWriteRecoveryOutcomeInput,
 ): Promise<AmbiguousExternalWriteRecoveryState> {
-  let disposition: EffectRecoveryDisposition;
-  try {
-    if (input.runId.length === 0) {
-      throw new TypeError("Effect recovery runId must not be empty.");
-    }
-    initialAction(input.classification);
-    disposition = validateResolution(input.resolution);
-  } catch (error) {
-    return Promise.reject(error);
+  if (input.runId.length === 0) {
+    throw new TypeError("Effect recovery runId must not be empty.");
   }
+  initialAction(input.classification);
+  const disposition = validateResolution(input.resolution);
 
   return database.commit((connection) => {
     assertRunningAttemptIdentity(connection, input);
