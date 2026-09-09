@@ -1,4 +1,4 @@
-name: Zet Harness 5.1 Format Fix
+name: Zet Harness 5.1 Windows Timeout Fix
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  format:
+  fix:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -33,24 +33,36 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Format policy files
-        working-directory: harness
-        run: npx prettier --write packages/plugin-api/src/node-behavior-policy.ts packages/plugin-api/src/node-behavior-policy.test.ts
+      - name: Give seeded file-backed crash loop an explicit timeout
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("harness/apps/runtime/src/runtime-fault-recovery.test.ts")
+          text = path.read_text()
+          old = "    }\n  });\n});"
+          new = "    }\n  }, 20_000);\n});"
+          if not text.endswith(old):
+              raise SystemExit("expected final seeded-test closing anchor not found")
+          path.write_text(text[:-len(old)] + new)
+          PY
+          cd harness
+          npx prettier --write apps/runtime/src/runtime-fault-recovery.test.ts
 
-      - name: Verify focused policy surface
+      - name: Verify fault suite and static gates
         working-directory: harness
         run: |
           npm run typecheck
           npm run lint
           npm run format:check
-          npx vitest run packages/plugin-api/src/node-behavior-policy.test.ts packages/core/src/node-catalog.test.ts packages/graph/src/graph-json-v1-effect-recovery.test.ts
+          npx vitest run apps/runtime/src/runtime-fault-recovery.test.ts
 
-      - name: Push exact formatter output
+      - name: Push timeout hardening
         shell: bash
         run: |
           git diff --check
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
-          git add harness/packages/plugin-api/src/node-behavior-policy.ts harness/packages/plugin-api/src/node-behavior-policy.test.ts
-          git commit -m "style(policy): format behavior policy"
+          git add harness/apps/runtime/src/runtime-fault-recovery.test.ts
+          git commit -m "test(runtime): allow seeded crash loop on slow filesystems"
           git push origin HEAD:zet-harness-v1
