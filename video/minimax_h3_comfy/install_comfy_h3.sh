@@ -24,11 +24,14 @@ else
 fi
 
 python -m pip install -q -r "$COMFY_ROOT/requirements.txt"
-python -m pip install -q -U "huggingface_hub[hf_xet]" requests imageio-ffmpeg
+python -m pip install -q -U "huggingface_hub[hf_xet]" requests imageio-ffmpeg websocket-client
 
 mkdir -p "$COMFY_ROOT/custom_nodes"
 if [[ -d "$EXTENDER_DIR/.git" ]]; then
   echo "Updating MiniMax H3 Extender..."
+  # Our UI compatibility patch modifies extender.js; reset that generated patch
+  # before updating so rerunning the setup cell in one Colab session is safe.
+  git -C "$EXTENDER_DIR" reset --hard HEAD >/dev/null
   git -C "$EXTENDER_DIR" pull --ff-only
 else
   echo "Installing MiniMax H3 Extender..."
@@ -38,9 +41,6 @@ if [[ -f "$EXTENDER_DIR/requirements.txt" ]]; then
   python -m pip install -q -r "$EXTENDER_DIR/requirements.txt"
 fi
 
-# Current ComfyUI Nodes 2.0 can collapse the Extender DOM timeline to roughly
-# one fixed card width after Add/Remove Clip. Keep the upstream 318 px cards and
-# horizontal scrolling, but force the timeline host to use the full node width.
 if [[ -f "$SCRIPT_DIR/patch_extender_ui.py" ]]; then
   python "$SCRIPT_DIR/patch_extender_ui.py" "$EXTENDER_DIR/web/extender.js"
 fi
@@ -55,6 +55,7 @@ if [[ -n "$H3_DRIVE_ROOT" ]]; then
 
   if [[ "$H3_PERSIST_MODELS" == "1" ]]; then
     echo "Using Drive-backed H3 model folders: $H3_DRIVE_ROOT/models"
+    echo "NOTE: local VM model storage is faster; Drive-backed weights are for convenience only."
     for sub in diffusion_models text_encoders vae loras; do
       mkdir -p "$H3_DRIVE_ROOT/models/$sub"
       rm -rf "$COMFY_ROOT/models/$sub"
@@ -79,7 +80,11 @@ mkdir -p \
   "$COMFY_ROOT/output" \
   "$COMFY_ROOT/user/default/workflows"
 
+# Remove stale bytecode after updating custom nodes in a reused runtime.
+find "$EXTENDER_DIR" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+
 echo
 echo "Setup complete."
 echo "ComfyUI:  $COMFY_ROOT"
 echo "Extender: $EXTENDER_DIR"
+git -C "$EXTENDER_DIR" log -1 --oneline || true
