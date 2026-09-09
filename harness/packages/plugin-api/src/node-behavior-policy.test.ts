@@ -139,6 +139,7 @@ describe("NodeBehavior cross-field policy", () => {
     ]);
   });
 
+  // Phase 5.3 owns retry ceilings; 5.1 validates only behavior cross-fields.
   it("leaves effect-aware retry ceilings to the separate retry-policy layer", () => {
     expect(
       validateNodeBehaviorPolicy(
