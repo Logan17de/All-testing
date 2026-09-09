@@ -84,7 +84,7 @@ describe("Phase 5.8 capability authority provenance", () => {
         apiVersion: PLUGIN_API_VERSION,
       },
       activate(context) {
-        expect(Reflect.ownKeys(context).sort()).toEqual(["nodes", "onDispose"]);
+        expect(Reflect.ownKeys(context).sort()).toEqual(["models", "nodes", "onDispose", "tools"]);
         expect(Reflect.ownKeys(context.nodes)).toEqual(["register"]);
         expect(Object.isFrozen(context)).toBe(true);
         expect(Object.isFrozen(context.nodes)).toBe(true);

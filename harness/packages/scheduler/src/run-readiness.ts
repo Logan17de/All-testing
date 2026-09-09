@@ -42,7 +42,7 @@ export class RunReadiness {
   private readonly readyQueue: number[] = [];
   private readyHead = 0;
 
-  constructor(ir: ExecutionIrV1) {
+  constructor(ir: ExecutionIrV1, restored?: RunReadinessSnapshot) {
     const dependents = Array.from({ length: ir.ops.length }, () => [] as number[]);
 
     this.ops = ir.ops.map((_, op) => createRunOpState(op));
@@ -64,10 +64,57 @@ export class RunReadiness {
     this.dependents = Object.freeze(dependents.map((targets) => Object.freeze([...targets])));
 
     for (let op = 0; op < this.ops.length; op += 1) {
-      if (this.remainingDependencies[op] === 0) {
-        this.markReady(op);
-      }
+      if (this.remainingDependencies[op] === 0) this.markReady(op);
     }
+    if (restored !== undefined) this.restore(ir, restored);
+  }
+
+  /** Restore a quiescent plain-DAG frontier, never an unclassified running attempt. */
+  private restore(ir: ExecutionIrV1, restored: RunReadinessSnapshot): void {
+    const count = this.ops.length;
+    const allowed = new Set(["pending", "ready", "completed", "waiting", "retry-wait"]);
+    if (restored.ops.length !== count || restored.remainingDependencies.length !== count) {
+      throw new TypeError("Restored readiness must cover the exact Execution IR op domain.");
+    }
+    const queued = new Set(restored.readyQueue);
+    if (queued.size !== restored.readyQueue.length) {
+      throw new TypeError("Restored readiness contains duplicate queue entries.");
+    }
+    for (const op of queued) assertOpIndex(op, count);
+    restored.ops.forEach((state, op) => {
+      if (state.op !== op || !allowed.has(state.status)) {
+        throw new TypeError("Restored readiness contains an unsupported op state.");
+      }
+      const expected = this.dependencies[op]!.filter(
+        (source) => restored.ops[source]?.status !== "completed",
+      ).length;
+      if (
+        restored.remainingDependencies[op] !== expected ||
+        (state.status === "pending" ? expected === 0 : expected !== 0) ||
+        queued.has(op) !== (state.status === "ready") ||
+        (state.status === "waiting" && ir.ops[op]?.behavior.primitiveFamily !== "interrupt")
+      ) {
+        throw new TypeError("Restored readiness contradicts committed dependency state.");
+      }
+    });
+    this.readyQueue.length = 0;
+    this.readyHead = 0;
+    this.readyQueue.push(...restored.readyQueue);
+    restored.ops.forEach((state, op) => {
+      this.ops[op] = Object.freeze({ ...state });
+      this.remainingDependencies[op] = restored.remainingDependencies[op]!;
+      this.releasedDependencies[op] = new Set(
+        this.dependencies[op]!.filter((source) => restored.ops[source]?.status === "completed"),
+      );
+    });
+  }
+
+  /** Commit-backed human wait. No executor attempt or dependency is consumed here. */
+  waitReadyOp(op: number): void {
+    if (this.peekReadyOp() !== op) throw new TypeError("Human gate must be FIFO ready.");
+    this.dequeueReadyOp();
+    this.startReservedReadyOp(op);
+    this.ops[op] = transitionRunOpState(this.getOpState(op), "waiting");
   }
 
   get opCount(): number {

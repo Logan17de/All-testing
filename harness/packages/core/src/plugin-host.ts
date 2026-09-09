@@ -10,6 +10,7 @@ import {
 
 import { snapshotPluginManifest } from "./immutable-manifest.js";
 import { NodeCatalog } from "./node-catalog.js";
+import { ModelCatalog, ToolCatalog } from "./adapter-catalog.js";
 
 interface ActivePlugin {
   readonly manifest: PluginManifest;
@@ -87,6 +88,8 @@ export class PluginHost {
   private readonly activating = new Set<string>();
 
   readonly nodes: NodeCatalog;
+  readonly models = new ModelCatalog();
+  readonly tools = new ToolCatalog();
 
   constructor(nodes = new NodeCatalog()) {
     this.nodes = nodes;
@@ -142,6 +145,30 @@ export class PluginHost {
           );
         },
       },
+      models: {
+        register: (adapter): void => {
+          assertActivationOpen("register a model");
+          disposers.push(
+            this.models.register(
+              adapter,
+              { id: manifest.id, version: manifest.version },
+              capabilityCeiling,
+            ),
+          );
+        },
+      },
+      tools: {
+        register: (adapter): void => {
+          assertActivationOpen("register a tool");
+          disposers.push(
+            this.tools.register(
+              adapter,
+              { id: manifest.id, version: manifest.version },
+              capabilityCeiling,
+            ),
+          );
+        },
+      },
       onDispose(disposer): void {
         assertActivationOpen("register cleanup");
 
@@ -153,6 +180,8 @@ export class PluginHost {
       },
     };
     Object.freeze(context.nodes);
+    Object.freeze(context.models);
+    Object.freeze(context.tools);
     Object.freeze(context);
 
     try {
