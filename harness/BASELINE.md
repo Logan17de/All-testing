@@ -17,7 +17,7 @@ Measured surfaces:
 - **scheduler overhead** — executes the same 64-op no-op chain through `PlainDagRun` with the normal concurrency coordinator;
 - **SQLite commit latency** — uses a temporary file-backed WAL database and `SqliteDatabase.commit()` with its serialized `BEGIN IMMEDIATE` transaction path and one prepared insert.
 
-Vitest benchmark output supplies timing statistics for compiler, scheduler, and SQLite measurements. Runtime startup/RSS samples are emitted as one machine-readable line beginning with `ZET_BASELINE_RUNTIME` and include sample count, median, p95, minimum, and maximum. `npm run baseline` also records the benchmark report under the ignored `tmp/baseline/` directory.
+Vitest benchmark output supplies timing statistics for compiler, scheduler, and SQLite measurements. Runtime startup/RSS samples are emitted as one machine-readable line beginning with `ZET_BASELINE_RUNTIME` and include sample count, median, p95, minimum, and maximum; the same structured runtime report is written directly to `tmp/baseline/runtime.json`. Vitest writes its benchmark report directly to `tmp/baseline/bench.json` under the same ignored directory.
 
 The command is verified on hosted Ubuntu and Windows runners. Observed measurements are samples from the machine that executed the command, not portable performance guarantees or fixed acceptance thresholds.
 
@@ -29,7 +29,7 @@ Phase 4.22 adds:
 npm run baseline:ci
 ```
 
-CI runs this command independently on `ubuntu-latest` and `windows-latest`. It captures the runtime JSON emitted by the existing baseline command, consumes Vitest 4's benchmark `--outputJson` report, compares the resulting medians with the checked-in per-OS reference in `baselines/lightweight-baseline-v1.json`, and writes `tmp/baseline/check.json` before returning success or failure.
+CI runs this command independently on `ubuntu-latest` and `windows-latest`. The baseline command produces `runtime.json` and Vitest 4's `bench.json` directly on disk; the checker consumes both reports, compares their medians with the checked-in per-OS reference in `baselines/lightweight-baseline-v1.json`, and writes `tmp/baseline/check.json` before returning success or failure. No console-output scraping sits in the CI path.
 
 The CI policy deliberately avoids cross-OS comparisons and brittle exact timing thresholds. For each numeric metric the upper guard is:
 
