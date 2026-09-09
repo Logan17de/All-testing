@@ -1,4 +1,4 @@
-// Phase 5.5 owns permission semantics; Phase 5.6 compiles against them, Phase 5.7 re-checks them at invocation time, and Phase 5.8 pins authority provenance. Phase 5.9 keeps secret material behind a host-owned node-scoped provider boundary.
+// Phase 5.5 owns permission semantics; Phase 5.6 compiles against them, Phase 5.7 re-checks them at invocation time, and Phase 5.8 pins authority provenance. Phase 5.9 keeps secret material behind a host-owned node-scoped provider boundary; Phase 5.10 next adds durable approval records.
 export {
   CapabilityPermissionPolicy,
   type CapabilityPermissionBatchResult,
