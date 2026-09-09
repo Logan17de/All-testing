@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./node-behavior-policy": "./src/node-behavior-policy.ts"
+    "./node-behavior-policy": "./src/node-behavior-policy.ts",
+    "./secret-contract": "./src/secret-contract.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
