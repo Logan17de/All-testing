@@ -1,4 +1,4 @@
-// Phase 5.5 owns permission semantics; Phase 5.6 now applies them at compile time.
+// Phase 5.5 owns permission semantics; Phase 5.6 applies them at compile time and Phase 5.7 reuses them at invocation time.
 export {
   CapabilityPermissionPolicy,
   type CapabilityPermissionBatchResult,
