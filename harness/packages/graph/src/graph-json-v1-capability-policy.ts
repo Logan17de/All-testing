@@ -4,12 +4,11 @@ import { GRAPH_LOOP_MAX_ITERATIONS_CONFIG_KEY } from "./graph-json-v1-loop-bound
 import type { GraphJsonV1 } from "./graph-json-v1.js";
 import type { NodeManifestResolver } from "./graph-json-v1-semantic-validator.js";
 
-export type GraphCapabilityAuthorityEvaluation =
-  | { readonly decision: "allow" }
-  | {
-      readonly decision: "deny";
-      readonly denialReason: "explicitly-denied" | "not-granted";
-    };
+/** Structural shape intentionally matches the host Core permission evaluation. */
+export interface GraphCapabilityAuthorityEvaluation {
+  readonly decision: "allow" | "deny";
+  readonly denialReason?: "explicitly-denied" | "not-granted";
+}
 
 /**
  * Narrow host-authority contract consumed by compilation.
