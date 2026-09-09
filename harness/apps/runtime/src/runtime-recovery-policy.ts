@@ -46,7 +46,9 @@ function recoveryPolicyFor(
  * `rerun` is the only immediately runnable classification. A still-running
  * attempt has no committed terminal result, so `reuse`, `reconcile`, and
  * `manual` remain explicit holds until the corresponding recovery mechanism
- * resolves the uncertain pre-crash execution. Classification itself never
+ * resolves the uncertain pre-crash execution. Phase 5.4 consumes the reconcile
+ * and manual holds through explicit durable recovery outcomes rather than
+ * changing this classifier into an effect observer. Classification itself never
  * mutates scheduler state, durable attempt rows, or retry-budget accounting.
  */
 export function classifyPreCrashRunningAttempts(
