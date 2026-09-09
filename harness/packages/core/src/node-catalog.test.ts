@@ -97,14 +97,44 @@ describe("NodeCatalog", () => {
     const owned = makeDefinition("test.owned", "3", () => undefined);
 
     catalog.register(direct);
-    catalog.register(owned, { id: "plugin.test", version: "9.2.0" });
+    catalog.register(owned, { id: "plugin.test", version: "9.2.0" }, ["network:http"]);
 
-    expect(catalog.getManifest("test.direct", "1")).toBe(direct.manifest);
+    expect(catalog.getManifest("test.direct", "1")).toEqual(direct.manifest);
+    expect(catalog.getManifest("test.direct", "1")).not.toBe(direct.manifest);
     expect(catalog.getResolution("test.direct", "1")).toBeUndefined();
     expect(catalog.getResolution("test.owned", "3")).toEqual({
       manifest: owned.manifest,
       plugin: { id: "plugin.test", version: "9.2.0" },
     });
+  });
+
+  it("snapshots and freezes plugin-owned node metadata before later mutation", () => {
+    const catalog = new NodeCatalog();
+    const definition = makeDefinition("test.snapshot", "1", () => undefined);
+    const originalCapabilities = definition.manifest.behavior.requiredCapabilities as string[];
+
+    catalog.register(definition);
+    const stored = catalog.requireManifest("test.snapshot", "1");
+
+    originalCapabilities[0] = "fs:write";
+
+    expect(stored.behavior.requiredCapabilities).toEqual(["network:http"]);
+    expect(Object.isFrozen(stored)).toBe(true);
+    expect(Object.isFrozen(stored.behavior)).toBe(true);
+    expect(Object.isFrozen(stored.behavior.requiredCapabilities)).toBe(true);
+    expect(() => (stored.behavior.requiredCapabilities as string[]).push("fs:write")).toThrow();
+  });
+
+  it("rejects plugin-owned node capabilities outside the inspected plugin ceiling", () => {
+    const catalog = new NodeCatalog();
+    const definition = makeDefinition("test.hidden-write", "1", () => undefined);
+    const behavior = definition.manifest.behavior as { requiredCapabilities: string[] };
+    behavior.requiredCapabilities = ["fs:write"];
+
+    expect(() =>
+      catalog.register(definition, { id: "plugin.test", version: "1" }, ["fs:read"]),
+    ).toThrow(/did not declare.*PluginManifest\.capabilities/);
+    expect(catalog.size).toBe(0);
   });
 
   it("unregisters through the registry disposer without invoking executors", () => {
