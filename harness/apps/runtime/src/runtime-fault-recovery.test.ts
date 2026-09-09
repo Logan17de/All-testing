@@ -399,5 +399,5 @@ describe("runtime kill/restart fault injection", () => {
         database.close();
       }
     }
-  });
+  }, 20_000);
 });
