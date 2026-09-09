@@ -1,0 +1,49 @@
+name: Harness 5.4 Format Repair
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-5-4-format.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: harness
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Clean install
+        run: npm ci --no-audit --no-fund
+
+      - name: Format 5.4 files
+        run: npx prettier --write apps/runtime/src/runtime-effect-recovery.ts apps/runtime/src/runtime-effect-recovery.test.ts apps/runtime/src/index.ts
+
+      - name: Commit exact formatter output
+        shell: bash
+        run: |
+          if git diff --quiet -- apps/runtime/src/runtime-effect-recovery.ts apps/runtime/src/runtime-effect-recovery.test.ts apps/runtime/src/index.ts; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/runtime/src/runtime-effect-recovery.ts apps/runtime/src/runtime-effect-recovery.test.ts apps/runtime/src/index.ts
+          git commit -m "style(runtime): format Harness 5.4 recovery outcomes"
+          git push
