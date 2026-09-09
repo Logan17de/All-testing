@@ -36,6 +36,32 @@ function isRetryAccountingError(error: unknown): boolean {
   return typeof error === "object" && error !== null && RETRY_ACCOUNTING_ERRORS.has(error);
 }
 
+/** Runtime repeat-safety requirement derived only from effect/idempotency semantics. */
+export type PlainDagEffectRetryRequirement = "safe" | "stable-idempotency-key" | "forbidden";
+
+/**
+ * Classify whether repeating one scheduler-visible operation is effect-safe.
+ *
+ * This is runtime policy, not another behavior validator. The compiler/plugin
+ * boundaries own contradictory metadata and malformed retry declarations. The
+ * scheduler consumes already-frozen IR defensively and never treats deterministic
+ * output, a retry budget, or stable logical effect identity as retry authority.
+ */
+export function classifyPlainDagEffectRetryRequirement(
+  behavior: Pick<ExecutionIrOpV1["behavior"], "effect" | "idempotency">,
+): PlainDagEffectRetryRequirement {
+  if (behavior.effect === "none" || behavior.effect === "external-read") {
+    return "safe";
+  }
+  if (behavior.idempotency === "idempotent") {
+    return "safe";
+  }
+  if (behavior.idempotency === "idempotency-key") {
+    return "stable-idempotency-key";
+  }
+  return "forbidden";
+}
+
 /**
  * Shared attempt budget for one scheduler-owned execution attempt.
  *
@@ -45,9 +71,15 @@ function isRetryAccountingError(error: unknown): boolean {
  */
 export interface PlainDagRetryBudget {
   readonly maxAttempts: number;
+  /** Whether effect-aware runtime policy permits repeating this logical op. */
+  readonly repeatAuthorized: boolean;
   /** Total scheduler attempts plus reported internal retries charged so far. */
   readonly usedAttempts: number;
-  /** Additional attempts still available after everything charged so far. */
+  /**
+   * Additional effect-authorized attempts still available after everything
+   * charged so far. This is zero when repeat safety is not authorized even when
+   * the static IR maxAttempts ceiling is greater than one.
+   */
   readonly remainingAttempts: number;
   /**
    * Charge one or more adapter/executor-internal retries to this logical op.
@@ -125,8 +157,26 @@ export interface PlainDagRetryHooks {
   readonly jitter?: (context: PlainDagRetryJitterContext) => number;
 }
 
+/** Runtime proof boundary for a key-backed external write. */
+export interface PlainDagIdempotencyKeyRetryContext {
+  readonly op: number;
+  readonly operation: ExecutionIrOpV1;
+}
+
+export interface PlainDagEffectRetryOptions {
+  /**
+   * Return true only when a stable Harness-owned idempotency key has already been
+   * bound to the logical external operation that the executor/integration will
+   * repeat. Merely having a persisted logical effect identity is not sufficient.
+   * The result is cached for the logical op so retry authority cannot change
+   * between scheduler attempts.
+   */
+  readonly hasBoundIdempotencyKey?: (context: PlainDagIdempotencyKeyRetryContext) => boolean;
+}
+
 export interface PlainDagRunOptions {
   readonly retry?: PlainDagRetryHooks;
+  readonly effectRetry?: PlainDagEffectRetryOptions;
   /**
    * Optional post-execution gate that must resolve before completion becomes
    * scheduler-visible. Durable runtimes use this for the atomic completion
@@ -322,6 +372,13 @@ function waitForSettlementOrAbort(
  * Retry-accounting contract violations are terminal and never schedule another
  * outer retry while preserving their original TypeError/RangeError identity.
  *
+ * 5.3 adds effect-aware repeat authorization without changing Graph/IR validation:
+ * side-effect-free work, external reads, and idempotent writes can consume the
+ * configured retry budget; unknown external writes cannot repeat; key-backed
+ * writes require an explicit runtime assertion that a stable idempotency key is
+ * bound to the integration operation. The same gate clamps adapter/internal
+ * retries, so retry layers cannot bypass effect safety by sharing only a number.
+ *
  * Retry waits are liveness tasks, not active execution tasks. They keep the run
  * alive while backoff is pending but never block dispatch of unrelated ready work.
  * Zero-delay retries use an immediate Promise path rather than a timer.
@@ -349,6 +406,7 @@ export class PlainDagRun {
   private readonly retryWaitTasks = new Set<Promise<void>>();
   private readonly attempts: number[];
   private readonly attemptBudgetUsed: number[];
+  private readonly repeatAuthorizations: Array<boolean | undefined>;
   private started = false;
   private settled = false;
   private hasFailure = false;
@@ -364,6 +422,7 @@ export class PlainDagRun {
     this.readiness = new RunReadiness(ir);
     this.attempts = ir.ops.map(() => 0);
     this.attemptBudgetUsed = ir.ops.map(() => 0);
+    this.repeatAuthorizations = ir.ops.map(() => undefined);
   }
 
   get signal(): AbortSignal {
@@ -456,6 +515,7 @@ export class PlainDagRun {
   private async executeReservedOp(op: number): Promise<void> {
     let permit: ConcurrencyPermit | undefined;
     let priorAttemptSettlement: Promise<void> | undefined;
+    let repeatAuthorized = false;
 
     try {
       permit = await this.concurrency.acquire(this.workStopController.signal);
@@ -471,8 +531,9 @@ export class PlainDagRun {
       }
 
       const maxAttempts = operation.behavior.retry?.maxAttempts ?? 1;
+      repeatAuthorized = this.resolveRepeatAuthorization(op, operation, maxAttempts);
       const attempt = this.startAttempt(op, maxAttempts);
-      const retryBudgetScope = this.createRetryBudgetScope(op, maxAttempts);
+      const retryBudgetScope = this.createRetryBudgetScope(op, maxAttempts, repeatAuthorized);
 
       try {
         const timeoutMs = operation.behavior.timeoutMs;
@@ -612,6 +673,7 @@ export class PlainDagRun {
 
       if (
         operation !== undefined &&
+        repeatAuthorized &&
         current.status === "running" &&
         attemptBudgetUsed < maxAttempts
       ) {
@@ -683,6 +745,44 @@ export class PlainDagRun {
     }
   }
 
+  private resolveRepeatAuthorization(
+    op: number,
+    operation: ExecutionIrOpV1,
+    maxAttempts: number,
+  ): boolean {
+    if (maxAttempts <= 1) {
+      return false;
+    }
+
+    const cached = this.repeatAuthorizations[op];
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const requirement = classifyPlainDagEffectRetryRequirement(operation.behavior);
+    let authorized: boolean;
+    switch (requirement) {
+      case "safe":
+        authorized = true;
+        break;
+      case "stable-idempotency-key":
+        authorized =
+          this.options.effectRetry?.hasBoundIdempotencyKey?.(
+            Object.freeze({
+              op,
+              operation,
+            }),
+          ) === true;
+        break;
+      case "forbidden":
+        authorized = false;
+        break;
+    }
+
+    this.repeatAuthorizations[op] = authorized;
+    return authorized;
+  }
+
   private startAttempt(op: number, maxAttempts: number): number {
     const current = this.attempts[op];
     const budgetUsed = this.attemptBudgetUsed[op];
@@ -705,7 +805,11 @@ export class PlainDagRun {
     return next;
   }
 
-  private createRetryBudgetScope(op: number, maxAttempts: number): PlainDagRetryBudgetScope {
+  private createRetryBudgetScope(
+    op: number,
+    maxAttempts: number,
+    repeatAuthorized: boolean,
+  ): PlainDagRetryBudgetScope {
     let closed = false;
 
     const readUsedAttempts = (): number => {
@@ -718,11 +822,12 @@ export class PlainDagRun {
 
     const budget: PlainDagRetryBudget = Object.freeze({
       maxAttempts,
+      repeatAuthorized,
       get usedAttempts(): number {
         return readUsedAttempts();
       },
       get remainingAttempts(): number {
-        return maxAttempts - readUsedAttempts();
+        return repeatAuthorized ? maxAttempts - readUsedAttempts() : 0;
       },
       reportInternalRetries: (count = 1): number => {
         if (closed) {
@@ -736,6 +841,13 @@ export class PlainDagRun {
           throw retryAccountingError(
             new TypeError(
               `Run op ${String(op)} internal retry count must be a non-negative safe integer.`,
+            ),
+          );
+        }
+        if (count > 0 && !repeatAuthorized) {
+          throw retryAccountingError(
+            new TypeError(
+              `Run op ${String(op)} effect-aware retry policy does not authorize repeated execution.`,
             ),
           );
         }
