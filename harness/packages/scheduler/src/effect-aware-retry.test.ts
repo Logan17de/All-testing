@@ -12,11 +12,7 @@ import {
 type EffectClass = ExecutionIrOpV1["behavior"]["effect"];
 type Idempotency = ExecutionIrOpV1["behavior"]["idempotency"];
 
-function op(
-  effect: EffectClass,
-  idempotency: Idempotency,
-  maxAttempts = 3,
-): ExecutionIrOpV1 {
+function op(effect: EffectClass, idempotency: Idempotency, maxAttempts = 3): ExecutionIrOpV1 {
   return {
     sourceNodeId: "effect",
     type: "test.effect",
