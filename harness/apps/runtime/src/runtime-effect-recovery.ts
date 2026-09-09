@@ -393,11 +393,16 @@ export function commitAmbiguousExternalWriteRecoveryOutcome(
   database: SerializedSqliteCommitPath,
   input: CommitAmbiguousExternalWriteRecoveryOutcomeInput,
 ): Promise<AmbiguousExternalWriteRecoveryState> {
-  if (input.runId.length === 0) {
-    throw new TypeError("Effect recovery runId must not be empty.");
+  let disposition: EffectRecoveryDisposition;
+  try {
+    if (input.runId.length === 0) {
+      throw new TypeError("Effect recovery runId must not be empty.");
+    }
+    initialAction(input.classification);
+    disposition = validateResolution(input.resolution);
+  } catch (error) {
+    return Promise.reject(error);
   }
-  initialAction(input.classification);
-  const disposition = validateResolution(input.resolution);
 
   return database.commit((connection) => {
     assertRunningAttemptIdentity(connection, input);
