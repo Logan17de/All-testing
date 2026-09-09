@@ -152,8 +152,8 @@ Goal: make the scheduler durable without changing Graph/IR semantics.
 
 Goal: make side effects and privilege boundaries explicit before broad real-world tool use.
 
-- [ ] 5.1 Define and enforce cross-field effect/idempotency/recovery invariants over the Phase 1 node enums.
-- [ ] 5.2 Generate a stable logical effect/idempotency ID that survives retry attempts.
+- [x] 5.1 Define and enforce cross-field effect/idempotency/recovery invariants over the Phase 1 node enums.
+- [x] 5.2 Generate a stable logical effect/idempotency ID that survives retry attempts.
 - [ ] 5.3 Add effect-aware retry rules; never infer that an uncertain external write is safe to repeat.
 - [ ] 5.4 Add reconciliation/manual-review outcomes for ambiguous external writes.
 - [ ] 5.5 Add capability-based permission policy.
@@ -319,4 +319,4 @@ microVM sandbox by default
 
 ## Next action
 
-**5.1 — Define and enforce cross-field effect/idempotency/recovery invariants over the Phase 1 node enums.**
+**5.3 — Add effect-aware retry rules; never infer that an uncertain external write is safe to repeat.**
