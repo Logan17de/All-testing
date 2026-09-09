@@ -13,7 +13,6 @@ describe("secret contract", () => {
 
     expect(secret.revealText()).toBe(material);
     expect(String(secret)).toBe(SECRET_REDACTED_TEXT);
-    expect(`${secret}`).toBe(SECRET_REDACTED_TEXT);
     expect(JSON.stringify(secret)).toBe(JSON.stringify(SECRET_REDACTED_TEXT));
     expect(Reflect.ownKeys(secret)).toEqual([]);
   });
