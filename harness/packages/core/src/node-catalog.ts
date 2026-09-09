@@ -1,6 +1,13 @@
-import type { NodeDefinition, NodeManifest, NodeType, Version } from "@zet-harness/plugin-api";
+import type {
+  CapabilityId,
+  NodeDefinition,
+  NodeManifest,
+  NodeType,
+  Version,
+} from "@zet-harness/plugin-api";
 import { checkNodeBehaviorPolicy } from "@zet-harness/plugin-api/node-behavior-policy";
 
+import { snapshotNodeManifest } from "./immutable-manifest.js";
 import { TypedRegistry, type RegistryDisposer } from "./typed-registry.js";
 
 export interface NodeCatalogPluginPin {
@@ -32,8 +39,8 @@ function nodeKey(type: NodeType, version: Version): string {
   return `${type}\u0000${version}`;
 }
 
-function assertNodeBehaviorPolicy(definition: NodeDefinition): void {
-  const { type, version, behavior } = definition.manifest;
+function assertNodeBehaviorPolicy(manifest: NodeManifest): void {
+  const { type, version, behavior } = manifest;
   const result = checkNodeBehaviorPolicy(behavior);
   if (result.valid) {
     return;
@@ -43,6 +50,36 @@ function assertNodeBehaviorPolicy(definition: NodeDefinition): void {
     .map((violation) => `[${violation.code}] ${violation.field}: ${violation.message}`)
     .join("; ");
   throw new Error(`Node definition "${type}@${version}" has invalid behavior metadata: ${summary}`);
+}
+
+function assertPluginCapabilityCeiling(
+  manifest: NodeManifest,
+  plugin: NodeCatalogPluginPin | undefined,
+  capabilityCeiling: readonly CapabilityId[] | undefined,
+): void {
+  if (plugin === undefined) {
+    return;
+  }
+
+  const declared = new Set(capabilityCeiling ?? []);
+  for (const capability of manifest.behavior.requiredCapabilities) {
+    if (!declared.has(capability)) {
+      throw new Error(
+        `Node definition "${manifest.type}@${manifest.version}" requires capability ` +
+          `'${capability}' that owning plugin "${plugin.id}" did not declare in ` +
+          "PluginManifest.capabilities. Plugin capability declarations are an audit ceiling, not a grant.",
+      );
+    }
+  }
+}
+
+function snapshotDefinition(definition: NodeDefinition): NodeDefinition {
+  const manifest = snapshotNodeManifest(definition.manifest);
+  const execute = definition.execute;
+  return Object.freeze({
+    manifest,
+    ...(execute === undefined ? {} : { execute }),
+  });
 }
 
 /**
@@ -56,6 +93,11 @@ function assertNodeBehaviorPolicy(definition: NodeDefinition): void {
  * that contributed the node. Direct catalog registrations remain supported for
  * low-level tests and internal construction, but they intentionally have no
  * plugin provenance and therefore cannot satisfy compiler pinning on their own.
+ *
+ * Plugin-owned registrations are snapshotted before validation/storage. Their
+ * node capability requirements must remain inside the capability declarations
+ * inspected from the owning plugin manifest; neither declaration can grant host
+ * authority. The third argument is internal host policy data, never plugin input.
  */
 export class NodeCatalog {
   private readonly definitions = new TypedRegistry<RegisteredNodeDefinition>();
@@ -64,13 +106,22 @@ export class NodeCatalog {
     return this.definitions.size;
   }
 
-  register(definition: NodeDefinition, plugin?: NodeCatalogPluginPin): RegistryDisposer {
-    const { type, version } = definition.manifest;
+  register(
+    definition: NodeDefinition,
+    plugin?: NodeCatalogPluginPin,
+    capabilityCeiling?: readonly CapabilityId[],
+  ): RegistryDisposer {
+    const storedDefinition = snapshotDefinition(definition);
+    const { type, version } = storedDefinition.manifest;
     const key = nodeKey(type, version);
-    assertNodeBehaviorPolicy(definition);
+    const storedPlugin = plugin === undefined ? undefined : Object.freeze({ ...plugin });
+
+    assertNodeBehaviorPolicy(storedDefinition.manifest);
+    assertPluginCapabilityCeiling(storedDefinition.manifest, storedPlugin, capabilityCeiling);
+
     return this.definitions.register(key, {
-      definition,
-      ...(plugin === undefined ? {} : { plugin }),
+      definition: storedDefinition,
+      ...(storedPlugin === undefined ? {} : { plugin: storedPlugin }),
     });
   }
 
