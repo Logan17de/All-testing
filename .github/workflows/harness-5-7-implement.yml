@@ -34,10 +34,15 @@ jobs:
           from pathlib import Path
           path = Path('harness/packages/scheduler/src/invocation-capability-policy.test.ts')
           text = path.read_text()
-          before = 'decision: capability === "fs:read" || capability === "network:http" ? "allow" : "deny",'
-          after = 'decision: (capability === "fs:read" || capability === "network:http" ? "allow" : "deny") as "allow" | "deny",'
+          before = '''    const evaluate = vi.fn((capability: string) => ({
+              decision: capability === "fs:read" || capability === "network:http" ? "allow" : "deny",
+            })) satisfies PlainDagCapabilityAuthority["evaluate"];'''
+          after = '''    const evaluateImpl: PlainDagCapabilityAuthority["evaluate"] = (capability) => ({
+              decision: capability === "fs:read" || capability === "network:http" ? "allow" : "deny",
+            });
+            const evaluate = vi.fn(evaluateImpl);'''
           if text.count(before) != 1:
-              raise SystemExit('literal typing anchor mismatch')
+              raise SystemExit('contextual typing anchor mismatch')
           path.write_text(text.replace(before, after))
           PY
       - name: Format changed files
