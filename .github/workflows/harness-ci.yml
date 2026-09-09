@@ -57,7 +57,14 @@ jobs:
         run: npm run lint
 
       - name: Format check
+        id: format
         run: npm run format:check
+
+      - name: Format failure diff
+        if: failure() && steps.format.outcome == 'failure' && runner.os == 'Linux'
+        run: |
+          npm exec -- prettier --write .
+          git diff --no-ext-diff --no-color -- .
 
       - name: Tests
         run: npm test

@@ -12,6 +12,7 @@ import {
   type SqliteDatabaseSnapshot,
   type SqliteMigration,
 } from "@zet-harness/db";
+import { DURABLE_APPROVALS_MIGRATION } from "@zet-harness/db/durable-approval-records";
 
 import { RuntimeEventStream, type RuntimeStreamEvent } from "./runtime-event-stream.js";
 import { inspectRuntimeHealth } from "./runtime-health.js";
@@ -20,6 +21,12 @@ import {
   type RuntimeHttpServerOptions,
   type RuntimeHttpServerSnapshot,
 } from "./runtime-http-server.js";
+import {
+  RuntimeHumanApprovals,
+  type RuntimeApprovalAuthority,
+  type SuspendForApprovalInput,
+} from "./runtime-human-approvals.js";
+import { RuntimeRedactionRegistry } from "./runtime-redaction.js";
 
 export const DEFAULT_RUNTIME_DATABASE_PATH = resolve("data", "zet-harness.sqlite");
 export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
@@ -28,37 +35,32 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_NODE_ATTEMPTS_MIGRATION,
   DURABLE_EVENTS_MIGRATION,
   DURABLE_CHECKPOINTS_MIGRATION,
+  DURABLE_APPROVALS_MIGRATION,
 ]);
-
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
 export interface RuntimeDaemonOptions {
   readonly api?: RuntimeHttpServerOptions;
   readonly database?: SqliteDatabaseOptions;
   readonly migrations?: readonly SqliteMigration[];
+  readonly permissionAuthority?: RuntimeApprovalAuthority;
+  readonly redaction?: RuntimeRedactionRegistry;
 }
-
 export interface RuntimeDaemonSnapshot {
   readonly state: RuntimeDaemonState;
   readonly api: RuntimeHttpServerSnapshot;
   readonly database: SqliteDatabaseSnapshot;
 }
 
-/**
- * Long-lived runtime lifecycle.
- *
- * The daemon owns the process-local event stream, loopback HTTP transport, and
- * native SQLite connection. Ordered SQL migrations run before API readiness.
- * The default catalog installs durable graph/plan identity, runs, node attempts,
- * the append-only event journal, and sparse checkpoint/frontier storage. Durable
- * scheduler wiring and restart reconstruction remain later Phase 4 work.
- */
+/** Owns transport, journal, human waits and redaction; a wait never retains a live task. */
 export class RuntimeDaemon {
   private state: RuntimeDaemonState = "idle";
   private readonly eventStream = new RuntimeEventStream();
   private readonly database: SqliteDatabase;
   private readonly migrations: readonly SqliteMigration[];
   private readonly httpServer: RuntimeHttpServer;
+  private readonly redaction: RuntimeRedactionRegistry;
+  private readonly approvals: RuntimeHumanApprovals;
   private readonly stoppedPromise: Promise<void>;
   private readonly resolveStopped: () => void;
   private stopPromise: Promise<boolean> | undefined;
@@ -66,14 +68,24 @@ export class RuntimeDaemon {
   constructor(options: RuntimeDaemonOptions = {}) {
     this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
     this.migrations = options.migrations ?? RUNTIME_DATABASE_MIGRATIONS;
-    this.httpServer = new RuntimeHttpServer(options.api, this.eventStream, () =>
-      inspectRuntimeHealth({
-        runtimeState: this.state,
-        database: this.database,
-        migrations: this.migrations,
-      }),
+    this.redaction = options.redaction ?? new RuntimeRedactionRegistry();
+    this.approvals = new RuntimeHumanApprovals(this.database, {
+      redaction: this.redaction,
+      ...(options.permissionAuthority === undefined
+        ? {}
+        : { authority: options.permissionAuthority }),
+    });
+    this.httpServer = new RuntimeHttpServer(
+      options.api,
+      this.eventStream,
+      () =>
+        inspectRuntimeHealth({
+          runtimeState: this.state,
+          database: this.database,
+          migrations: this.migrations,
+        }),
+      { approvals: this.approvals, redaction: this.redaction },
     );
-
     let resolveStopped!: () => void;
     this.stoppedPromise = new Promise<void>((resolve) => {
       resolveStopped = resolve;
@@ -93,18 +105,22 @@ export class RuntimeDaemon {
     if (this.state !== "running") {
       throw new TypeError("Runtime daemon must be running before publishing stream events.");
     }
-    return this.eventStream.publish(type, data);
+    return this.eventStream.publish(type, this.redaction.redact(data));
   }
 
-  /** Start only after SQLite migrations and the loopback API are ready. */
+  /** Host dispatch boundary. Never expose this method to a model as approval authority. */
+  suspendForApproval(input: SuspendForApprovalInput): ReturnType<RuntimeHumanApprovals["suspend"]> {
+    if (this.state !== "running" || this.stopPromise !== undefined) {
+      throw new TypeError("Runtime daemon must be running before requesting approval.");
+    }
+    return this.approvals.suspend(input);
+  }
+
   async start(): Promise<boolean> {
     if (this.state === "stopped") {
       throw new TypeError("Runtime daemon cannot restart after it has stopped.");
     }
-    if (this.state === "running") {
-      return false;
-    }
-
+    if (this.state === "running") return false;
     this.database.open();
     try {
       runSqliteMigrations(this.database.connection(), this.migrations);
@@ -113,21 +129,16 @@ export class RuntimeDaemon {
       this.database.close();
       throw error;
     }
-
     this.state = "running";
     return true;
   }
 
-  /** Stop once, closing SSE/API transport before the SQLite connection. */
   async stop(): Promise<boolean> {
-    if (this.state === "stopped") {
-      return false;
-    }
+    if (this.state === "stopped") return false;
     if (this.stopPromise !== undefined) {
       await this.stopPromise;
       return false;
     }
-
     this.stopPromise = this.stopOnce();
     return this.stopPromise;
   }
@@ -140,9 +151,9 @@ export class RuntimeDaemon {
     try {
       await this.httpServer.stop();
     } finally {
+      await this.database.drainWrites();
       this.database.close();
     }
-
     this.state = "stopped";
     this.resolveStopped();
     return true;

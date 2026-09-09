@@ -11,6 +11,10 @@
     "./durable-node-invocation": {
       "types": "./src/durable-node-invocation.ts",
       "default": "./dist/durable-node-invocation.js"
+    },
+    "./durable-approval-records": {
+      "types": "./src/durable-approval-records.ts",
+      "default": "./dist/durable-approval-records.js"
     }
   },
   "scripts": {
