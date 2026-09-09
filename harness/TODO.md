@@ -158,7 +158,7 @@ Goal: make side effects and privilege boundaries explicit before broad real-worl
 - [x] 5.4 Add reconciliation/manual-review outcomes for ambiguous external writes.
 - [x] 5.5 Add capability-based permission policy.
 - [x] 5.6 Enforce graph/node capabilities at compile time.
-- [ ] 5.7 Re-check actual capability use at invocation time.
+- [x] 5.7 Re-check actual capability use at invocation time.
 - [ ] 5.8 Ensure a model/plugin cannot grant itself capabilities.
 - [ ] 5.9 Add secret references/secret provider boundary; never put secret values in Graph JSON, IR, checkpoints, or logs.
 - [ ] 5.10 Add first-class approval records.
