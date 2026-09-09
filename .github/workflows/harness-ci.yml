@@ -1,4 +1,4 @@
-name: Zet Harness Phase 4 Closeout
+name: Zet Harness Phase 4 Closeout Matrix
 
 on:
   push:
@@ -8,108 +8,70 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  closeout:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: harness
+
     steps:
-      - name: Checkout Harness branch
+      - name: Checkout phase 4 closeout head
         uses: actions/checkout@v4
         with:
-          ref: zet-harness-v1
-          fetch-depth: 0
+          ref: 72088b42a2fa2b066c4a2fb7c0a35672b06d9270
 
-      - name: Advance roadmap
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
 
-          def replace_once(path: Path, old: str, new: str) -> None:
-              text = path.read_text()
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one replacement anchor, found {count}: {old[:120]!r}")
-              path.write_text(text.replace(old, new, 1))
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
 
-          todo = Path("harness/TODO.md")
-          replace_once(
-              todo,
-              "- [ ] 4.22 Record/check the baseline in CI without making noisy machine-specific thresholds brittle.",
-              "- [x] 4.22 Record/check the baseline in CI without making noisy machine-specific thresholds brittle.",
-          )
-          replace_once(
-              todo,
-              "**4.13 — Keep short SQLite writes serialized through one clear commit path.**",
-              "**5.1 — Define and enforce cross-field effect/idempotency/recovery invariants over the Phase 1 node enums.**",
-          )
+      - name: Clean install
+        run: npm ci --no-audit --no-fund
 
-          plan = Path("harness/PLAN.md")
-          replace_once(
-              plan,
-              "Phase 4  Runtime daemon + SQLite           🚧 WE ARE HERE",
-              "Phase 4  Runtime daemon + SQLite           ✅ COMPLETE",
-          )
-          replace_once(
-              plan,
-              "           └─ 4.22 CI baseline check                                            ▶ CURRENT",
-              "           └─ 4.22 CI baseline check                                            ✅",
-          )
-          replace_once(
-              plan,
-              "Phase 5  Effects + permissions + humans    ⏳\nPhase 6  Model + tool adapters             ⏳",
-              "Phase 5  Effects + permissions + humans    🚧 WE ARE HERE\n           └─ 5.1 effect/idempotency/recovery invariants                       ▶ CURRENT\nPhase 6  Model + tool adapters             ⏳",
-          )
-          replace_once(
-              plan,
-              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | 🚧 In progress — **4.22 current** |",
-              "| **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ✅ Complete |",
-          )
-          replace_once(
-              plan,
-              "| **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ⏳ Planned |",
-              "| **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | 🚧 In progress — **5.1 current** |",
-          )
-          replace_once(
-              plan,
-              "npm ci\n→ typecheck\n→ lint\n→ format check\n→ tests\n→ startup smoke\n→ build",
-              "npm ci\n→ typecheck\n→ lint\n→ format check\n→ tests\n→ plugin smoke\n→ startup smoke\n→ build\n→ baseline check",
-          )
-          anchor = "The command has been exercised successfully on hosted Ubuntu and Windows runners, whose materially different startup timings demonstrate why 4.22 must compare recorded baselines without brittle universal machine thresholds."
-          phase_422 = (
-              anchor
-              + "\n\nPhase 4.22 closes the durability phase with a deliberately coarse CI regression guard rather than a portable performance claim. `npm run baseline:ci` runs independently on `ubuntu-latest` and `windows-latest`; the benchmark writes runtime statistics directly to `tmp/baseline/runtime.json`, Vitest 4 writes benchmark medians to `tmp/baseline/bench.json`, and the checker writes `tmp/baseline/check.json` before returning success or failure. Each OS compares only with its own checked-in reference using broad `max(reference × multiplier, reference + additive slack)` ceilings for startup, idle RSS, compiler, scheduler, and file-backed WAL SQLite commit medians, while direct runtime dependency identity is checked exactly. Faster results always pass, cross-OS comparisons are forbidden, and every matrix job uploads the three JSON reports even when the guard fails. This makes large regressions review-visible without letting hosted-runner noise turn CI into a benchmark contest. Phase 4 is complete; Phase 5 now owns effect/idempotency/recovery enforcement and permission boundaries."
-          )
-          replace_once(plan, anchor, phase_422)
-          replace_once(
-              plan,
-              "> **Phase 4 / Item 4.22 — Record/check the baseline in CI without making noisy machine-specific thresholds brittle.**",
-              "> **Phase 5 / Item 5.1 — Define and enforce cross-field effect/idempotency/recovery invariants over the Phase 1 node enums.**",
-          )
+      - name: Typecheck
+        run: npm run typecheck
 
-          baseline = Path("harness/BASELINE.md")
-          replace_once(
-              baseline,
-              "Runtime startup/RSS samples are emitted as one machine-readable line beginning with `ZET_BASELINE_RUNTIME` and include sample count, median, p95, minimum, and maximum. `npm run baseline` also records the benchmark report under the ignored `tmp/baseline/` directory.",
-              "Runtime startup/RSS samples are emitted as one machine-readable line beginning with `ZET_BASELINE_RUNTIME` and include sample count, median, p95, minimum, and maximum; the same structured runtime report is written directly to `tmp/baseline/runtime.json`. Vitest writes its benchmark report directly to `tmp/baseline/bench.json` under the same ignored directory.",
-          )
-          replace_once(
-              baseline,
-              "CI runs this command independently on `ubuntu-latest` and `windows-latest`. It captures the runtime JSON emitted by the existing baseline command, consumes Vitest 4's benchmark `--outputJson` report, compares the resulting medians with the checked-in per-OS reference in `baselines/lightweight-baseline-v1.json`, and writes `tmp/baseline/check.json` before returning success or failure.",
-              "CI runs this command independently on `ubuntu-latest` and `windows-latest`. The baseline command produces `runtime.json` and Vitest 4's `bench.json` directly on disk; the checker consumes both reports, compares their medians with the checked-in per-OS reference in `baselines/lightweight-baseline-v1.json`, and writes `tmp/baseline/check.json` before returning success or failure. No console-output scraping sits in the CI path.",
-          )
-          PY
+      - name: Lint
+        run: npm run lint
 
-          git diff --check
-          git diff -- harness/TODO.md harness/PLAN.md harness/BASELINE.md
+      - name: Format check
+        run: npm run format:check
 
-      - name: Commit closeout
-        shell: bash
-        run: |
-          git config user.name "Logesh"
-          git config user.email "loganlogesh17@gmail.com"
-          git add harness/TODO.md harness/PLAN.md harness/BASELINE.md
-          git commit -m "docs: complete Harness phase 4"
-          git push origin HEAD:zet-harness-v1
+      - name: Tests
+        run: npm test
+
+      - name: Plugin smoke
+        run: npm run test:plugin-smoke --workspace @zet-harness/core
+
+      - name: Startup smoke
+        run: npm run test:startup
+
+      - name: Build
+        run: npm run build
+
+      - name: Baseline check
+        env:
+          ZET_BASELINE_PLATFORM: ${{ matrix.os }}
+        run: npm run baseline:ci
+
+      - name: Upload baseline report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zet-harness-phase4-closeout-${{ matrix.os }}
+          path: harness/tmp/baseline/*.json
+          if-no-files-found: error
+          retention-days: 14
