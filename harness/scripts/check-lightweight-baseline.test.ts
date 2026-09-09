@@ -74,8 +74,8 @@ describe("lightweight baseline CI policy", () => {
 
     const result = evaluateBaselineSnapshot("windows-latest", observed, reference, policy);
     expect(result.status).toBe("fail");
-    expect(result.checks.find((check) => check.metric === "direct runtime dependencies")?.pass).toBe(
-      false,
-    );
+    expect(
+      result.checks.find((check) => check.metric === "direct runtime dependencies")?.pass,
+    ).toBe(false);
   });
 });

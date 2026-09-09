@@ -38,9 +38,7 @@
         "total": 1,
         "workspace": 1,
         "external": 0,
-        "names": [
-          "@zet-harness/db"
-        ]
+        "names": ["@zet-harness/db"]
       }
     },
     "windows-latest": {
@@ -53,9 +51,7 @@
         "total": 1,
         "workspace": 1,
         "external": 0,
-        "names": [
-          "@zet-harness/db"
-        ]
+        "names": ["@zet-harness/db"]
       }
     }
   }

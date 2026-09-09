@@ -187,7 +187,9 @@ function benchmarkMedian(report: BenchmarkReport, name: string): number {
     .filter((benchmark) => benchmark.name === name);
 
   if (matches.length !== 1) {
-    throw new Error(`Expected exactly one benchmark named ${JSON.stringify(name)}; found ${matches.length}.`);
+    throw new Error(
+      `Expected exactly one benchmark named ${JSON.stringify(name)}; found ${matches.length}.`,
+    );
   }
 
   const median = matches[0]?.median;
@@ -235,7 +237,9 @@ function main(): void {
   const platform = resolvePlatform();
   const reference = references.platforms[platform];
   if (reference === undefined) {
-    throw new Error(`No lightweight baseline reference exists for platform ${JSON.stringify(platform)}.`);
+    throw new Error(
+      `No lightweight baseline reference exists for platform ${JSON.stringify(platform)}.`,
+    );
   }
 
   const runtime = readJson<RuntimeReport>(runtimeReportPath);
