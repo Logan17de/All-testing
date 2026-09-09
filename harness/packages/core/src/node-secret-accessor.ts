@@ -135,7 +135,9 @@ export function createNodeSecretAccessor(
     },
     async getAll(port: string): Promise<readonly SecretValue[]> {
       const references = getReferences(port);
-      return Object.freeze(await Promise.all(references.map((reference) => resolveReference(port, reference))));
+      return Object.freeze(
+        await Promise.all(references.map((reference) => resolveReference(port, reference))),
+      );
     },
   });
 }

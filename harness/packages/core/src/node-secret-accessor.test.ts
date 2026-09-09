@@ -2,10 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SecretValue, type SecretProvider } from "@zet-harness/plugin-api/secret-contract";
 
-import {
-  NodeSecretResolutionError,
-  createNodeSecretAccessor,
-} from "./node-secret-accessor.js";
+import { NodeSecretResolutionError, createNodeSecretAccessor } from "./node-secret-accessor.js";
 
 describe("node-scoped secret accessor", () => {
   it("exposes bound ports without exposing provider references or material", async () => {

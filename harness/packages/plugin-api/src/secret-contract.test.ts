@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  SECRET_REDACTED_TEXT,
-  SecretValue,
-  assertSecretReference,
-} from "./secret-contract.js";
+import { SECRET_REDACTED_TEXT, SecretValue, assertSecretReference } from "./secret-contract.js";
 
 describe("secret contract", () => {
   it("reveals material only through the explicit accessor", () => {
