@@ -1,0 +1,49 @@
+name: Harness Format Repair
+
+on:
+  push:
+    branches:
+      - zet-harness-v1
+    paths:
+      - ".github/workflows/harness-format-repair.yml"
+      - "harness/packages/scheduler/src/plain-dag-run.ts"
+      - "harness/packages/scheduler/src/effect-aware-retry.test.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: harness
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2 --no-audit --no-fund
+
+      - name: Clean install
+        run: npm ci --no-audit --no-fund
+
+      - name: Format target files
+        run: npx prettier --write packages/scheduler/src/plain-dag-run.ts packages/scheduler/src/effect-aware-retry.test.ts
+
+      - name: Upload formatted files
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-5-3-formatted
+          path: |
+            harness/packages/scheduler/src/plain-dag-run.ts
+            harness/packages/scheduler/src/effect-aware-retry.test.ts
+          if-no-files-found: error
+          retention-days: 1
