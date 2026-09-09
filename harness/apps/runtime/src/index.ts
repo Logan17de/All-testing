@@ -40,3 +40,18 @@ export {
   type PreCrashRecoveryClassification,
   type PreCrashRecoveryPolicy,
 } from "./runtime-recovery-policy.js";
+export {
+  DURABLE_EFFECT_RECOVERY_OUTCOME_EVENT_SCHEMA_VERSION,
+  DURABLE_EFFECT_RECOVERY_OUTCOME_EVENT_TYPE,
+  commitAmbiguousExternalWriteRecoveryOutcome,
+  readAmbiguousExternalWriteRecoveryState,
+  type AmbiguousExternalWriteRecoveryIdentity,
+  type AmbiguousExternalWriteRecoveryState,
+  type CommitAmbiguousExternalWriteRecoveryOutcomeInput,
+  type DurableEffectRecoveryOutcome,
+  type EffectRecoveryDisposition,
+  type EffectRecoveryNextAction,
+  type EffectRecoveryOutcomeInput,
+  type EffectRecoveryOutcomeKind,
+  type EffectRecoveryOutcomeSource,
+} from "./runtime-effect-recovery.js";
