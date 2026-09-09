@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,7 @@ const execFileAsync = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const runtimeSampleScript = resolve(root, "scripts/runtime-baseline-child.mjs");
 const runtimePackagePath = resolve(root, "apps/runtime/package.json");
+const runtimeReportPath = resolve(root, "tmp/baseline/runtime.json");
 const runtimeSampleCount = 5;
 const benchmarkNodeCount = 64;
 const temporaryDirectories: string[] = [];
@@ -179,18 +180,19 @@ async function collectRuntimeSamples(): Promise<void> {
     idleRssBytes.push(sample.idleRssBytes);
   }
 
-  console.log(
-    `ZET_BASELINE_RUNTIME ${JSON.stringify({
-      startupMs: summarize(startupMs),
-      idleRssBytes: summarize(idleRssBytes),
-      directRuntimeDependencies: {
-        total: dependencies.length,
-        workspace: workspaceDependencies.length,
-        external: externalDependencies.length,
-        names: dependencies.sort(),
-      },
-    })}`,
-  );
+  const runtimeReport = {
+    startupMs: summarize(startupMs),
+    idleRssBytes: summarize(idleRssBytes),
+    directRuntimeDependencies: {
+      total: dependencies.length,
+      workspace: workspaceDependencies.length,
+      external: externalDependencies.length,
+      names: dependencies.sort(),
+    },
+  };
+  mkdirSync(dirname(runtimeReportPath), { recursive: true });
+  writeFileSync(runtimeReportPath, `${JSON.stringify(runtimeReport, null, 2)}\n`);
+  console.log(`ZET_BASELINE_RUNTIME ${JSON.stringify(runtimeReport)}`);
 }
 
 let compiledIr: ExecutionIrV1;
