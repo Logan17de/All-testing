@@ -111,7 +111,8 @@ describe("NodeCatalog", () => {
   it("snapshots and freezes plugin-owned node metadata before later mutation", () => {
     const catalog = new NodeCatalog();
     const definition = makeDefinition("test.snapshot", "1", () => undefined);
-    const originalCapabilities = definition.manifest.behavior.requiredCapabilities as string[];
+    const originalCapabilities = definition.manifest.behavior
+      .requiredCapabilities as unknown as string[];
 
     catalog.register(definition);
     const stored = catalog.requireManifest("test.snapshot", "1");
@@ -122,13 +123,15 @@ describe("NodeCatalog", () => {
     expect(Object.isFrozen(stored)).toBe(true);
     expect(Object.isFrozen(stored.behavior)).toBe(true);
     expect(Object.isFrozen(stored.behavior.requiredCapabilities)).toBe(true);
-    expect(() => (stored.behavior.requiredCapabilities as string[]).push("fs:write")).toThrow();
+    expect(() =>
+      (stored.behavior.requiredCapabilities as unknown as string[]).push("fs:write"),
+    ).toThrow();
   });
 
   it("rejects plugin-owned node capabilities outside the inspected plugin ceiling", () => {
     const catalog = new NodeCatalog();
     const definition = makeDefinition("test.hidden-write", "1", () => undefined);
-    const behavior = definition.manifest.behavior as { requiredCapabilities: string[] };
+    const behavior = definition.manifest.behavior as unknown as { requiredCapabilities: string[] };
     behavior.requiredCapabilities = ["fs:write"];
 
     expect(() =>
