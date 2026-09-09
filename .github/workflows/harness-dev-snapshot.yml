@@ -19,19 +19,17 @@ jobs:
       - run: npm install --global npm@12.0.2 --no-audit --no-fund
       - run: npm ci --no-audit --no-fund
         working-directory: harness
-      - name: Archive tracked source and development tools only
+      - name: Archive supplementary development tools only
         shell: bash
         run: |
-          mkdir -p /tmp/harness-snapshot
-          git archive HEAD harness .github/workflows | tar -x -C /tmp/harness-snapshot
-          cp "$(command -v node)" /tmp/harness-snapshot/node
-          tar -cf /tmp/harness-tools.tar --exclude='harness/node_modules/next' --exclude='harness/node_modules/@next/swc-*' --exclude='harness/node_modules/@img' harness/node_modules
-          tar -xf /tmp/harness-tools.tar -C /tmp/harness-snapshot
-          git rev-parse HEAD > /tmp/harness-snapshot/SOURCE_COMMIT
-          tar -czf /tmp/harness-development.tgz -C /tmp/harness-snapshot .
+          mkdir -p /tmp/harness-extras
+          find harness/apps harness/packages -type d -name node_modules -prune -print0 | tar --null -T - -cf /tmp/harness-tools.tar
+          tar -xf /tmp/harness-tools.tar -C /tmp/harness-extras
+          cp -a "$(npm root -g)/npm" /tmp/harness-extras/npm
+          tar -czf /tmp/harness-extras.tgz -C /tmp/harness-extras .
       - uses: actions/upload-artifact@v4
         with:
-          name: harness-development
-          path: /tmp/harness-development.tgz
+          name: harness-extras
+          path: /tmp/harness-extras.tgz
           retention-days: 1
           compression-level: 0
