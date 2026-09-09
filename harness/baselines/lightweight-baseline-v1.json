@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "recordedFrom": {
+    "workflowRunId": 34294622045,
+    "nodeVersion": "24.20.0",
+    "vitestVersion": "4.1.11"
+  },
+  "policy": {
+    "startupMedianMs": {
+      "multiplier": 3,
+      "additive": 100
+    },
+    "idleRssMedianBytes": {
+      "multiplier": 1.5,
+      "additive": 33554432
+    },
+    "compilerMedianMs": {
+      "multiplier": 2,
+      "additive": 2
+    },
+    "schedulerMedianMs": {
+      "multiplier": 3,
+      "additive": 1
+    },
+    "sqliteMedianMs": {
+      "multiplier": 4,
+      "additive": 5
+    }
+  },
+  "platforms": {
+    "ubuntu-latest": {
+      "startupMedianMs": 47.980472,
+      "idleRssMedianBytes": 67608576,
+      "compilerMedianMs": 2.021568,
+      "schedulerMedianMs": 0.243554,
+      "sqliteMedianMs": 0.299057,
+      "directRuntimeDependencies": {
+        "total": 1,
+        "workspace": 1,
+        "external": 0,
+        "names": [
+          "@zet-harness/db"
+        ]
+      }
+    },
+    "windows-latest": {
+      "startupMedianMs": 106.8324,
+      "idleRssMedianBytes": 59318272,
+      "compilerMedianMs": 2.0289,
+      "schedulerMedianMs": 0.23525,
+      "sqliteMedianMs": 2.70405,
+      "directRuntimeDependencies": {
+        "total": 1,
+        "workspace": 1,
+        "external": 0,
+        "names": [
+          "@zet-harness/db"
+        ]
+      }
+    }
+  }
+}

@@ -70,3 +70,17 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Baseline check
+        env:
+          ZET_BASELINE_PLATFORM: ${{ matrix.os }}
+        run: npm run baseline:ci
+
+      - name: Upload baseline report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zet-harness-baseline-${{ matrix.os }}
+          path: harness/tmp/baseline/*.json
+          if-no-files-found: warn
+          retention-days: 14

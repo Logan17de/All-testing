@@ -17,8 +17,38 @@ Measured surfaces:
 - **scheduler overhead** — executes the same 64-op no-op chain through `PlainDagRun` with the normal concurrency coordinator;
 - **SQLite commit latency** — uses a temporary file-backed WAL database and `SqliteDatabase.commit()` with its serialized `BEGIN IMMEDIATE` transaction path and one prepared insert.
 
-Vitest benchmark output supplies timing statistics for compiler, scheduler, and SQLite measurements. Runtime startup/RSS samples are emitted as one machine-readable line beginning with `ZET_BASELINE_RUNTIME` and include sample count, median, p95, minimum, and maximum.
+Vitest benchmark output supplies timing statistics for compiler, scheduler, and SQLite measurements. Runtime startup/RSS samples are emitted as one machine-readable line beginning with `ZET_BASELINE_RUNTIME` and include sample count, median, p95, minimum, and maximum. `npm run baseline` also records the benchmark report under the ignored `tmp/baseline/` directory.
 
-The command is verified on hosted Ubuntu and Windows runners. Observed measurements are samples from the machine that executed the command, not portable performance guarantees or fixed acceptance thresholds. SQLite durability samples are deliberately file-backed and WAL-enabled; in-memory transaction figures are not retained as a durability baseline.
+The command is verified on hosted Ubuntu and Windows runners. Observed measurements are samples from the machine that executed the command, not portable performance guarantees or fixed acceptance thresholds.
 
-This item records **measurement methodology only**. It intentionally does not fail CI based on absolute timing or memory thresholds. Hosted runners, developer machines, antivirus, filesystem implementation, CPU frequency scaling, and concurrent system load can all move these values materially. Phase 4.22 owns recording/checking the baseline in CI with comparison rules that avoid brittle machine-specific limits.
+## CI regression guard
+
+Phase 4.22 adds:
+
+```text
+npm run baseline:ci
+```
+
+CI runs this command independently on `ubuntu-latest` and `windows-latest`. It captures the runtime JSON emitted by the existing baseline command, consumes Vitest 4's benchmark `--outputJson` report, compares the resulting medians with the checked-in per-OS reference in `baselines/lightweight-baseline-v1.json`, and writes `tmp/baseline/check.json` before returning success or failure.
+
+The CI policy deliberately avoids cross-OS comparisons and brittle exact timing thresholds. For each numeric metric the upper guard is:
+
+```text
+max(reference × multiplier, reference + additive slack)
+```
+
+Current guards:
+
+| Metric | Multiplier | Additive slack |
+| --- | ---: | ---: |
+| Runtime startup median | 3× | 100 ms |
+| Idle runtime RSS median | 1.5× | 32 MiB |
+| Compiler median | 2× | 2 ms |
+| Scheduler median | 3× | 1 ms |
+| File-backed WAL SQLite commit median | 4× | 5 ms |
+
+Medians are used for CI comparisons because hosted runners can produce large one-off timing spikes, especially for filesystem-backed SQLite. Faster measurements always pass. Direct runtime dependency identity is checked exactly instead of through a timing envelope, so adding a runtime package requires an intentional baseline update.
+
+Every CI matrix job uploads the generated runtime, benchmark, and check JSON as a short-lived artifact, including on a failed guard when the reports were produced. Updating the checked-in reference is therefore an explicit reviewable change rather than an automatic moving average that could silently normalize a regression.
+
+The original 4.21 item records **measurement methodology**; 4.22 adds only a deliberately coarse regression tripwire. Hosted runners, developer machines, antivirus, filesystem implementation, CPU frequency scaling, and concurrent system load can all move raw values materially, so these guards are meant to catch large changes rather than rank machines or certify absolute performance.
