@@ -42,10 +42,17 @@ function assertPort(port: string): void {
  * code can discover only bound port names and resolve material for those ports;
  * it cannot enumerate the provider or ask for an arbitrary reference. Resolution
  * is lazy and cached per reference for the lifetime of this accessor.
+ *
+ * The optional synchronous host observer registers material with a log/payload
+ * redactor before it is exposed to node code. It is captured at construction and
+ * never appears on the node-facing accessor. Observer failure fails closed.
+ * Provider/observer exceptions are always normalized, even when they mimic the
+ * exported error class. Only errors created by this boundary retain safe codes.
  */
 export function createNodeSecretAccessor(
   bindings: readonly NodeSecretBinding[],
   provider: SecretProvider,
+  onResolve?: (value: SecretValue) => void,
 ): NodeSecretAccessor {
   const refsByPort = new Map<string, SecretReference[]>();
 
@@ -68,9 +75,18 @@ export function createNodeSecretAccessor(
     if (cached !== undefined) {
       return cached;
     }
+    const providerFailure = (): NodeSecretResolutionError =>
+      new NodeSecretResolutionError(
+        "SECRET_PROVIDER_FAILED",
+        port,
+        `Secret provider failed for port '${port}'.`,
+      );
 
     const resolution = Promise.resolve()
       .then(() => provider.resolve(reference))
+      .catch(() => {
+        throw providerFailure();
+      })
       .then((value) => {
         if (value === undefined) {
           throw new NodeSecretResolutionError(
@@ -86,17 +102,12 @@ export function createNodeSecretAccessor(
             `Secret provider returned an invalid value for port '${port}'.`,
           );
         }
-        return value;
-      })
-      .catch((error: unknown) => {
-        if (error instanceof NodeSecretResolutionError) {
-          throw error;
+        try {
+          onResolve?.(value);
+        } catch {
+          throw providerFailure();
         }
-        throw new NodeSecretResolutionError(
-          "SECRET_PROVIDER_FAILED",
-          port,
-          `Secret provider failed for port '${port}'.`,
-        );
+        return value;
       });
 
     cache.set(reference, resolution);

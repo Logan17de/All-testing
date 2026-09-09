@@ -2,6 +2,7 @@ import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 
 import type { ConcurrencyPermit, RunConcurrency, RunConcurrencySnapshot } from "./concurrency.js";
 import { RunReadiness, type RunReadinessSnapshot } from "./run-readiness.js";
+import { assertInvocationPermission } from "./invocation-permission.js";
 
 const MAX_NATIVE_TIMER_MS = 2_147_483_647;
 const RETRY_ACCOUNTING_ERRORS = new WeakSet<object>();
@@ -781,35 +782,12 @@ export class PlainDagRun {
   }
 
   private assertInvocationCapabilities(op: number, operation: ExecutionIrOpV1): void {
-    const seen = new Set<ExecutionIrOpV1["behavior"]["requiredCapabilities"][number]>();
-
-    for (const capability of operation.behavior.requiredCapabilities) {
-      if (seen.has(capability)) {
-        continue;
-      }
-      seen.add(capability);
-
-      if (this.ir.policies.capabilities.deny.includes(capability)) {
-        throw new Error(
-          `Run op ${String(op)} requires capability '${capability}', but the compiled graph denies it.`,
-        );
-      }
-
-      const evaluation = this.#evaluateCapability?.(capability);
-      if (evaluation?.decision === "allow") {
-        continue;
-      }
-
-      if (evaluation?.denialReason === "explicitly-denied") {
-        throw new Error(
-          `Run op ${String(op)} requires capability '${capability}', but current runtime authority explicitly denies it.`,
-        );
-      }
-
-      throw new Error(
-        `Run op ${String(op)} requires capability '${capability}', but current runtime authority does not grant it.`,
-      );
-    }
+    assertInvocationPermission(
+      op,
+      operation.behavior.requiredCapabilities,
+      this.ir.policies.capabilities.deny,
+      this.#evaluateCapability,
+    );
   }
 
   private resolveRepeatAuthorization(

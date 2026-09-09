@@ -1,4 +1,4 @@
-// Phase 5.4 exposes durable, evidence-backed ambiguous-write recovery outcomes without silently applying attempt or scheduler-frontier state.
+// Durable effects, human decisions, and current host authority are separate runtime concerns.
 export {
   RUNTIME_HEALTH_SERVICE,
   inspectRuntimeHealth,
@@ -14,6 +14,7 @@ export {
 } from "./runtime-health.js";
 export {
   RuntimeDaemon,
+  type RuntimeDaemonOptions,
   type RuntimeDaemonSnapshot,
   type RuntimeDaemonState,
 } from "./runtime-daemon.js";
@@ -56,3 +57,16 @@ export {
   type EffectRecoveryOutcomeKind,
   type EffectRecoveryOutcomeSource,
 } from "./runtime-effect-recovery.js";
+export {
+  RuntimeHumanApprovals,
+  type RuntimeApprovalAuthority,
+  type ResumeApprovalInput,
+  type SuspendForApprovalInput,
+} from "./runtime-human-approvals.js";
+export { RuntimeApprovalError, type RuntimeApprovalErrorCode } from "./runtime-approval-error.js";
+export {
+  REDACTED,
+  RuntimeRedactionRegistry,
+  canonicalRuntimeJson,
+  type SafeJson,
+} from "./runtime-redaction.js";

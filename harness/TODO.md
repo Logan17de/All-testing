@@ -161,15 +161,22 @@ Goal: make side effects and privilege boundaries explicit before broad real-worl
 - [x] 5.7 Re-check actual capability use at invocation time.
 - [x] 5.8 Ensure a model/plugin cannot grant itself capabilities.
 - [x] 5.9 Add secret references/secret provider boundary; never put secret values in Graph JSON, IR, checkpoints, or logs.
-- [ ] 5.10 Add first-class approval records.
-- [ ] 5.11 Add durable human interrupt node/state.
-- [ ] 5.12 Persist checkpoint + suspend so the runtime may terminate while waiting for approval.
-- [ ] 5.13 Add idempotent resume tokens/payload handling.
-- [ ] 5.14 Return machine-readable permission denials with stable code, safe reason, and remediation metadata.
-- [ ] 5.15 Add payload/log redaction registry and secret deny list.
-- [ ] 5.16 Add origin/CSRF protection where applicable for the local UI/API boundary.
+- [x] 5.10 Add first-class approval records.
+- [x] 5.11 Add durable human interrupt node/state.
+- [x] 5.12 Persist checkpoint + suspend so the runtime may terminate while waiting for approval.
+- [x] 5.13 Add idempotent resume tokens/payload handling.
+- [x] 5.14 Return machine-readable permission denials with stable code, safe reason, and remediation metadata.
+- [x] 5.15 Add payload/log redaction registry and secret deny list.
+- [x] 5.16 Add origin/CSRF protection where applicable for the local UI/API boundary.
+- [ ] 5.17 Integrate automatic daemon dispatch and scheduler wake-up with durable human gates; prove run → gate → shutdown → resume → privileged effect through the same scheduler.
 
-**Checkpoint:** a privileged effect can pause for approval, survive process shutdown, resume once, and cannot exceed compiled/runtime capabilities.
+**Batch scope:** 5.10–5.16 are implemented at the host service/API boundary for quiescent,
+iteration-zero plain DAGs. See `PHASE-5.10-5.16.md` for supported behavior, token handling,
+redaction wiring, and trust limits. The service releases a durable ready frontier but does not
+itself invoke downstream effects. 5.17 makes the remaining automatic-dispatch integration explicit;
+it must not be hidden by marking the whole product checkpoint complete.
+
+**Checkpoint:** a privileged effect can pause for approval, survive process shutdown, resume once, and cannot exceed compiled/runtime capabilities. Automatic end-to-end checkpoint closeout remains pending 5.17.
 
 ---
 
@@ -319,4 +326,7 @@ microVM sandbox by default
 
 ## Next action
 
-**5.10 — Add first-class approval records.**
+**5.17 — Connect the durable human-gate service to automatic daemon dispatch and scheduler wake-up.**
+
+5.10–5.16 are implemented as one batch. Preserve the validation boundary and current host
+permission checks while closing the end-to-end execution checkpoint; then continue Phase 6.
