@@ -238,7 +238,9 @@ function permutePresentation(graph: GraphJsonV1, seed: number): GraphJsonV1 {
 async function compileGraph(graph: GraphJsonV1) {
   const diagnostics = checkGraphJsonV1Diagnostics(graph, {
     resolver,
-    capabilityAuthority: { granted: [] },
+    capabilityAuthority: {
+      evaluate: () => ({ decision: "deny", denialReason: "not-granted" }),
+    },
   });
   if (!diagnostics.valid) {
     throw new Error(

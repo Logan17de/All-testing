@@ -47,10 +47,24 @@ const resolver: NodeManifestResolver = {
   },
 };
 
-function context(granted: readonly string[] = []): GraphJsonV1DiagnosticContext {
+function context(
+  granted: readonly string[] = [],
+  denied: readonly string[] = [],
+): GraphJsonV1DiagnosticContext {
+  const grantedSet = new Set(granted);
+  const deniedSet = new Set(denied);
   return {
     resolver,
-    capabilityAuthority: { granted },
+    capabilityAuthority: {
+      evaluate(capability) {
+        if (deniedSet.has(capability)) {
+          return { decision: "deny", denialReason: "explicitly-denied" };
+        }
+        return grantedSet.has(capability)
+          ? { decision: "allow" }
+          : { decision: "deny", denialReason: "not-granted" };
+      },
+    },
   };
 }
 

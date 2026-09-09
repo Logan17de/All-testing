@@ -7,6 +7,8 @@ import { promisify } from "node:util";
 
 import { afterAll, beforeAll, bench, describe } from "vitest";
 
+import { CapabilityPermissionPolicy } from "@zet-harness/core";
+
 import { SqliteDatabase } from "@zet-harness/db";
 import {
   GRAPH_JSON_VERSION,
@@ -108,7 +110,7 @@ const compilerFixture = createCompilerFixture(benchmarkNodeCount);
 async function compileFixture(): Promise<ExecutionIrV1> {
   const diagnostics = checkGraphJsonV1Diagnostics(compilerFixture, {
     resolver,
-    capabilityAuthority: { granted: [] },
+    capabilityAuthority: new CapabilityPermissionPolicy(),
   });
   if (!diagnostics.valid) {
     throw new Error(`Baseline compiler fixture failed validation: ${JSON.stringify(diagnostics)}`);

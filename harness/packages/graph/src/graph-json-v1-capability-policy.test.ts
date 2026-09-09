@@ -110,12 +110,7 @@ describe("Graph JSON v1 capability/policy validation", () => {
       checkGraphJsonV1CapabilityPolicy(
         value,
         resolver,
-        authority([
-          "project:read",
-          "telemetry:emit",
-          "network:https",
-          "unrequested:grant",
-        ]),
+        authority(["project:read", "telemetry:emit", "network:https", "unrequested:grant"]),
       ),
     ).toEqual({
       valid: true,
@@ -227,8 +222,7 @@ describe("Graph JSON v1 capability/policy validation", () => {
     });
 
     expect(
-      checkGraphJsonV1CapabilityPolicy(value, resolver, authority(["network:https"]))
-        .diagnostics,
+      checkGraphJsonV1CapabilityPolicy(value, resolver, authority(["network:https"])).diagnostics,
     ).toEqual([
       expect.objectContaining({
         code: "GRAPH_CAPABILITY_REQUIRED_DENIED",
@@ -249,8 +243,7 @@ describe("Graph JSON v1 capability/policy validation", () => {
     });
 
     expect(
-      checkGraphJsonV1CapabilityPolicy(value, resolver, authority(["same", "other"]))
-        .diagnostics,
+      checkGraphJsonV1CapabilityPolicy(value, resolver, authority(["same", "other"])).diagnostics,
     ).toEqual([
       expect.objectContaining({
         code: "GRAPH_CAPABILITY_INTENT_DUPLICATE",
