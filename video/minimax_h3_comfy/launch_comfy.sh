@@ -4,18 +4,34 @@ set -euo pipefail
 COMFY_ROOT="${COMFY_ROOT:-/content/ComfyUI}"
 PORT="${COMFY_PORT:-8188}"
 LOG_DIR="${H3_LOG_DIR:-/content/h3_comfy_logs}"
+VRAM_MODE="${H3_VRAM_MODE:-normalvram}"
+RESERVE_VRAM_GB="${H3_RESERVE_VRAM_GB:-4}"
+PREVIEW_METHOD="${H3_PREVIEW_METHOD:-none}"
 mkdir -p "$LOG_DIR"
 
-# Reuse a healthy ComfyUI process instead of restarting it every time we change
-# tunnel providers. This avoids unnecessary model/UI reloads during Colab tests.
+# Long video sampling can fragment the CUDA allocator across clips. Expandable
+# segments let PyTorch reuse/free large blocks more gracefully on Colab GPUs.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+export CUDA_MODULE_LOADING="${CUDA_MODULE_LOADING:-LAZY}"
+
+VRAM_ARGS=()
+case "$VRAM_MODE" in
+  highvram) VRAM_ARGS+=(--highvram) ;;
+  normalvram) VRAM_ARGS+=(--normalvram) ;;
+  lowvram) VRAM_ARGS+=(--lowvram) ;;
+  *) echo "ERROR: H3_VRAM_MODE must be highvram, normalvram, or lowvram"; exit 2 ;;
+esac
+VRAM_ARGS+=(--reserve-vram "$RESERVE_VRAM_GB" --preview-method "$PREVIEW_METHOD")
+
 if curl -fsS "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
   echo "✅ Existing ComfyUI is healthy on port $PORT; reusing it."
 else
   echo "Starting ComfyUI on port $PORT..."
+  echo "VRAM mode: $VRAM_MODE | reserved: ${RESERVE_VRAM_GB} GB | preview: $PREVIEW_METHOD"
   pkill -f "python.*main.py.*--port $PORT" >/dev/null 2>&1 || true
   (
     cd "$COMFY_ROOT"
-    nohup python main.py --listen 0.0.0.0 --port "$PORT" --disable-auto-launch \
+    nohup python main.py --listen 0.0.0.0 --port "$PORT" --disable-auto-launch "${VRAM_ARGS[@]}" \
       >"$LOG_DIR/comfyui.log" 2>&1 &
     echo $! >"$LOG_DIR/comfyui.pid"
   )
@@ -35,13 +51,11 @@ else
   echo "✅ ComfyUI is healthy on the Colab VM."
 fi
 
-# Kill only previous tunnel helpers. Keep ComfyUI itself alive.
+# Keep ComfyUI alive when refreshing the public tunnel.
 pkill -f "cloudflared tunnel" >/dev/null 2>&1 || true
 pkill -f "lt --port $PORT" >/dev/null 2>&1 || true
 pkill -f "free.pinggy.io" >/dev/null 2>&1 || true
 
-# Pinggy uses an SSH reverse tunnel over port 443 and does not require an account
-# for a temporary free URL. It works better for full web apps that need WebSockets.
 if ! command -v ssh >/dev/null 2>&1; then
   apt-get update -qq
   apt-get install -y -qq openssh-client >/dev/null
@@ -70,12 +84,10 @@ done
 
 if [[ -z "$PUBLIC_URL" ]]; then
   echo "ERROR: Pinggy did not return a public URL."
-  echo "Pinggy log:"
   tail -n 100 "$LOG_DIR/pinggy.log" || true
   exit 4
 fi
 
-# Verify that public HTTP traffic reaches the actual ComfyUI backend.
 echo "Checking remote ComfyUI HTTP endpoint..."
 HTTP_STATUS="$(curl -A 'h3-colab-health/1.0' -sS -o /tmp/h3_remote_stats.json -w '%{http_code}' \
   --connect-timeout 15 --max-time 25 "$PUBLIC_URL/system_stats" || true)"
@@ -85,15 +97,12 @@ if [[ "$HTTP_STATUS" != "200" ]]; then
   exit 5
 fi
 
-# Verify the same WebSocket endpoint the ComfyUI frontend uses.
 python -m pip install -q websocket-client >/dev/null 2>&1
 WS_URL="${PUBLIC_URL/https:\/\//wss://}/ws?clientId=h3-colab-tunnel-test"
 if ! python - "$WS_URL" <<'PY'
 import sys
 import websocket
-
-url = sys.argv[1]
-ws = websocket.create_connection(url, timeout=20)
+ws = websocket.create_connection(sys.argv[1], timeout=20)
 ws.close()
 print("WebSocket OK")
 PY
@@ -108,8 +117,8 @@ echo "✅ COMFYUI HTTP CHECK: PASSED"
 echo "✅ COMFYUI WEBSOCKET CHECK: PASSED"
 echo "🌐 OPEN COMFYUI HERE: $PUBLIC_URL"
 echo "============================================================"
-echo "Pinggy free tunnels may show a one-time browser screening page; choose Continue."
-echo "No IP/password is required."
+echo "Recommended workflow: MiniMax_H3_G4_Optimized_FullBatch.json"
+echo "OOM fallback:          MiniMax_H3_G4_Optimized_Safe_ClipByClip.json"
 echo "Keep this Colab runtime running while you use ComfyUI."
 echo "ComfyUI log: $LOG_DIR/comfyui.log"
 echo "Pinggy log:  $LOG_DIR/pinggy.log"
