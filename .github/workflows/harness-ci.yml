@@ -1,4 +1,4 @@
-name: Zet Harness 5.1 Windows Timeout Fix
+name: Zet Harness 5.2 Format Fix
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  fix:
+  format:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -33,37 +33,25 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Give seeded file-backed crash loop an explicit timeout
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path("harness/apps/runtime/src/runtime-fault-recovery.test.ts")
-          text = path.read_text()
-          old = "    }\n  });\n});\n"
-          new = "    }\n  }, 20_000);\n});\n"
-          if not text.endswith(old):
-              raise SystemExit("expected final seeded-test closing anchor not found")
-          path.write_text(text[:-len(old)] + new)
-          PY
-          cd harness
-          npx prettier --write apps/runtime/src/runtime-fault-recovery.test.ts
+      - name: Format 5.2 identity files
+        working-directory: harness
+        run: npx prettier --write packages/db/src/durable-node-invocation.ts packages/db/src/durable-node-invocation.test.ts
 
-      - name: Verify fault suite and static gates
+      - name: Verify focused 5.2 surface
         working-directory: harness
         run: |
           npm run typecheck
           npm run lint
           npm run format:check
           npm run build --workspace @zet-harness/db
-          npx vitest run apps/runtime/src/runtime-fault-recovery.test.ts
+          npx vitest run packages/db/src/durable-node-invocation.test.ts
 
-      - name: Push timeout hardening
+      - name: Push exact formatter output
         shell: bash
         run: |
           git diff --check
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
-          git add harness/apps/runtime/src/runtime-fault-recovery.test.ts
-          git commit -m "test(runtime): allow seeded crash loop on slow filesystems"
+          git add harness/packages/db/src/durable-node-invocation.ts harness/packages/db/src/durable-node-invocation.test.ts
+          git commit -m "style(db): format logical effect identity"
           git push origin HEAD:zet-harness-v1
