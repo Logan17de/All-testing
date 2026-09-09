@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { RuntimeApiSecurityError, type RuntimeApiSecurity } from "./runtime-api-security.js";
 import { RuntimeApprovalError } from "./runtime-approval-error.js";
+import { approvalHttpView } from "./runtime-approval-view.js";
 import type { RuntimeHumanApprovals } from "./runtime-human-approvals.js";
 import type { RuntimeRedactionRegistry } from "./runtime-redaction.js";
 
@@ -84,11 +85,10 @@ export async function handleApprovalHttp(
   }
   if (url.pathname === "/api/approvals" && request.method === "GET") {
     const runId = url.searchParams.get("runId") ?? undefined;
-    writeRuntimeJson(
-      response,
-      200,
-      redaction.redact({ approvals: approvals.listPending(runId), limit: 100 }),
-    );
+    writeRuntimeJson(response, 200, {
+      approvals: approvals.listPending(runId).map((record) => approvalHttpView(record, redaction)),
+      limit: 100,
+    });
     return;
   }
   const match = /^\/api\/approvals\/([^/]+)(?:\/(token|resume))?$/.exec(url.pathname);
@@ -104,7 +104,9 @@ export async function handleApprovalHttp(
   }
   const action = match[2];
   if (action === undefined && request.method === "GET") {
-    writeRuntimeJson(response, 200, redaction.redact({ approval: approvals.get(approvalId) }));
+    writeRuntimeJson(response, 200, {
+      approval: approvalHttpView(approvals.get(approvalId), redaction),
+    });
     return;
   }
   if (request.method !== "POST" || action === undefined) {
@@ -132,5 +134,8 @@ export async function handleApprovalHttp(
     decision: body.decision,
     payload: body.payload ?? null,
   });
-  writeRuntimeJson(response, 200, redaction.redact(result));
+  writeRuntimeJson(response, 200, {
+    approval: approvalHttpView(result.approval, redaction),
+    duplicate: result.duplicate,
+  });
 }
