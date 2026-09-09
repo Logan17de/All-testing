@@ -1,0 +1,76 @@
+name: Harness 5.5 Roadmap Handoff
+
+on:
+  push:
+    branches: [zet-harness-v1]
+    paths:
+      - .github/workflows/harness-5-5-roadmap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zet-harness-v1
+      - name: Advance 5.5 to 5.6
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          todo_path = Path("harness/TODO.md")
+          todo = todo_path.read_text()
+          old = "- [ ] 5.5 Add capability-based permission policy."
+          new = "- [x] 5.5 Add capability-based permission policy."
+          if old not in todo:
+              raise SystemExit("TODO 5.5 marker not found")
+          todo_path.write_text(todo.replace(old, new, 1))
+
+          plan_path = Path("harness/PLAN.md")
+          plan = plan_path.read_text()
+
+          old_tree = """           ├─ 5.4 reconciliation/manual-review outcomes                        ✅
+           └─ 5.5 capability-based permission policy                           ▶ CURRENT"""
+          new_tree = """           ├─ 5.4 reconciliation/manual-review outcomes                        ✅
+           ├─ 5.5 capability-based permission policy                           ✅
+           └─ 5.6 compile-time graph/node capability enforcement                ▶ CURRENT"""
+          if old_tree not in plan:
+              raise SystemExit("PLAN Phase 5 tree marker not found")
+          plan = plan.replace(old_tree, new_tree, 1)
+
+          old_status = "🚧 In progress — **5.5 current**"
+          if old_status not in plan:
+              raise SystemExit("PLAN phase-map status marker not found")
+          plan = plan.replace(old_status, "🚧 In progress — **5.6 current**", 1)
+
+          paragraph = """Phase 5.5 adds one host-owned capability permission policy in `@zet-harness/core` without expanding Graph JSON/schema validation or prematurely wiring invocation enforcement. Capability IDs are opaque exact case-sensitive strings in v1: there are no wildcard, prefix, hierarchy, or implication semantics. Authority is default-deny, explicit denial overrides an overlapping grant, and construction copies/deduplicates caller inputs into immutable snapshots so later mutation cannot change an existing decision. Single-capability evaluation returns explicit allow/deny plus the safe denial cause (`explicitly-denied` or `not-granted`), while required capability sets use deterministic all-of evaluation and preserve those causes separately. Graph, node, plugin, model, and tool declarations remain requests rather than sources of authority. Phase 5.6 consumes this shared policy for compile-time graph/node enforcement and Phase 5.7 reuses the same semantics at invocation time.
+"""
+          anchor = "\n\nPhase 4.10 adds migration v4"
+          if paragraph not in plan:
+              if anchor not in plan:
+                  raise SystemExit("PLAN 5.5 insertion anchor not found")
+              plan = plan.replace(anchor, "\n\n" + paragraph + "\nPhase 4.10 adds migration v4", 1)
+
+          old_next = "> **Phase 5 / Item 5.1 — Define and enforce cross-field effect/idempotency/recovery invariants over the Phase 1 node enums.**"
+          if old_next in plan:
+              plan = plan.replace(
+                  old_next,
+                  "> **Phase 5 / Item 5.6 — Enforce graph/node capabilities at compile time using the host-owned capability permission policy.**",
+                  1,
+              )
+
+          plan_path.write_text(plan)
+          PY
+      - name: Commit roadmap handoff and remove helper
+        shell: bash
+        run: |
+          rm .github/workflows/harness-5-5-roadmap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add harness/TODO.md harness/PLAN.md .github/workflows/harness-5-5-roadmap.yml
+          git commit -m "docs: complete Harness 5.5 capability policy"
+          git push origin HEAD:zet-harness-v1
