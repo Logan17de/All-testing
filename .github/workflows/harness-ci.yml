@@ -50,12 +50,12 @@ jobs:
 
           old = '''    child.stderr.on("data", (chunk: Buffer) => {
               process.stderr.write(chunk);
-            });'''
+            });'''.replace('              ', '      ')
           new = '''    child.stderr.on("data", (chunk: Buffer) => {
               const text = chunk.toString("utf8");
               stdout += text;
               process.stderr.write(text);
-            });'''
+            });'''.replace('              ', '      ')
           if old not in text:
               raise SystemExit("stderr capture anchor not found")
           path.write_text(text.replace(old, new, 1))
