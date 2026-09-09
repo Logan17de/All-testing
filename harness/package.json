@@ -16,7 +16,7 @@
     "test": "npm run build --workspace @zet-harness/db && vitest run --passWithNoTests",
     "test:startup": "npm run build --workspace @zet-harness/runtime && node scripts/runtime-startup-smoke.mjs && node scripts/startup-smoke.mjs",
     "baseline": "npm run build --workspace @zet-harness/runtime && vitest bench scripts/lightweight-baseline.bench.ts --outputJson=tmp/baseline/bench.json",
-    "baseline:ci": "node --experimental-strip-types scripts/run-lightweight-baseline-ci.ts",
+    "baseline:ci": "npm run baseline && node --experimental-strip-types scripts/check-lightweight-baseline.ts",
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
