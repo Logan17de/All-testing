@@ -14,15 +14,9 @@ export const DURABLE_EFFECT_RECOVERY_OUTCOME_EVENT_SCHEMA_VERSION = 1 as const;
 
 export type EffectRecoveryOutcomeSource = "reconciliation" | "manual-review";
 export type EffectRecoveryOutcomeKind =
-  | "confirmed-applied"
-  | "confirmed-not-applied"
-  | "inconclusive"
-  | "abandoned";
+  "confirmed-applied" | "confirmed-not-applied" | "inconclusive" | "abandoned";
 export type EffectRecoveryDisposition =
-  | "complete-with-recovered-output"
-  | "rerun-authorized"
-  | "hold-for-manual-review"
-  | "fail";
+  "complete-with-recovered-output" | "rerun-authorized" | "hold-for-manual-review" | "fail";
 export type EffectRecoveryNextAction = "hold-for-reconciliation" | EffectRecoveryDisposition;
 
 export interface EffectRecoveryOutcomeInput {
@@ -62,8 +56,7 @@ export interface AmbiguousExternalWriteRecoveryIdentity {
   readonly classification: PreCrashRecoveryClassification;
 }
 
-export interface CommitAmbiguousExternalWriteRecoveryOutcomeInput
-  extends AmbiguousExternalWriteRecoveryIdentity {
+export interface CommitAmbiguousExternalWriteRecoveryOutcomeInput extends AmbiguousExternalWriteRecoveryIdentity {
   readonly resolution: EffectRecoveryOutcomeInput;
 }
 
@@ -196,7 +189,10 @@ function validateResolution(input: EffectRecoveryOutcomeInput): EffectRecoveryDi
   throw new TypeError(`Unknown effect recovery outcome source '${String(input.source)}'.`);
 }
 
-function assertSourceAllowed(nextAction: EffectRecoveryNextAction, source: EffectRecoveryOutcomeSource) {
+function assertSourceAllowed(
+  nextAction: EffectRecoveryNextAction,
+  source: EffectRecoveryOutcomeSource,
+) {
   if (nextAction === "hold-for-reconciliation") {
     if (source !== "reconciliation") {
       throw new TypeError("This recovery hold requires reconciliation before manual review.");
@@ -256,7 +252,9 @@ function parseStoredOutcome(
   });
 
   if (requireString(payload, "disposition") !== disposition) {
-    throw new TypeError("Durable effect recovery outcome disposition is inconsistent with its result.");
+    throw new TypeError(
+      "Durable effect recovery outcome disposition is inconsistent with its result.",
+    );
   }
 
   return Object.freeze({
@@ -370,10 +368,14 @@ function assertRunningAttemptIdentity(
     throw new RangeError("Effect recovery references an unavailable durable node attempt.");
   }
   if (requireString(row, "logical_effect_id") !== classification.logicalEffectId) {
-    throw new TypeError("Effect recovery logical effect identity does not match the durable attempt.");
+    throw new TypeError(
+      "Effect recovery logical effect identity does not match the durable attempt.",
+    );
   }
   if (requireString(row, "status") !== "running") {
-    throw new TypeError("Effect recovery outcome requires the ambiguous durable attempt to remain running.");
+    throw new TypeError(
+      "Effect recovery outcome requires the ambiguous durable attempt to remain running.",
+    );
   }
 }
 

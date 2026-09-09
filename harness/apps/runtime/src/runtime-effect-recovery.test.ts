@@ -42,8 +42,7 @@ function classification(
     startedAtMs: 7,
     sourceNodeId: "write-node",
     recoveryPolicy,
-    action:
-      recoveryPolicy === "reconcile" ? "hold-for-reconciliation" : "hold-for-manual-review",
+    action: recoveryPolicy === "reconcile" ? "hold-for-reconciliation" : "hold-for-manual-review",
   });
 }
 
