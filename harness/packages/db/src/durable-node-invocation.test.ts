@@ -232,9 +232,10 @@ describe("durable logical effect identity", () => {
         createdAtMs: 502,
       });
 
-      expect(new Set([first.logicalEffectId, nextIteration.logicalEffectId, nextOp.logicalEffectId]).size).toBe(
-        3,
-      );
+      expect(
+        new Set([first.logicalEffectId, nextIteration.logicalEffectId, nextOp.logicalEffectId])
+          .size,
+      ).toBe(3);
     } finally {
       database.close();
     }

@@ -67,9 +67,7 @@ export function ensureDurableNodeInvocation(
          FROM ${NODE_INVOCATIONS_TABLE}
          WHERE run_id = ? AND op_index = ? AND iteration = ?`,
       )
-      .get(input.runId, input.opIndex, input.iteration) as
-      | DurableNodeInvocationRow
-      | undefined;
+      .get(input.runId, input.opIndex, input.iteration) as DurableNodeInvocationRow | undefined;
 
     if (existing !== undefined) {
       return freezeInvocationRecord(existing);
