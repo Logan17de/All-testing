@@ -1,4 +1,4 @@
-// Phase 5.5 exports host-owned permission policy; enforcement lands in 5.6 and 5.7.
+// Phase 5.5 owns permission semantics; Phase 5.6 now applies them at compile time.
 export {
   CapabilityPermissionPolicy,
   type CapabilityPermissionBatchResult,
