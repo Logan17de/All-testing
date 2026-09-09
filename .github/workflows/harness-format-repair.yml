@@ -6,11 +6,9 @@ on:
       - zet-harness-v1
     paths:
       - ".github/workflows/harness-format-repair.yml"
-      - "harness/packages/scheduler/src/plain-dag-run.ts"
-      - "harness/packages/scheduler/src/effect-aware-retry.test.ts"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format:
@@ -38,12 +36,14 @@ jobs:
       - name: Format target files
         run: npx prettier --write packages/scheduler/src/plain-dag-run.ts packages/scheduler/src/effect-aware-retry.test.ts
 
-      - name: Upload formatted files
-        uses: actions/upload-artifact@v4
-        with:
-          name: harness-5-3-formatted
-          path: |
-            harness/packages/scheduler/src/plain-dag-run.ts
-            harness/packages/scheduler/src/effect-aware-retry.test.ts
-          if-no-files-found: error
-          retention-days: 1
+      - name: Commit exact formatter output
+        shell: bash
+        run: |
+          if git diff --quiet -- packages/scheduler/src/plain-dag-run.ts packages/scheduler/src/effect-aware-retry.test.ts; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/scheduler/src/plain-dag-run.ts packages/scheduler/src/effect-aware-retry.test.ts
+          git commit -m "style(scheduler): format effect-aware retry changes"
+          git push
