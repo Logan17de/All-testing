@@ -4,9 +4,22 @@ import { GRAPH_LOOP_MAX_ITERATIONS_CONFIG_KEY } from "./graph-json-v1-loop-bound
 import type { GraphJsonV1 } from "./graph-json-v1.js";
 import type { NodeManifestResolver } from "./graph-json-v1-semantic-validator.js";
 
-/** External authority supplied to compilation. Graph JSON never grants itself authority. */
+export type GraphCapabilityAuthorityEvaluation =
+  | { readonly decision: "allow" }
+  | {
+      readonly decision: "deny";
+      readonly denialReason: "explicitly-denied" | "not-granted";
+    };
+
+/**
+ * Narrow host-authority contract consumed by compilation.
+ *
+ * `CapabilityPermissionPolicy` from `@zet-harness/core` satisfies this interface
+ * structurally. Graph JSON, node manifests, plugins, models, and tools only
+ * declare capability demand; none of them are authority sources.
+ */
 export interface GraphCapabilityAuthority {
-  readonly granted: readonly CapabilityId[];
+  evaluate(capability: CapabilityId): GraphCapabilityAuthorityEvaluation;
 }
 
 export type GraphCapabilityPolicyDiagnosticCode =
@@ -66,17 +79,54 @@ function collectDuplicates(
   }
 }
 
+function appendExternalAuthorityDiagnostic(
+  diagnostics: GraphCapabilityPolicyDiagnostic[],
+  capability: CapabilityId,
+  evaluation: GraphCapabilityAuthorityEvaluation,
+  subject: "graph" | "node",
+  nodeId?: string,
+): void {
+  if (evaluation.decision === "allow") {
+    return;
+  }
+
+  if (evaluation.denialReason === "explicitly-denied") {
+    diagnostics.push({
+      code: "GRAPH_CAPABILITY_REQUIRED_DENIED",
+      message:
+        subject === "graph"
+          ? `Graph-required capability '${capability}' is explicitly denied by external compile authority.`
+          : `Node '${nodeId}' requires capability '${capability}', but external compile authority explicitly denies it.`,
+      capability,
+      ...(nodeId === undefined ? { policyField: "required" as const } : { nodeId }),
+    });
+    return;
+  }
+
+  diagnostics.push({
+    code: "GRAPH_CAPABILITY_REQUIRED_UNAVAILABLE",
+    message:
+      subject === "graph"
+        ? `Graph-required capability '${capability}' is not present in external compile authority.`
+        : `Node '${nodeId}' requires capability '${capability}', but external compile authority does not grant it.`,
+    capability,
+    ...(nodeId === undefined ? { policyField: "required" as const } : { nodeId }),
+  });
+}
+
 /**
- * Run the narrow 2.13 capability/policy compile-time stage.
+ * Run the narrow capability/policy compile-time stage.
  *
  * Hard demand is the union of graph `required` requests and capabilities required
  * by resolved node manifests. Graph `optional` requests never make compilation
- * fail merely because external authority is absent. Graph `deny` is a one-way
+ * fail merely because host authority is absent. Graph `deny` is a one-way
  * self-restriction and can never add authority.
  *
- * Effective capability authority is therefore requested capability intent,
- * intersected with externally supplied grants, minus graph self-denials. Runtime
- * policy may always be stricter than this compile-time view.
+ * Phase 5.6 consumes a host-owned authority evaluator rather than a raw grant
+ * list. Each capability is evaluated at most once per validation pass, so even
+ * an accidentally stateful caller cannot make one compile observe conflicting
+ * decisions for the same capability. The immutable `CapabilityPermissionPolicy`
+ * from `@zet-harness/core` is the intended authority implementation.
  */
 export function checkGraphJsonV1CapabilityPolicy(
   graph: GraphJsonV1,
@@ -114,8 +164,19 @@ export function checkGraphJsonV1CapabilityPolicy(
     }
   }
 
-  const granted = new Set(authority.granted);
   const denied = new Set(graphDeny);
+  const authorityEvaluations = new Map<CapabilityId, GraphCapabilityAuthorityEvaluation>();
+  const evaluateAuthority = (capability: CapabilityId): GraphCapabilityAuthorityEvaluation => {
+    const cached = authorityEvaluations.get(capability);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const evaluation = authority.evaluate(capability);
+    authorityEvaluations.set(capability, evaluation);
+    return evaluation;
+  };
+
   const requiredCapabilities: CapabilityId[] = [];
   const requiredSeen = new Set<CapabilityId>();
   const optionalCapabilities: CapabilityId[] = [];
@@ -131,13 +192,13 @@ export function checkGraphJsonV1CapabilityPolicy(
         capability,
         policyField: "required",
       });
-    } else if (!granted.has(capability)) {
-      diagnostics.push({
-        code: "GRAPH_CAPABILITY_REQUIRED_UNAVAILABLE",
-        message: `Graph-required capability '${capability}' is not present in external compile authority.`,
+    } else {
+      appendExternalAuthorityDiagnostic(
+        diagnostics,
         capability,
-        policyField: "required",
-      });
+        evaluateAuthority(capability),
+        "graph",
+      );
     }
   }
 
@@ -170,13 +231,14 @@ export function checkGraphJsonV1CapabilityPolicy(
           nodeId: node.id,
           policyField: "deny",
         });
-      } else if (!granted.has(capability)) {
-        diagnostics.push({
-          code: "GRAPH_CAPABILITY_REQUIRED_UNAVAILABLE",
-          message: `Node '${node.id}' requires capability '${capability}', but external compile authority does not grant it.`,
+      } else {
+        appendExternalAuthorityDiagnostic(
+          diagnostics,
           capability,
-          nodeId: node.id,
-        });
+          evaluateAuthority(capability),
+          "node",
+          node.id,
+        );
       }
     }
 
@@ -201,7 +263,7 @@ export function checkGraphJsonV1CapabilityPolicy(
   const effectiveCapabilities: CapabilityId[] = [];
   const effectiveSeen = new Set<CapabilityId>();
   for (const capability of [...requiredCapabilities, ...optionalCapabilities]) {
-    if (granted.has(capability) && !denied.has(capability)) {
+    if (!denied.has(capability) && evaluateAuthority(capability).decision === "allow") {
       pushUnique(effectiveCapabilities, effectiveSeen, capability);
     }
   }
@@ -215,7 +277,7 @@ export function checkGraphJsonV1CapabilityPolicy(
   };
 }
 
-/** Boolean convenience wrapper for the separate 2.13 capability/policy stage. */
+/** Boolean convenience wrapper for the separate capability/policy stage. */
 export function validateGraphJsonV1CapabilityPolicy(
   graph: GraphJsonV1,
   resolver: NodeManifestResolver,
