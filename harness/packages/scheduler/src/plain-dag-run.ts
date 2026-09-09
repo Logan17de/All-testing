@@ -174,9 +174,27 @@ export interface PlainDagEffectRetryOptions {
   readonly hasBoundIdempotencyKey?: (context: PlainDagIdempotencyKeyRetryContext) => boolean;
 }
 
+/** Structural shape intentionally satisfied by the host Core permission policy. */
+export interface PlainDagCapabilityAuthorityEvaluation {
+  readonly decision: "allow" | "deny";
+  readonly denialReason?: "explicitly-denied" | "not-granted";
+}
+
+/** Current host-owned capability authority consulted immediately before invocation. */
+export interface PlainDagCapabilityAuthority {
+  evaluate(
+    capability: ExecutionIrOpV1["behavior"]["requiredCapabilities"][number],
+  ): PlainDagCapabilityAuthorityEvaluation;
+}
+
 export interface PlainDagRunOptions {
   readonly retry?: PlainDagRetryHooks;
   readonly effectRetry?: PlainDagEffectRetryOptions;
+  /**
+   * Host-owned authority re-evaluated for every scheduler invocation attempt.
+   * Omission is fail-closed only for ops that actually require capabilities.
+   */
+  readonly capabilityAuthority?: PlainDagCapabilityAuthority;
   /**
    * Optional post-execution gate that must resolve before completion becomes
    * scheduler-visible. Durable runtimes use this for the atomic completion
@@ -379,6 +397,12 @@ function waitForSettlementOrAbort(
  * bound to the integration operation. The same gate clamps adapter/internal
  * retries, so retry layers cannot bypass effect safety by sharing only a number.
  *
+ * 5.7 re-checks each op's frozen required capability demand immediately before
+ * every executor attempt. Current host authority is intentionally not cached
+ * across attempts, so a revoked capability blocks a retry before it consumes a
+ * new scheduler attempt or reaches executor/effect code. Graph deny remains a
+ * one-way runtime restriction, while capability-free ops need no authority.
+ *
  * Retry waits are liveness tasks, not active execution tasks. They keep the run
  * alive while backoff is pending but never block dispatch of unrelated ready work.
  * Zero-delay retries use an immediate Promise path rather than a timer.
@@ -529,6 +553,8 @@ export class PlainDagRun {
       if (operation === undefined) {
         throw new RangeError(`Execution IR op ${String(op)} is unavailable.`);
       }
+
+      this.assertInvocationCapabilities(op, operation);
 
       const maxAttempts = operation.behavior.retry?.maxAttempts ?? 1;
       repeatAuthorized = this.resolveRepeatAuthorization(op, operation, maxAttempts);
@@ -742,6 +768,38 @@ export class PlainDagRun {
     }
     if (this.readiness.getOpState(op).status === "retry-wait") {
       this.readiness.readyRetryOp(op);
+    }
+  }
+
+  private assertInvocationCapabilities(op: number, operation: ExecutionIrOpV1): void {
+    const seen = new Set<ExecutionIrOpV1["behavior"]["requiredCapabilities"][number]>();
+
+    for (const capability of operation.behavior.requiredCapabilities) {
+      if (seen.has(capability)) {
+        continue;
+      }
+      seen.add(capability);
+
+      if (this.ir.policies.capabilities.deny.includes(capability)) {
+        throw new Error(
+          `Run op ${String(op)} requires capability '${capability}', but the compiled graph denies it.`,
+        );
+      }
+
+      const evaluation = this.options.capabilityAuthority?.evaluate(capability);
+      if (evaluation?.decision === "allow") {
+        continue;
+      }
+
+      if (evaluation?.denialReason === "explicitly-denied") {
+        throw new Error(
+          `Run op ${String(op)} requires capability '${capability}', but current runtime authority explicitly denies it.`,
+        );
+      }
+
+      throw new Error(
+        `Run op ${String(op)} requires capability '${capability}', but current runtime authority does not grant it.`,
+      );
     }
   }
 
