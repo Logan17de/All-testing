@@ -1,4 +1,4 @@
-name: Zet Harness 4.22 Format Fix
+name: Zet Harness 4.22 Final Format
 
 on:
   push:
@@ -33,34 +33,6 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Harden baseline runner
-        working-directory: harness
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path("scripts/run-lightweight-baseline-ci.ts")
-          text = path.read_text()
-
-          old = '  const baseline = await runCommand(process.execPath, [npmCli, "run", "baseline"]);'
-          new = '  mkdirSync(dirname(runtimeReportPath), { recursive: true });\n  const baseline = await runCommand(process.execPath, [npmCli, "run", "baseline"]);'
-          if old not in text:
-              raise SystemExit("baseline runner anchor not found")
-          text = text.replace(old, new, 1)
-
-          old = '''    child.stderr.on("data", (chunk: Buffer) => {
-              process.stderr.write(chunk);
-            });'''.replace('              ', '      ')
-          new = '''    child.stderr.on("data", (chunk: Buffer) => {
-              const text = chunk.toString("utf8");
-              stdout += text;
-              process.stderr.write(text);
-            });'''.replace('              ', '      ')
-          if old not in text:
-              raise SystemExit("stderr capture anchor not found")
-          path.write_text(text.replace(old, new, 1))
-          PY
-
       - name: Format and verify
         working-directory: harness
         env:
@@ -72,7 +44,7 @@ jobs:
           npm run format:check
           npm run baseline:ci
 
-      - name: Push correction
+      - name: Push formatting
         working-directory: harness
         shell: bash
         run: |
@@ -80,5 +52,9 @@ jobs:
           git config user.name "Logesh"
           git config user.email "loganlogesh17@gmail.com"
           git add baselines/lightweight-baseline-v1.json scripts/check-lightweight-baseline.test.ts scripts/check-lightweight-baseline.ts scripts/run-lightweight-baseline-ci.ts
-          git commit -m "fix(perf): format and harden baseline guard"
-          git push origin HEAD:zet-harness-v1
+          if git diff --cached --quiet; then
+            echo "No formatting changes to commit."
+          else
+            git commit -m "style(perf): format baseline guard"
+            git push origin HEAD:zet-harness-v1
+          fi
