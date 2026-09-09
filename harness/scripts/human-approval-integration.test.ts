@@ -30,7 +30,14 @@ describe("human gate and secret redaction integration", () => {
         revisionId: "1",
         inputs: [],
         outputs: [{ id: "response", schema: true, source: { nodeId: "gate", port: "response" } }],
-        nodes: [{ id: "gate", type: HUMAN_APPROVAL_NODE_TYPE, version: "1", config: { prompt: "Proceed?" } }],
+        nodes: [
+          {
+            id: "gate",
+            type: HUMAN_APPROVAL_NODE_TYPE,
+            version: "1",
+            config: { prompt: "Proceed?" },
+          },
+        ],
         edges: [],
         entrypoints: [{ id: "main", nodeId: "gate" }],
       };
@@ -77,14 +84,18 @@ describe("human gate and secret redaction integration", () => {
     await accessor.get("key");
     expect(observe).toHaveBeenCalledOnce();
     expect(Reflect.has(accessor, "onResolve")).toBe(false);
-    expect(() => registry.assertSafe({ result: secret.revealText() })).toThrow("protected material");
+    expect(() => registry.assertSafe({ result: secret.revealText() })).toThrow(
+      "protected material",
+    );
   });
 
   it("fails closed with a safe error if the host redaction observer fails", async () => {
     const accessor = createNodeSecretAccessor(
       [{ port: "key", secretRef: "local:test-key" }],
       { resolve: () => new SecretValue("unexposed-material") },
-      () => { throw new Error("private-observer-detail"); },
+      () => {
+        throw new Error("private-observer-detail");
+      },
     );
     const error: unknown = await accessor.get("key").catch((failure: unknown) => failure);
     expect(error).toMatchObject({ code: "SECRET_PROVIDER_FAILED" });

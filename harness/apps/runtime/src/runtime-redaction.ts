@@ -50,7 +50,9 @@ export function canonicalRuntimeJson(value: unknown): string {
         }
         return result;
       }
-      const result: { [key: string]: SafeJson } = Object.create(null) as { [key: string]: SafeJson };
+      const result: { [key: string]: SafeJson } = Object.create(null) as {
+        [key: string]: SafeJson;
+      };
       for (const key of Reflect.ownKeys(item).sort((a, b) =>
         String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0,
       )) {
@@ -105,7 +107,9 @@ export class RuntimeRedactionRegistry {
       if (typeof item === "string") return text(item);
       if (item === null || typeof item !== "object") return item;
       if (Array.isArray(item)) return item.map(visit);
-      const result: { [key: string]: SafeJson } = Object.create(null) as { [key: string]: SafeJson };
+      const result: { [key: string]: SafeJson } = Object.create(null) as {
+        [key: string]: SafeJson;
+      };
       for (const [key, child] of Object.entries(item)) {
         result[text(key)] = this.#fields.has(normalizeField(key)) ? REDACTED : visit(child);
       }

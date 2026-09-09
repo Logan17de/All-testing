@@ -30,7 +30,9 @@ describe("machine-readable invocation permission denials", () => {
       const evaluate = vi.fn(() => ({
         decision: "deny" as const,
         denialReason:
-          reason === "explicitly-denied" ? ("explicitly-denied" as const) : ("not-granted" as const),
+          reason === "explicitly-denied"
+            ? ("explicitly-denied" as const)
+            : ("not-granted" as const),
       }));
       const run = new PlainDagRun(plan, scheduler.createRun(plan), executor, {
         capabilityAuthority: { evaluate },

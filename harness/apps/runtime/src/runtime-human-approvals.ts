@@ -90,9 +90,8 @@ function publicRecord(row: StoredApproval): DurableApprovalRecord {
 }
 
 function load(connection: DatabaseSync, approvalId: string): StoredApproval {
-  const row = connection
-    .prepare(`${APPROVAL_SELECT} WHERE approval_id = ?`)
-    .get(approvalId) as StoredApproval | undefined;
+  const row = connection.prepare(`${APPROVAL_SELECT} WHERE approval_id = ?`).get(approvalId) as
+    StoredApproval | undefined;
   if (row === undefined) throw new RuntimeApprovalError("APPROVAL_NOT_FOUND");
   return row;
 }
@@ -114,10 +113,12 @@ function appendEvent(
   opIndex: number | null = null,
 ): number {
   const result = connection
-    .prepare(`INSERT INTO durable_events (
+    .prepare(
+      `INSERT INTO durable_events (
       run_id, event_type, event_schema_version, op_index, iteration, attempt,
       occurred_at_ms, payload_json
-    ) VALUES (?, ?, 1, ?, ?, NULL, ?, ?)`)
+    ) VALUES (?, ?, 1, ?, ?, NULL, ?, ?)`,
+    )
     .run(runId, type, opIndex, opIndex === null ? null : 0, now, canonicalRuntimeJson(payload));
   return Number(result.lastInsertRowid);
 }
@@ -141,9 +142,11 @@ function checkpoint(
     );
   }
   const header = connection
-    .prepare(`INSERT INTO run_checkpoints (
+    .prepare(
+      `INSERT INTO run_checkpoints (
       run_id, through_event_id, checkpoint_schema_version, created_at_ms
-    ) VALUES (?, ?, 1, ?)`)
+    ) VALUES (?, ?, 1, ?)`,
+    )
     .run(frontier.runId, cursor, now);
   const checkpointId = Number(header.lastInsertRowid);
   const insertOp = connection.prepare(`INSERT INTO checkpoint_op_frontier (
@@ -213,9 +216,11 @@ export class RuntimeHumanApprovals {
     }
     const rows = this.#database
       .connection()
-      .prepare(`${APPROVAL_SELECT}
+      .prepare(
+        `${APPROVAL_SELECT}
         WHERE status = 'pending' AND (? IS NULL OR run_id = ?)
-        ORDER BY created_at_ms, approval_id LIMIT ?`)
+        ORDER BY created_at_ms, approval_id LIMIT ?`,
+      )
       .all(runId ?? null, runId ?? null, limit) as unknown as StoredApproval[];
     return Object.freeze(rows.map(publicRecord));
   }
@@ -234,8 +239,10 @@ export class RuntimeHumanApprovals {
     const requestJson = this.safeJson(input.request);
     return this.#database.commit((connection) => {
       const existing = connection
-        .prepare(`${APPROVAL_SELECT}
-          WHERE run_id = ? AND op_index = ? AND iteration = 0`)
+        .prepare(
+          `${APPROVAL_SELECT}
+          WHERE run_id = ? AND op_index = ? AND iteration = 0`,
+        )
         .get(runId, opIndex) as StoredApproval | undefined;
       if (existing !== undefined) {
         if (
@@ -247,10 +254,7 @@ export class RuntimeHumanApprovals {
         return { approval: publicRecord(existing), resumeToken: null, duplicate: true };
       }
       const now = this.now();
-      if (
-        expiresAtMs !== undefined &&
-        (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= now)
-      ) {
+      if (expiresAtMs !== undefined && (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= now)) {
         throw new RuntimeApprovalError("APPROVAL_INVALID_REQUEST");
       }
       const frontier = this.frontier(connection, runId, opIndex);
@@ -261,15 +265,19 @@ export class RuntimeHumanApprovals {
       const approvalId = `approval-v1:${randomUUID()}`;
       const resumeToken = this.freshToken();
       const invocation = connection
-        .prepare(`SELECT logical_effect_id AS id FROM node_invocations
-          WHERE run_id = ? AND op_index = ? AND iteration = 0`)
+        .prepare(
+          `SELECT logical_effect_id AS id FROM node_invocations
+          WHERE run_id = ? AND op_index = ? AND iteration = 0`,
+        )
         .get(runId, opIndex) as { readonly id: string } | undefined;
       const logicalEffectId = invocation?.id ?? generateLogicalEffectId();
       if (invocation === undefined) {
         connection
-          .prepare(`INSERT INTO node_invocations
+          .prepare(
+            `INSERT INTO node_invocations
             (run_id, op_index, iteration, logical_effect_id, created_at_ms)
-            VALUES (?, ?, 0, ?, ?)`)
+            VALUES (?, ?, 0, ?, ?)`,
+          )
           .run(runId, opIndex, logicalEffectId, now);
       }
       appendEvent(connection, runId, "harness.approval.requested", now, { approvalId }, opIndex);
@@ -278,10 +286,12 @@ export class RuntimeHumanApprovals {
       );
       const checkpointId = checkpoint(connection, frontier, ops, now);
       connection
-        .prepare(`INSERT INTO approvals (
+        .prepare(
+          `INSERT INTO approvals (
           approval_id, run_id, compiled_plan_id, op_index, iteration, logical_effect_id,
           checkpoint_id, status, request_json, resume_token_hash, created_at_ms, expires_at_ms
-        ) VALUES (?, ?, ?, ?, 0, ?, ?, 'pending', ?, ?, ?, ?)`)
+        ) VALUES (?, ?, ?, ?, 0, ?, ?, 'pending', ?, ?, ?, ?)`,
+        )
         .run(
           approvalId,
           runId,
@@ -295,7 +305,11 @@ export class RuntimeHumanApprovals {
           expiresAtMs ?? null,
         );
       connection.prepare("UPDATE runs SET status = 'waiting' WHERE run_id = ?").run(runId);
-      return { approval: publicRecord(load(connection, approvalId)), resumeToken, duplicate: false };
+      return {
+        approval: publicRecord(load(connection, approvalId)),
+        resumeToken,
+        duplicate: false,
+      };
     });
   }
 
@@ -376,8 +390,10 @@ export class RuntimeHumanApprovals {
         throw new RuntimeApprovalError("APPROVAL_CONFLICT");
       }
       connection
-        .prepare(`UPDATE approvals SET status = ?, response_json = ?, response_hash = ?,
-          resolved_at_ms = ? WHERE approval_id = ? AND status = 'pending'`)
+        .prepare(
+          `UPDATE approvals SET status = ?, response_json = ?, response_hash = ?,
+          resolved_at_ms = ? WHERE approval_id = ? AND status = 'pending'`,
+        )
         .run(decision, responseJson, responseHash, now, approvalId);
       let readyOrder = Math.max(-1, ...frontier.ops.map((op) => op.readyOrder ?? -1)) + 1;
       const ops = frontier.ops.map((op): RecoveredOpFrontier => {
@@ -405,10 +421,12 @@ export class RuntimeHumanApprovals {
       });
       if (decision === "approved") {
         connection
-          .prepare(`INSERT INTO node_attempts (
+          .prepare(
+            `INSERT INTO node_attempts (
             run_id, op_index, iteration, attempt, logical_effect_id, status, input_refs_json,
             output_refs_json, error_json, usage_json, started_at_ms, finished_at_ms
-          ) VALUES (?, ?, 0, 1, ?, 'completed', '{}', ?, NULL, NULL, ?, ?)`)
+          ) VALUES (?, ?, 0, 1, ?, 'completed', '{}', ?, NULL, NULL, ?, ?)`,
+          )
           .run(
             row.runId,
             row.opIndex,
@@ -421,8 +439,10 @@ export class RuntimeHumanApprovals {
           );
       } else {
         connection
-          .prepare(`UPDATE approvals SET status = 'cancelled', response_json = 'null',
-            response_hash = ?, resolved_at_ms = ? WHERE run_id = ? AND status = 'pending'`)
+          .prepare(
+            `UPDATE approvals SET status = 'cancelled', response_json = 'null',
+            response_hash = ?, resolved_at_ms = ? WHERE run_id = ? AND status = 'pending'`,
+          )
           .run(digest("cancelled"), now, row.runId);
       }
       appendEvent(
@@ -533,10 +553,7 @@ export class RuntimeHumanApprovals {
     for (const capability of authorize
       ? new Set([...intent.required, ...gate.behavior.requiredCapabilities])
       : []) {
-      if (
-        intent.deny.includes(capability) ||
-        this.#evaluate?.(capability).decision !== "allow"
-      ) {
+      if (intent.deny.includes(capability) || this.#evaluate?.(capability).decision !== "allow") {
         throw new RuntimeApprovalError("PERMISSION_DENIED");
       }
     }

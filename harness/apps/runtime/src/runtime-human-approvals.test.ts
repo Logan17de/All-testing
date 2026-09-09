@@ -6,10 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SqliteDatabase, runSqliteMigrations } from "@zet-harness/db";
 
 import { RUNTIME_DATABASE_MIGRATIONS, RuntimeDaemon } from "./runtime-daemon.js";
-import {
-  RuntimeHumanApprovals,
-  type RuntimeApprovalAuthority,
-} from "./runtime-human-approvals.js";
+import { RuntimeHumanApprovals, type RuntimeApprovalAuthority } from "./runtime-human-approvals.js";
 import { RuntimeHttpServer } from "./runtime-http-server.js";
 import { reconstructExecutionFrontier } from "./runtime-recovery.js";
 import { RuntimeRedactionRegistry, canonicalRuntimeJson } from "./runtime-redaction.js";
@@ -61,18 +58,26 @@ function fixture(
     policies: { capabilities: { required: [], optional: [], deny: [] } },
   };
   const c = database.connection();
-  c.prepare(`INSERT INTO graph_sources (document_hash, semantic_hash, hash_algorithm, graph_id,
+  c.prepare(
+    `INSERT INTO graph_sources (document_hash, semantic_hash, hash_algorithm, graph_id,
     revision_id, normalized_document_json, canonical_semantics_json, created_at_ms)
-    VALUES ('doc', 'sem', 'sha256', 'graph', 'rev', '{}', '{}', 1)`).run();
-  c.prepare(`INSERT INTO compiled_plans (compiled_plan_id, semantic_hash, registry_hash,
+    VALUES ('doc', 'sem', 'sha256', 'graph', 'rev', '{}', '{}', 1)`,
+  ).run();
+  c.prepare(
+    `INSERT INTO compiled_plans (compiled_plan_id, semantic_hash, registry_hash,
     compiler_version, hash_algorithm, ir_hash, execution_ir_json, node_pins_json,
     plugin_pins_json, created_at_ms) VALUES (1, 'sem', 'registry', 'harness.compiler/v1',
-    'sha256', 'ir', ?, '[]', '[]', 1)`).run(JSON.stringify(ir));
-  c.prepare(`INSERT INTO graph_compilations (document_hash, compiled_plan_id, semantic_hash,
-    created_at_ms) VALUES ('doc', 1, 'sem', 1)`).run();
-  c.prepare(`INSERT INTO runs (run_id, document_hash, compiled_plan_id, status, parent_run_id,
+    'sha256', 'ir', ?, '[]', '[]', 1)`,
+  ).run(JSON.stringify(ir));
+  c.prepare(
+    `INSERT INTO graph_compilations (document_hash, compiled_plan_id, semantic_hash,
+    created_at_ms) VALUES ('doc', 1, 'sem', 1)`,
+  ).run();
+  c.prepare(
+    `INSERT INTO runs (run_id, document_hash, compiled_plan_id, status, parent_run_id,
     fork_metadata_json, created_at_ms, started_at_ms, finished_at_ms)
-    VALUES ('run-1', 'doc', 1, 'running', NULL, NULL, 1, 1, NULL)`).run();
+    VALUES ('run-1', 'doc', 1, 'running', NULL, NULL, 1, 1, NULL)`,
+  ).run();
   return database;
 }
 
@@ -84,7 +89,11 @@ function count(
 }
 
 async function suspend(service: RuntimeHumanApprovals, opIndex = 0) {
-  const result = await service.suspend({ runId: "run-1", opIndex, request: { prompt: "Proceed?" } });
+  const result = await service.suspend({
+    runId: "run-1",
+    opIndex,
+    request: { prompt: "Proceed?" },
+  });
   if (result.resumeToken === null) throw new Error("Expected a fresh test token.");
   return { approvalId: result.approval.approvalId, resumeToken: result.resumeToken };
 }
@@ -107,7 +116,8 @@ afterEach(async () => {
     await database.drainWrites();
     database.close();
   }
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
 });
 
 describe("durable human approval transactions", () => {
@@ -259,7 +269,9 @@ describe("durable human approval transactions", () => {
     await expect(service.resume({ ...credentials, decision: "rejected" })).resolves.toMatchObject({
       duplicate: false,
     });
-    expect(reconstructExecutionFrontier(database.connection(), "run-1").runStatus).toBe("cancelled");
+    expect(reconstructExecutionFrontier(database.connection(), "run-1").runStatus).toBe(
+      "cancelled",
+    );
   });
 
   it("cancels sibling waits on rejection without pretending any gate executed", async () => {
@@ -281,7 +293,8 @@ describe("durable human approval transactions", () => {
     const service = new RuntimeHumanApprovals(database);
     const credentials = await suspend(service);
     const eventsBefore = count(database, "durable_events");
-    database.connection().exec(`CREATE TRIGGER inject_resume_failure BEFORE INSERT ON checkpoint_op_frontier
+    database.connection()
+      .exec(`CREATE TRIGGER inject_resume_failure BEFORE INSERT ON checkpoint_op_frontier
       WHEN NEW.status = 'completed' BEGIN SELECT RAISE(ABORT, 'injected checkpoint failure'); END`);
     await expect(service.resume({ ...credentials, decision: "approved" })).rejects.toThrow(
       "injected checkpoint failure",
@@ -300,9 +313,11 @@ describe("durable human approval transactions", () => {
     const database = fixture({ secondGate: true });
     database
       .connection()
-      .prepare(`INSERT INTO durable_events (run_id, event_type, event_schema_version,
+      .prepare(
+        `INSERT INTO durable_events (run_id, event_type, event_schema_version,
         op_index, iteration, attempt, occurred_at_ms, payload_json)
-        VALUES ('run-1', 'harness.frontier.op', 1, 1, 0, NULL, 10, ?)`)
+        VALUES ('run-1', 'harness.frontier.op', 1, 1, 0, NULL, 10, ?)`,
+      )
       .run(
         canonicalRuntimeJson({
           status: "running",
@@ -329,12 +344,20 @@ describe("durable human approval transactions", () => {
     ).toThrow("protected material");
     const credentials = await suspend(service);
     expect(() =>
-      service.resume({ ...credentials, decision: "approved", payload: { comment: "private-material" } }),
+      service.resume({
+        ...credentials,
+        decision: "approved",
+        payload: { comment: "private-material" },
+      }),
     ).toThrow("protected material");
-    expect(() => database.connection().exec("UPDATE approvals SET op_index = 1")).toThrow("immutable");
+    expect(() => database.connection().exec("UPDATE approvals SET op_index = 1")).toThrow(
+      "immutable",
+    );
     expect(() => database.connection().exec("DELETE FROM approvals")).toThrow("retained");
     await service.resume({ ...credentials, decision: "approved" });
-    expect(() => database.connection().exec("UPDATE approvals SET response_json = '{}' ")).toThrow("immutable");
+    expect(() => database.connection().exec("UPDATE approvals SET response_json = '{}' ")).toThrow(
+      "immutable",
+    );
   });
 });
 
@@ -420,7 +443,9 @@ describe("protected approval HTTP surface", () => {
     const { base } = await serve(service);
     const path = `${base}/api/approvals/${encodeURIComponent(credentials.approvalId)}/token`;
     expect((await fetch(path)).status).toBe(405);
-    const { csrfToken } = (await (await fetch(`${base}/api/session`)).json()) as { csrfToken: string };
+    const { csrfToken } = (await (await fetch(`${base}/api/session`)).json()) as {
+      csrfToken: string;
+    };
     const response = await fetch(path, {
       method: "POST",
       headers: { "content-type": "application/json", "x-zet-csrf": csrfToken },
@@ -435,7 +460,11 @@ describe("protected approval HTTP surface", () => {
   it("redacts stream payloads before they enter the daemon replay buffer", async () => {
     const redaction = new RuntimeRedactionRegistry();
     redaction.registerSecret("private-value");
-    const daemon = new RuntimeDaemon({ api: { port: 0 }, database: { path: ":memory:" }, redaction });
+    const daemon = new RuntimeDaemon({
+      api: { port: 0 },
+      database: { path: ":memory:" },
+      redaction,
+    });
     try {
       await daemon.start();
       const event = daemon.publishEvent("test.safe", {

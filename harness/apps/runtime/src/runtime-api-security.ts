@@ -49,27 +49,23 @@ export class RuntimeApiSecurity {
     if (typeof host !== "string" || !allowedHosts.includes(host)) {
       throw new RuntimeApiSecurityError("LOCAL_API_HOST_REJECTED", "Untrusted local API host.");
     }
-    if (
-      request.url === undefined ||
-      !request.url.startsWith("/") ||
-      request.url.startsWith("//")
-    ) {
-      throw new RuntimeApiSecurityError("LOCAL_API_TARGET_REJECTED", "Invalid request target.", 400);
+    if (request.url === undefined || !request.url.startsWith("/") || request.url.startsWith("//")) {
+      throw new RuntimeApiSecurityError(
+        "LOCAL_API_TARGET_REJECTED",
+        "Invalid request target.",
+        400,
+      );
     }
     const origin = request.headers.origin;
     const ownOrigins = allowedHosts.map((name) => `http://${name}`);
     if (
       origin !== undefined &&
-      (Array.isArray(origin) ||
-        (!ownOrigins.includes(origin) && !this.#allowedOrigins.has(origin)))
+      (Array.isArray(origin) || (!ownOrigins.includes(origin) && !this.#allowedOrigins.has(origin)))
     ) {
       throw new RuntimeApiSecurityError("LOCAL_API_ORIGIN_REJECTED", "Untrusted local API origin.");
     }
     const fetchSite = request.headers["sec-fetch-site"];
-    if (
-      fetchSite === "cross-site" &&
-      (origin === undefined || !this.#allowedOrigins.has(origin))
-    ) {
+    if (fetchSite === "cross-site" && (origin === undefined || !this.#allowedOrigins.has(origin))) {
       throw new RuntimeApiSecurityError(
         "LOCAL_API_CROSS_SITE",
         "Cross-site local API requests are blocked.",
