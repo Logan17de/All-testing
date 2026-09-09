@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./node-behavior-policy": "./src/node-behavior-policy.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

@@ -1,4 +1,5 @@
 import type { NodeDefinition, NodeManifest, NodeType, Version } from "@zet-harness/plugin-api";
+import { checkNodeBehaviorPolicy } from "@zet-harness/plugin-api/node-behavior-policy";
 
 import { TypedRegistry, type RegistryDisposer } from "./typed-registry.js";
 
@@ -31,6 +32,19 @@ function nodeKey(type: NodeType, version: Version): string {
   return `${type}\u0000${version}`;
 }
 
+function assertNodeBehaviorPolicy(definition: NodeDefinition): void {
+  const { type, version, behavior } = definition.manifest;
+  const result = checkNodeBehaviorPolicy(behavior);
+  if (result.valid) {
+    return;
+  }
+
+  const summary = result.violations
+    .map((violation) => `[${violation.code}] ${violation.field}: ${violation.message}`)
+    .join("; ");
+  throw new Error(`Node definition "${type}@${version}" has invalid behavior metadata: ${summary}`);
+}
+
 /**
  * Registry of versioned node definitions with manifest-only inspection APIs.
  *
@@ -52,7 +66,9 @@ export class NodeCatalog {
 
   register(definition: NodeDefinition, plugin?: NodeCatalogPluginPin): RegistryDisposer {
     const { type, version } = definition.manifest;
-    return this.definitions.register(nodeKey(type, version), {
+    const key = nodeKey(type, version);
+    assertNodeBehaviorPolicy(definition);
+    return this.definitions.register(key, {
       definition,
       ...(plugin === undefined ? {} : { plugin }),
     });

@@ -1,4 +1,8 @@
 import type { NodeBehavior, NodeManifest } from "@zet-harness/plugin-api";
+import {
+  checkNodeBehaviorPolicy,
+  type NodeBehaviorPolicyViolation,
+} from "@zet-harness/plugin-api/node-behavior-policy";
 
 import type { GraphJsonV1 } from "./graph-json-v1.js";
 import type { NodeManifestResolver } from "./graph-json-v1-semantic-validator.js";
@@ -32,121 +36,48 @@ function isNonNegativeSafeInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+function graphDiagnosticCode(
+  violation: NodeBehaviorPolicyViolation,
+): GraphEffectRecoveryDiagnosticCode {
+  switch (violation.code) {
+    case "NODE_BEHAVIOR_EFFECT_FAMILY_MISMATCH":
+      return "GRAPH_EFFECT_FAMILY_MISMATCH";
+    case "NODE_BEHAVIOR_IDEMPOTENCY_INVALID":
+      return "GRAPH_EFFECT_IDEMPOTENCY_INVALID";
+    case "NODE_BEHAVIOR_EFFECT_EXECUTION_MODE_INVALID":
+    case "NODE_BEHAVIOR_RECOVERY_INVALID":
+    case "NODE_BEHAVIOR_RECOVERY_UNSAFE":
+      return "GRAPH_EFFECT_RECOVERY_INVALID";
+  }
+}
+
 function validateBehavior(
   nodeId: string,
   behavior: NodeBehavior,
   diagnostics: GraphEffectRecoveryDiagnostic[],
 ): void {
+  for (const violation of checkNodeBehaviorPolicy(behavior).violations) {
+    diagnostics.push({
+      code: graphDiagnosticCode(violation),
+      message: `Node '${nodeId}' violates behavior policy: ${violation.message}`,
+      nodeId,
+      field: violation.field,
+    });
+  }
+
   const executable = behavior.executionMode !== "none";
-
-  if (behavior.effect === "none") {
-    if (behavior.primitiveFamily === "effect") {
-      diagnostics.push({
-        code: "GRAPH_EFFECT_FAMILY_MISMATCH",
-        message: `Node '${nodeId}' declares primitive family 'effect' but effect class 'none'.`,
-        nodeId,
-        field: "primitiveFamily",
-      });
-    }
-
-    if (behavior.idempotency !== "not-applicable") {
-      diagnostics.push({
-        code: "GRAPH_EFFECT_IDEMPOTENCY_INVALID",
-        message: `Node '${nodeId}' has no external effect, so idempotency must be 'not-applicable'.`,
-        nodeId,
-        field: "idempotency",
-      });
-    }
-  } else {
-    if (behavior.primitiveFamily !== "effect") {
-      diagnostics.push({
-        code: "GRAPH_EFFECT_FAMILY_MISMATCH",
-        message: `Node '${nodeId}' declares external effect '${behavior.effect}' but primitive family '${behavior.primitiveFamily}'.`,
-        nodeId,
-        field: "effect",
-      });
-    }
-
-    if (!executable) {
-      diagnostics.push({
-        code: "GRAPH_EFFECT_RECOVERY_INVALID",
-        message: `Node '${nodeId}' declares external effect '${behavior.effect}' but has execution mode 'none'.`,
-        nodeId,
-        field: "executionMode",
-      });
-    }
-
-    if (behavior.effect === "external-read" && behavior.idempotency !== "idempotent") {
-      diagnostics.push({
-        code: "GRAPH_EFFECT_IDEMPOTENCY_INVALID",
-        message: `Node '${nodeId}' is an external read; repeated reads may differ in result, but must be side-effect-idempotent.`,
-        nodeId,
-        field: "idempotency",
-      });
-    }
-
-    if (behavior.effect === "external-write" && behavior.idempotency === "not-applicable") {
-      diagnostics.push({
-        code: "GRAPH_EFFECT_IDEMPOTENCY_INVALID",
-        message: `Node '${nodeId}' is an external write and must declare idempotency as 'idempotent', 'idempotency-key', or 'unknown'.`,
-        nodeId,
-        field: "idempotency",
-      });
-    }
-  }
-
-  if (!executable) {
-    if (behavior.recovery !== "not-applicable") {
-      diagnostics.push({
-        code: "GRAPH_EFFECT_RECOVERY_INVALID",
-        message: `Node '${nodeId}' has no runtime executor, so recovery must be 'not-applicable'.`,
-        nodeId,
-        field: "recovery",
-      });
-    }
-
-    if (behavior.retry !== undefined) {
-      diagnostics.push({
-        code: "GRAPH_EFFECT_RETRY_INVALID",
-        message: `Node '${nodeId}' has no runtime executor and cannot declare retry defaults.`,
-        nodeId,
-        field: "retry",
-      });
-    }
-  } else if (behavior.recovery === "not-applicable") {
-    diagnostics.push({
-      code: "GRAPH_EFFECT_RECOVERY_INVALID",
-      message: `Executable node '${nodeId}' must declare an explicit recovery policy.`,
-      nodeId,
-      field: "recovery",
-    });
-  }
-
-  if (behavior.recovery === "reconcile" && behavior.effect !== "external-write") {
-    diagnostics.push({
-      code: "GRAPH_EFFECT_RECOVERY_INVALID",
-      message: `Node '${nodeId}' may use 'reconcile' recovery only for an external write.`,
-      nodeId,
-      field: "recovery",
-    });
-  }
-
-  if (
-    behavior.effect === "external-write" &&
-    behavior.idempotency === "unknown" &&
-    behavior.recovery === "rerun"
-  ) {
-    diagnostics.push({
-      code: "GRAPH_EFFECT_RECOVERY_INVALID",
-      message: `Node '${nodeId}' is an external write with unknown idempotency and cannot recover by automatic rerun.`,
-      nodeId,
-      field: "recovery",
-    });
-  }
-
   const retry = behavior.retry;
   if (retry === undefined) {
     return;
+  }
+
+  if (!executable) {
+    diagnostics.push({
+      code: "GRAPH_EFFECT_RETRY_INVALID",
+      message: `Node '${nodeId}' has no runtime executor and cannot declare retry defaults.`,
+      nodeId,
+      field: "retry",
+    });
   }
 
   if (!isPositiveSafeInteger(retry.maxAttempts)) {
@@ -183,16 +114,13 @@ function validateBehavior(
 }
 
 /**
- * Run the narrow 2.14 side-effect/retry/recovery consistency stage.
+ * Run the narrow side-effect/retry/recovery consistency stage.
  *
- * This stage validates static manifest promises only. It deliberately keeps
- * determinism separate from idempotency: deterministic output does not make an
- * external write safe to repeat, and a nondeterministic external read can still
- * be side-effect-idempotent.
- *
- * In particular, automatic retries/reruns for external writes require an
- * idempotency promise. An `unknown` write may use reconcile/manual-style
- * recovery, but the Harness must not infer exactly-once execution.
+ * Phase 5.1 owns the shared cross-field effect/idempotency/recovery contract via
+ * `checkNodeBehaviorPolicy(...)`; this graph stage delegates those invariants to
+ * the public policy helper and adds graph/compiler-specific retry validation.
+ * Determinism remains separate from idempotency, and effect-aware retry policy is
+ * intentionally kept distinct for the later Phase 5 retry work.
  */
 export function checkGraphJsonV1EffectRecovery(
   graph: GraphJsonV1,
@@ -206,7 +134,7 @@ export function checkGraphJsonV1EffectRecovery(
     if (manifest === undefined) {
       diagnostics.push({
         code: "GRAPH_EFFECT_RECOVERY_PREREQUISITE_FAILED",
-        message: `Node '${node.id}' must resolve before 2.14 side-effect/retry/recovery validation.`,
+        message: `Node '${node.id}' must resolve before side-effect/retry/recovery validation.`,
         nodeId: node.id,
       });
       continue;
@@ -218,7 +146,7 @@ export function checkGraphJsonV1EffectRecovery(
   return { valid: diagnostics.length === 0, diagnostics };
 }
 
-/** Boolean convenience wrapper for the separate 2.14 effect/recovery stage. */
+/** Boolean convenience wrapper for the graph effect/recovery stage. */
 export function validateGraphJsonV1EffectRecovery(
   graph: GraphJsonV1,
   resolver: NodeManifestResolver,

@@ -59,6 +59,28 @@ describe("NodeCatalog", () => {
     expect(executions).toBe(0);
   });
 
+  it("rejects contradictory effect/recovery metadata before registration or execution", () => {
+    let executions = 0;
+    const catalog = new NodeCatalog();
+    const base = makeDefinition("test.unsafe-write", "1", () => executions++);
+    const unsafe: NodeDefinition = {
+      ...base,
+      manifest: {
+        ...base.manifest,
+        behavior: {
+          ...base.manifest.behavior,
+          effect: "external-write",
+          idempotency: "unknown",
+          recovery: "rerun",
+        },
+      },
+    };
+
+    expect(() => catalog.register(unsafe)).toThrow(/NODE_BEHAVIOR_RECOVERY_UNSAFE/);
+    expect(catalog.size).toBe(0);
+    expect(executions).toBe(0);
+  });
+
   it("keeps node versions independently inspectable", () => {
     const catalog = new NodeCatalog();
     catalog.register(makeDefinition("test.echo", "1", () => undefined));
