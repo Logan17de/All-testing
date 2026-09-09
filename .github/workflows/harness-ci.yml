@@ -1,4 +1,4 @@
-name: Zet Harness 4.22 Finalize
+name: Zet Harness 4.22 Final Matrix
 
 on:
   push:
@@ -8,18 +8,27 @@ on:
       - ".github/workflows/harness-ci.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  finalize:
-    runs-on: ubuntu-latest
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: harness
+
     steps:
-      - name: Checkout real Harness branch
+      - name: Checkout final implementation head
         uses: actions/checkout@v4
         with:
-          ref: zet-harness-v1
-          fetch-depth: 0
+          ref: a6a8dd4c0e498b51215800f53b3b0d2a047513b3
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -30,36 +39,39 @@ jobs:
         run: npm install --global npm@12.0.2 --no-audit --no-fund
 
       - name: Clean install
-        working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Remove obsolete wrapper and format
-        working-directory: harness
-        shell: bash
-        run: |
-          rm -f scripts/run-lightweight-baseline-ci.ts
-          npx prettier --write package.json baselines/lightweight-baseline-v1.json scripts/lightweight-baseline.bench.ts scripts/check-lightweight-baseline.test.ts scripts/check-lightweight-baseline.ts
+      - name: Typecheck
+        run: npm run typecheck
 
-      - name: Verify
-        working-directory: harness
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Tests
+        run: npm test
+
+      - name: Plugin smoke
+        run: npm run test:plugin-smoke --workspace @zet-harness/core
+
+      - name: Startup smoke
+        run: npm run test:startup
+
+      - name: Build
+        run: npm run build
+
+      - name: Baseline check
         env:
-          ZET_BASELINE_PLATFORM: ubuntu-latest
-        run: |
-          npm run typecheck
-          npm run lint
-          npm run format:check
-          npm run baseline:ci
-          test -f tmp/baseline/runtime.json
-          test -f tmp/baseline/bench.json
-          test -f tmp/baseline/check.json
+          ZET_BASELINE_PLATFORM: ${{ matrix.os }}
+        run: npm run baseline:ci
 
-      - name: Push correction
-        working-directory: harness
-        shell: bash
-        run: |
-          git diff --check
-          git config user.name "Logesh"
-          git config user.email "loganlogesh17@gmail.com"
-          git add -A package.json baselines/lightweight-baseline-v1.json scripts
-          git commit -m "fix(perf): finalize file-native baseline guard"
-          git push origin HEAD:zet-harness-v1
+      - name: Upload baseline report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zet-harness-4-22-final-${{ matrix.os }}
+          path: harness/tmp/baseline/*.json
+          if-no-files-found: error
+          retention-days: 14
