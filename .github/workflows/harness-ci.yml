@@ -1,4 +1,4 @@
-name: Zet Harness 4.21 File-backed Matrix
+name: Zet Harness 4.22 Benchmark JSON Probe
 
 on:
   push:
@@ -11,14 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  baseline:
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
+  probe:
+    runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
       - name: Checkout real Harness branch
@@ -38,6 +32,9 @@ jobs:
         working-directory: harness
         run: npm ci --no-audit --no-fund
 
-      - name: Run lightweight baseline
+      - name: Generate benchmark JSON
         working-directory: harness
-        run: npm run baseline
+        run: |
+          npm run build --workspace @zet-harness/runtime
+          npx vitest bench scripts/lightweight-baseline.bench.ts --reporter=json --outputFile=baseline-report.json
+          node -e "const r=require('./baseline-report.json'); console.log(JSON.stringify(r,null,2))"
