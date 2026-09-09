@@ -1,3 +1,4 @@
+// Phase 5.4 exposes durable, evidence-backed ambiguous-write recovery outcomes without silently applying attempt or scheduler-frontier state.
 export {
   RUNTIME_HEALTH_SERVICE,
   inspectRuntimeHealth,
