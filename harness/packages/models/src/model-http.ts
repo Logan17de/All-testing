@@ -1,5 +1,7 @@
 import type { AdapterInvocationContext } from "@zet-harness/plugin-api";
 
+import { assertModelJson } from "./model-json.js";
+
 export type ModelTransportErrorCode =
   | "MODEL_CONFIGURATION_INVALID"
   | "MODEL_REQUEST_UNSUPPORTED"
@@ -85,7 +87,9 @@ export function record(value: unknown): Record<string, unknown> {
 
 export function parseJson(text: string): unknown {
   try {
-    return JSON.parse(text) as unknown;
+    const value: unknown = JSON.parse(text);
+    assertModelJson(value);
+    return value;
   } catch {
     throw new ModelTransportError("MODEL_RESPONSE_INVALID");
   }
@@ -108,28 +112,31 @@ export function limit(value: number | undefined, fallback: number): number {
 }
 
 /** Abort even if a host resolver or injected fetch implementation fails to cooperate. */
-export function abortable<T>(value: PromiseLike<T> | T, signal: AbortSignal): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      reject(signal.reason);
+export async function abortable<T>(value: PromiseLike<T> | T, signal: AbortSignal): Promise<T> {
+  let onAbort = (): void => undefined;
+  const aborted = new Promise<{ readonly aborted: true }>((resolve) => {
+    onAbort = (): void => {
+      resolve({ aborted: true });
     };
     signal.addEventListener("abort", onAbort, { once: true });
-    void Promise.resolve(value).then(
-      (result) => {
-        signal.removeEventListener("abort", onAbort);
-        if (signal.aborted) reject(signal.reason);
-        else resolve(result);
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(signal.aborted ? signal.reason : error);
-      },
-    );
-    if (signal.aborted) {
-      signal.removeEventListener("abort", onAbort);
-      onAbort();
-    }
+    if (signal.aborted) onAbort();
   });
+  try {
+    const result = await Promise.race([
+      Promise.resolve(value).then((result) => ({ value: result })),
+      aborted,
+    ]);
+    // AbortSignal permits any caller-owned reason. Let its own API preserve that
+    // identity instead of normalizing it or manually rejecting an untyped value.
+    signal.throwIfAborted();
+    if ("value" in result) return result.value;
+    throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+  } catch (error) {
+    signal.throwIfAborted();
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 /** Host-configured endpoint, never selected from request/model data. */
@@ -158,6 +165,7 @@ export function createModelHttp(options: ModelHttpOptions, path: string) {
 
   return Object.freeze({
     capability,
+    maxRequestBytes,
     maxResponseBytes,
     session(context: AdapterInvocationContext): ModelHttpSession {
       const originalSignal = context.signal;
@@ -251,7 +259,10 @@ async function* chunks(response: Response, maxBytes: number, signal: AbortSignal
 
 export async function readModelJson(response: Response, maxBytes: number, signal: AbortSignal) {
   const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
-  if (contentType !== "application/json") throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+  if (contentType !== "application/json") {
+    void response.body?.cancel().catch(() => undefined);
+    throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+  }
   let text = "";
   for await (const chunk of chunks(response, maxBytes, signal)) text += chunk;
   return record(parseJson(text));
@@ -260,7 +271,10 @@ export async function readModelJson(response: Response, maxBytes: number, signal
 /** SSE framing is independent of provider semantics, including split CRLF and UTF-8 boundaries. */
 export async function* readModelSse(response: Response, maxBytes: number, signal: AbortSignal) {
   const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
-  if (contentType !== "text/event-stream") throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+  if (contentType !== "text/event-stream") {
+    void response.body?.cancel().catch(() => undefined);
+    throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+  }
   let buffer = "";
   let data: string[] = [];
   let eventBytes = 0;
@@ -274,9 +288,7 @@ export async function* readModelSse(response: Response, maxBytes: number, signal
     }
     eventBytes += new TextEncoder().encode(value).byteLength;
     if (eventBytes > maxEventBytes) throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
-    if (value.startsWith("data:")) {
-      data.push(value.slice(value[5] === " " ? 6 : 5));
-    }
+    if (value.startsWith("data:")) data.push(value.slice(value[5] === " " ? 6 : 5));
     return undefined;
   };
   for await (const chunk of chunks(response, maxBytes, signal)) {

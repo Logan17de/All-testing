@@ -32,7 +32,9 @@ function context(): AdapterInvocationContext {
       repeatAuthorized: false,
       usedAttempts: 1,
       remainingAttempts: 0,
-      reportInternalRetries: () => { throw new Error("No internal retries allowed."); },
+      reportInternalRetries: () => {
+        throw new Error("No internal retries allowed.");
+      },
     },
   };
 }
@@ -64,9 +66,11 @@ describe("first-party model transport integration", () => {
   it("blocks network use before invocation and shares the existing outer retry budget", async () => {
     const host = new PluginHost();
     const calls: number[] = [];
-    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
-      calls.length === 1 ? new Response("unexposed-details", { status: 503 }) : Response.json(completion),
-    );
+    const fetch = vi.fn<typeof globalThis.fetch>(() => Promise.resolve(
+      calls.length === 1
+        ? new Response("unexposed-details", { status: 503 })
+        : Response.json(completion),
+    ));
     const plugin = createOpenAICompatiblePlugin({
       id: "retry-transport",
       baseUrl: "https://example.test/v1",
@@ -90,7 +94,9 @@ describe("first-party model transport integration", () => {
         }),
       ]);
       const scheduler = new SchedulerConcurrency(1);
-      const execute = async (invocation: Parameters<ConstructorParameters<typeof PlainDagRun>[2]>[0]) => {
+      const execute = async (
+        invocation: Parameters<ConstructorParameters<typeof PlainDagRun>[2]>[0],
+      ) => {
         calls.push(invocation.attempt);
         await adapter.generate(request, {
           ...context(),
@@ -121,7 +127,9 @@ describe("first-party model transport integration", () => {
     const server = createServer((incoming, response) => {
       let body = "";
       incoming.setEncoding("utf8");
-      incoming.on("data", (chunk: string) => { body += chunk; });
+      incoming.on("data", (chunk: string) => {
+        body += chunk;
+      });
       incoming.on("end", () => {
         received.push(incoming.url ?? "", body);
         response.writeHead(200, { "content-type": "application/json" });
@@ -134,14 +142,18 @@ describe("first-party model transport integration", () => {
     try {
       const address = server.address();
       if (address === null || typeof address === "string") throw new Error("Expected test listener.");
-      await host.activate(createOpenAICompatiblePlugin({
-        id: "local",
-        model: "local-model",
-        baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
-        tokenLimitField: "max_tokens",
-      }));
+      await host.activate(
+        createOpenAICompatiblePlugin({
+          id: "local",
+          model: "local-model",
+          baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+          tokenLimitField: "max_tokens",
+        }),
+      );
       const adapter = host.models.requireAdapter("local", "1");
-      await expect(adapter.generate(request, context())).resolves.toMatchObject({ finishReason: "stop" });
+      await expect(adapter.generate(request, context())).resolves.toMatchObject({
+        finishReason: "stop",
+      });
       expect(received[0]).toBe("/v1/chat/completions");
       expect(JSON.parse(received[1]!)).toMatchObject({ model: "local-model", stream: false, n: 1 });
     } finally {
