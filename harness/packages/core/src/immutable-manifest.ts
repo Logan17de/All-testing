@@ -1,4 +1,9 @@
-import type { NodeManifest, PluginManifest } from "@zet-harness/plugin-api";
+import type {
+  NodeManifest,
+  PluginManifest,
+  ModelAdapterManifest,
+  ToolManifest,
+} from "@zet-harness/plugin-api";
 
 /**
  * Clone host-inspected plugin metadata away from plugin-owned object references.
@@ -14,6 +19,14 @@ export function snapshotPluginManifest(manifest: PluginManifest): PluginManifest
 
 /** Immutable host-owned snapshot of one node manifest. */
 export function snapshotNodeManifest(manifest: NodeManifest): NodeManifest {
+  return immutableStructuredClone(manifest);
+}
+
+export function snapshotModelManifest(manifest: ModelAdapterManifest): ModelAdapterManifest {
+  return immutableStructuredClone(manifest);
+}
+
+export function snapshotToolManifest(manifest: ToolManifest): ToolManifest {
   return immutableStructuredClone(manifest);
 }
 

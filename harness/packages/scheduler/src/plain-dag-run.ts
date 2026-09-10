@@ -2,7 +2,10 @@ import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 
 import type { ConcurrencyPermit, RunConcurrency, RunConcurrencySnapshot } from "./concurrency.js";
 import { RunReadiness, type RunReadinessSnapshot } from "./run-readiness.js";
-import { assertInvocationPermission } from "./invocation-permission.js";
+import {
+  assertInvocationPermission,
+  InvocationPermissionDeniedError,
+} from "./invocation-permission.js";
 
 const MAX_NATIVE_TIMER_MS = 2_147_483_647;
 const RETRY_ACCOUNTING_ERRORS = new WeakSet<object>();
@@ -188,7 +191,35 @@ export interface PlainDagCapabilityAuthority {
   ): PlainDagCapabilityAuthorityEvaluation;
 }
 
+/** Host-provided quiescent state reconstructed from the durable journal. */
+export interface PlainDagRestoreState {
+  readonly readiness: RunReadinessSnapshot;
+  readonly attempts: readonly number[];
+  readonly attemptBudgetUsed: readonly number[];
+  /** Remaining wall-clock backoff per op, null except for retry-wait. */
+  readonly retryDelaysMs: readonly (number | null)[];
+}
+
+export interface PlainDagAttemptFailureContext extends PlainDagCompletionBarrierContext {
+  readonly error: unknown;
+  readonly attemptBudgetUsed: number;
+  /** null means terminal; zero is an authorized immediate retry. */
+  readonly retryDelayMs: number | null;
+}
+
+export interface PlainDagDurabilityHooks {
+  readonly beforeAttempt?: (context: PlainDagCompletionBarrierContext) => void | Promise<void>;
+  readonly attemptFailed?: (context: PlainDagAttemptFailureContext) => void | Promise<void>;
+  /** Called with no active attempts or retry waits; must persist before resolving. */
+  readonly suspend?: (context: {
+    readonly op: number;
+    readonly operation: ExecutionIrOpV1;
+  }) => void | Promise<void>;
+}
+
 export interface PlainDagRunOptions {
+  readonly restored?: PlainDagRestoreState;
+  readonly durability?: PlainDagDurabilityHooks;
   readonly retry?: PlainDagRetryHooks;
   readonly effectRetry?: PlainDagEffectRetryOptions;
   /**
@@ -211,6 +242,7 @@ export interface PlainDagRunSnapshot {
   readonly started: boolean;
   readonly settled: boolean;
   readonly cancelled: boolean;
+  readonly suspended?: true;
   /** Number of scheduler-owned attempts started for each IR op. */
   readonly attempts: readonly number[];
   /** Scheduler attempts plus adapter/executor-internal retries charged per op. */
@@ -252,7 +284,7 @@ function assertRetryPolicy(op: number, operation: ExecutionIrOpV1): void {
   }
 }
 
-function assertPlainExecutableDag(ir: ExecutionIrV1): void {
+function assertPlainExecutableDag(ir: ExecutionIrV1, humanHandler: boolean): void {
   ir.ops.forEach((op, index) => {
     if (op.control !== undefined) {
       throw new TypeError(
@@ -263,6 +295,9 @@ function assertPlainExecutableDag(ir: ExecutionIrV1): void {
       throw new TypeError(
         `Plain DAG run cannot execute op ${String(index)} with executionMode 'none'.`,
       );
+    }
+    if (op.behavior.primitiveFamily === "interrupt" && !humanHandler) {
+      throw new TypeError("Human interrupt requires a host-owned durable suspension handler.");
     }
     assertPositiveTimeoutMs(index, op.behavior.timeoutMs);
     assertRetryPolicy(index, op);
@@ -435,6 +470,10 @@ export class PlainDagRun {
   private readonly workStopController = new AbortController();
   private readonly activeTasks = new Set<Promise<void>>();
   private readonly retryWaitTasks = new Set<Promise<void>>();
+  private readonly pauseController = new AbortController();
+  private suspendedForHuman = false;
+  readonly #durability: PlainDagDurabilityHooks;
+  private readonly initialRetryDelays: readonly (number | null)[];
   private readonly attempts: number[];
   private readonly attemptBudgetUsed: number[];
   private readonly repeatAuthorizations: Array<boolean | undefined>;
@@ -450,12 +489,50 @@ export class PlainDagRun {
     private readonly executor: PlainDagOpExecutor,
     private readonly options: PlainDagRunOptions = {},
   ) {
-    assertPlainExecutableDag(ir);
+    const hooks = options.durability;
+    this.#durability = Object.freeze({
+      ...(hooks?.beforeAttempt === undefined
+        ? {}
+        : { beforeAttempt: hooks.beforeAttempt.bind(hooks) }),
+      ...(hooks?.attemptFailed === undefined
+        ? {}
+        : { attemptFailed: hooks.attemptFailed.bind(hooks) }),
+      ...(hooks?.suspend === undefined ? {} : { suspend: hooks.suspend.bind(hooks) }),
+    });
+    this.suspendedForHuman =
+      options.restored?.readiness.ops.some((op) => op.status === "waiting") ?? false;
+    assertPlainExecutableDag(ir, this.#durability.suspend !== undefined);
     const authority = options.capabilityAuthority;
     this.#evaluateCapability = authority?.evaluate.bind(authority);
-    this.readiness = new RunReadiness(ir);
-    this.attempts = ir.ops.map(() => 0);
-    this.attemptBudgetUsed = ir.ops.map(() => 0);
+    this.readiness = new RunReadiness(ir, options.restored?.readiness);
+    this.attempts = [...(options.restored?.attempts ?? ir.ops.map(() => 0))];
+    this.attemptBudgetUsed = [...(options.restored?.attemptBudgetUsed ?? ir.ops.map(() => 0))];
+    this.initialRetryDelays = [...(options.restored?.retryDelaysMs ?? ir.ops.map(() => null))];
+    if (
+      [this.attempts, this.attemptBudgetUsed, this.initialRetryDelays].some(
+        (values) => values.length !== ir.ops.length,
+      )
+    )
+      throw new TypeError("Restored attempt accounting must cover the exact op domain.");
+    ir.ops.forEach((operation, op) => {
+      const attempts = this.attempts[op]!;
+      const used = this.attemptBudgetUsed[op]!;
+      const delay = this.initialRetryDelays[op]!;
+      const state = this.readiness.getOpState(op).status;
+      if (
+        !Number.isSafeInteger(attempts) ||
+        attempts < 0 ||
+        !Number.isSafeInteger(used) ||
+        used < attempts ||
+        used > (operation.behavior.retry?.maxAttempts ?? 1) ||
+        ((state === "completed" || state === "retry-wait") && attempts < 1) ||
+        ((state === "pending" || state === "waiting") && used !== 0) ||
+        (state === "retry-wait" ? delay === null : delay !== null)
+      ) {
+        throw new TypeError("Invalid restored attempt accounting.");
+      }
+      if (delay !== null) assertNonNegativeSafeInteger("Restored retry delay", delay);
+    });
     this.repeatAuthorizations = ir.ops.map(() => undefined);
   }
 
@@ -468,11 +545,21 @@ export class PlainDagRun {
       started: this.started,
       settled: this.settled,
       cancelled: this.signal.aborted,
+      ...(this.pauseController.signal.aborted || this.suspendedForHuman
+        ? { suspended: true as const }
+        : {}),
       attempts: frozenCopy(this.attempts),
       attemptBudgetUsed: frozenCopy(this.attemptBudgetUsed),
       readiness: this.readiness.snapshot(),
       concurrency: this.concurrency.snapshot(),
     });
+  }
+
+  /** Stop new dispatch, drain admitted work, and preserve nonterminal state for restart. */
+  pause(): boolean {
+    if (this.settled || this.pauseController.signal.aborted) return false;
+    this.pauseController.abort();
+    return true;
   }
 
   /** Request cooperative run cancellation exactly once. */
@@ -492,12 +579,39 @@ export class PlainDagRun {
       throw new TypeError("Plain DAG run may be executed only once.");
     }
     this.started = true;
+    this.initialRetryDelays.forEach((delay, op) => {
+      if (delay !== null) this.scheduleRetryWait(op, delay, undefined);
+    });
 
     while (true) {
       this.dispatchAvailableReadyOps();
 
       const livenessTasks = [...this.activeTasks, ...this.retryWaitTasks];
       if (livenessTasks.length === 0) {
+        const op = this.readiness.peekReadyOp();
+        const operation = op === undefined ? undefined : this.ir.ops[op];
+        if (
+          !this.hasFailure &&
+          !this.signal.aborted &&
+          !this.pauseController.signal.aborted &&
+          op !== undefined &&
+          operation?.behavior.primitiveFamily === "interrupt"
+        ) {
+          try {
+            if (!this.suspendedForHuman) {
+              this.assertInvocationCapabilities(op, operation);
+              await this.#durability.suspend!({ op, operation });
+              // Cancellation may have terminalized readiness while the host committed.
+              // A late success/failure must not replace the user's cancellation reason.
+              if (!this.signal.aborted) {
+                this.readiness.waitReadyOp(op);
+                this.suspendedForHuman = true;
+              }
+            }
+          } catch (error) {
+            if (!this.signal.aborted) this.recordFailure(error);
+          }
+        }
         break;
       }
 
@@ -511,6 +625,14 @@ export class PlainDagRun {
     }
     if (this.signal.aborted) {
       throw this.signal.reason;
+    }
+
+    if (
+      this.pauseController.signal.aborted ||
+      this.suspendedForHuman ||
+      this.readiness.snapshot().ops.some((op) => op.status === "waiting")
+    ) {
+      return this.snapshot();
     }
 
     const incomplete = this.readiness
@@ -530,9 +652,13 @@ export class PlainDagRun {
     while (
       !this.hasFailure &&
       !this.signal.aborted &&
+      !this.pauseController.signal.aborted &&
+      !this.suspendedForHuman &&
       this.readiness.hasReadyOps() &&
       this.concurrency.activeCount < this.concurrency.limit
     ) {
+      const next = this.readiness.peekReadyOp();
+      if (next !== undefined && this.ir.ops[next]?.behavior.primitiveFamily === "interrupt") return;
       const op = this.readiness.dequeueReadyOp();
       if (op === undefined) {
         return;
@@ -550,6 +676,7 @@ export class PlainDagRun {
     let permit: ConcurrencyPermit | undefined;
     let priorAttemptSettlement: Promise<void> | undefined;
     let repeatAuthorized = false;
+    let startBarrierFailed = false;
 
     try {
       permit = await this.concurrency.acquire(this.workStopController.signal);
@@ -568,12 +695,29 @@ export class PlainDagRun {
 
       const maxAttempts = operation.behavior.retry?.maxAttempts ?? 1;
       repeatAuthorized = this.resolveRepeatAuthorization(op, operation, maxAttempts);
+      if (this.attempts[op]! > 0 && !repeatAuthorized) {
+        throw new TypeError("Restored operation is not authorized for repeated execution.");
+      }
       const attempt = this.startAttempt(op, maxAttempts);
+      try {
+        if (this.#durability.beforeAttempt !== undefined) {
+          await this.#durability.beforeAttempt({ op, operation, attempt });
+        }
+      } catch (error) {
+        startBarrierFailed = true;
+        throw error;
+      }
+      // An asynchronous durable admission must not allow an intervening user
+      // cancellation to invoke effect code. The admitted record remains available
+      // to the host's cancellation/recovery path; no external operation occurred.
+      if (this.signal.aborted) return;
       const retryBudgetScope = this.createRetryBudgetScope(op, maxAttempts, repeatAuthorized);
 
       try {
         const timeoutMs = operation.behavior.timeoutMs;
         if (timeoutMs === undefined) {
+          if (this.#durability.beforeAttempt !== undefined)
+            this.assertInvocationCapabilities(op, operation);
           await this.executor(
             Object.freeze({
               op,
@@ -598,8 +742,10 @@ export class PlainDagRun {
             this.signal.addEventListener("abort", onRunAbort, { once: true });
           }
 
-          const executorPromise = Promise.resolve().then(() =>
-            this.executor(
+          const executorPromise = Promise.resolve().then(() => {
+            this.signal.throwIfAborted();
+            this.assertInvocationCapabilities(op, operation);
+            return this.executor(
               Object.freeze({
                 op,
                 operation,
@@ -607,8 +753,8 @@ export class PlainDagRun {
                 retryBudget: retryBudgetScope.budget,
                 signal: timeoutController.signal,
               }),
-            ),
-          );
+            );
+          });
           const timeoutPromise = new Promise<never>((_resolve, reject) => {
             timeoutReject = reject;
           });
@@ -687,8 +833,15 @@ export class PlainDagRun {
       }
 
       const current = this.readiness.getOpState(op);
+      if (startBarrierFailed) {
+        if (current.status === "running") this.readiness.failRunningOp(op);
+        this.recordFailure(error);
+        return;
+      }
       if (this.hasFailure && this.workStopController.signal.aborted) {
         if (current.status === "running") {
+          if (this.#durability.attemptFailed !== undefined)
+            await this.persistAttemptFailure(op, error, null);
           this.readiness.failRunningOp(op);
         }
         return;
@@ -699,7 +852,9 @@ export class PlainDagRun {
       const attemptBudgetUsed = this.attemptBudgetUsed[op] ?? 0;
       const maxAttempts = operation?.behavior.retry?.maxAttempts ?? 1;
 
-      if (isRetryAccountingError(error)) {
+      if (isRetryAccountingError(error) || error instanceof InvocationPermissionDeniedError) {
+        if (this.#durability.attemptFailed !== undefined)
+          await this.persistAttemptFailure(op, error, null);
         if (current.status === "running") {
           this.readiness.failRunningOp(op);
         }
@@ -724,11 +879,20 @@ export class PlainDagRun {
             maxAttempts,
           );
         } catch (retryPolicyError) {
+          if (this.#durability.attemptFailed !== undefined)
+            await this.persistAttemptFailure(op, retryPolicyError, null);
           this.readiness.failRunningOp(op);
           this.recordFailure(retryPolicyError);
           return;
         }
 
+        if (
+          this.#durability.attemptFailed !== undefined &&
+          !(await this.persistAttemptFailure(op, error, retryDelayMs))
+        ) {
+          this.readiness.failRunningOp(op);
+          return;
+        }
         this.readiness.retryRunningOp(op);
 
         // A normal failed attempt returns capacity immediately. Timed-out attempts
@@ -740,12 +904,36 @@ export class PlainDagRun {
         return;
       }
 
+      if (this.#durability.attemptFailed !== undefined)
+        await this.persistAttemptFailure(op, error, null);
       if (current.status === "running") {
         this.readiness.failRunningOp(op);
       }
       this.recordFailure(error);
     } finally {
       permit?.release();
+    }
+  }
+
+  private async persistAttemptFailure(
+    op: number,
+    error: unknown,
+    retryDelayMs: number | null,
+  ): Promise<boolean> {
+    const operation = this.ir.ops[op]!;
+    try {
+      await this.#durability.attemptFailed?.({
+        op,
+        operation,
+        error,
+        retryDelayMs,
+        attempt: this.attempts[op]!,
+        attemptBudgetUsed: this.attemptBudgetUsed[op]!,
+      });
+      return true;
+    } catch (commitError) {
+      this.recordFailure(commitError);
+      return false;
     }
   }
 
@@ -766,16 +954,18 @@ export class PlainDagRun {
     retryDelayMs: number,
     priorAttemptSettlement: Promise<void> | undefined,
   ): Promise<void> {
-    const stopSignals = [this.signal, this.workStopController.signal] as const;
+    const stopSignals = [
+      this.signal,
+      this.workStopController.signal,
+      this.pauseController.signal,
+    ] as const;
     const waits: Promise<void>[] = [waitForDelay(retryDelayMs, stopSignals)];
     if (priorAttemptSettlement !== undefined) {
       waits.push(waitForSettlementOrAbort(priorAttemptSettlement, stopSignals));
     }
     await Promise.all(waits);
 
-    if (this.signal.aborted || this.hasFailure || this.workStopController.signal.aborted) {
-      return;
-    }
+    if (stopSignals.some((signal) => signal.aborted) || this.hasFailure) return;
     if (this.readiness.getOpState(op).status === "retry-wait") {
       this.readiness.readyRetryOp(op);
     }
@@ -784,7 +974,7 @@ export class PlainDagRun {
   private assertInvocationCapabilities(op: number, operation: ExecutionIrOpV1): void {
     assertInvocationPermission(
       op,
-      operation.behavior.requiredCapabilities,
+      [...this.ir.policies.capabilities.required, ...operation.behavior.requiredCapabilities],
       this.ir.policies.capabilities.deny,
       this.#evaluateCapability,
     );

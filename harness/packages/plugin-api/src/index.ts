@@ -1,3 +1,6 @@
+import type { PluginModelRegistry, PluginToolRegistry } from "./adapter-contract.js";
+export type * from "./adapter-contract.js";
+
 /**
  * JSON-safe values that may cross the public Harness/plugin boundary.
  *
@@ -332,6 +335,8 @@ export interface PluginNodeRegistry {
 export interface PluginContext {
   readonly config?: JsonValue;
   readonly nodes: PluginNodeRegistry;
+  readonly models: PluginModelRegistry;
+  readonly tools: PluginToolRegistry;
   onDispose(disposer: PluginDisposer): void;
 }
 

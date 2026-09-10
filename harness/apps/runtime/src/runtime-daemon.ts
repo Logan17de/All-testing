@@ -26,6 +26,11 @@ import {
   type RuntimeApprovalAuthority,
   type SuspendForApprovalInput,
 } from "./runtime-human-approvals.js";
+import {
+  RuntimeRunDispatcher,
+  type RuntimeExecutionOptions,
+  type RuntimeDispatchReport,
+} from "./runtime-run-dispatcher.js";
 import { RuntimeRedactionRegistry } from "./runtime-redaction.js";
 
 export const DEFAULT_RUNTIME_DATABASE_PATH = resolve("data", "zet-harness.sqlite");
@@ -45,6 +50,7 @@ export interface RuntimeDaemonOptions {
   readonly migrations?: readonly SqliteMigration[];
   readonly permissionAuthority?: RuntimeApprovalAuthority;
   readonly redaction?: RuntimeRedactionRegistry;
+  readonly execution?: RuntimeExecutionOptions;
 }
 export interface RuntimeDaemonSnapshot {
   readonly state: RuntimeDaemonState;
@@ -61,6 +67,7 @@ export class RuntimeDaemon {
   private readonly httpServer: RuntimeHttpServer;
   private readonly redaction: RuntimeRedactionRegistry;
   private readonly approvals: RuntimeHumanApprovals;
+  private readonly dispatcher: RuntimeRunDispatcher | undefined;
   private readonly stoppedPromise: Promise<void>;
   private readonly resolveStopped: () => void;
   private stopPromise: Promise<boolean> | undefined;
@@ -71,10 +78,23 @@ export class RuntimeDaemon {
     this.redaction = options.redaction ?? new RuntimeRedactionRegistry();
     this.approvals = new RuntimeHumanApprovals(this.database, {
       redaction: this.redaction,
+      onResolved: (runId) => {
+        this.dispatcher?.wake(runId);
+      },
       ...(options.permissionAuthority === undefined
         ? {}
         : { authority: options.permissionAuthority }),
     });
+    this.dispatcher =
+      options.execution === undefined
+        ? undefined
+        : new RuntimeRunDispatcher(
+            this.database,
+            this.approvals,
+            options.execution,
+            this.redaction,
+            options.permissionAuthority,
+          );
     this.httpServer = new RuntimeHttpServer(
       options.api,
       this.eventStream,
@@ -116,6 +136,23 @@ export class RuntimeDaemon {
     return this.approvals.suspend(input);
   }
 
+  /** Dispatch a stored, compiler-admitted run; arbitrary graph submission stays host-owned. */
+  dispatchRun(runId: string): Promise<RuntimeDispatchReport> {
+    if (
+      this.state !== "running" ||
+      this.stopPromise !== undefined ||
+      this.dispatcher === undefined
+    ) {
+      throw new TypeError("A running daemon with a trusted execution adapter is required.");
+    }
+    return this.dispatcher.dispatch(runId);
+  }
+
+  waitForRunIdle(runId: string): Promise<RuntimeDispatchReport> {
+    if (this.dispatcher === undefined) throw new TypeError("No execution adapter is configured.");
+    return this.dispatcher.waitForIdle(runId);
+  }
+
   async start(): Promise<boolean> {
     if (this.state === "stopped") {
       throw new TypeError("Runtime daemon cannot restart after it has stopped.");
@@ -130,6 +167,14 @@ export class RuntimeDaemon {
       throw error;
     }
     this.state = "running";
+    try {
+      this.dispatcher?.start();
+    } catch (error) {
+      // A dispatch bootstrap failure after HTTP binding must not leave a live
+      // listener claiming readiness. This instance is stopped; use a fresh daemon.
+      await this.stop();
+      throw error;
+    }
     return true;
   }
 
@@ -148,9 +193,11 @@ export class RuntimeDaemon {
   }
 
   private async stopOnce(): Promise<boolean> {
+    const draining = this.dispatcher?.stop();
     try {
       await this.httpServer.stop();
     } finally {
+      await draining;
       await this.database.drainWrites();
       this.database.close();
     }

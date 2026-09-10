@@ -506,4 +506,16 @@ By the end of **Phase 7**, a user can:
 
 ## 10. Next action
 
-> **Phase 5 / Item 5.10 — Add first-class approval records.**
+> **Phase 6 / Item 6.5 — Implement the generic OpenAI-compatible model adapter as a first-party plugin.**
+
+Phase 5.17 now connects daemon startup and approval wake-up to the existing `PlainDagRun`
+scheduler, with durable attempt admission, atomic output/frontier completion, restored budgets,
+quiescent human waits, graceful dispatch pause, and fail-closed crash recovery. The supported
+iteration-zero plain-DAG checkpoint is covered by an actual process-kill/restart test, not only
+in-memory reconstruction. This does not add generic run submission or structured loop execution.
+See `PHASE-5.17.md` for the exact supported scope.
+
+Phase 6.1–6.4 adds provider-neutral model/tool contracts, host-owned versioned registration
+services, and finite scripted offline adapters. Registry inspection never invokes adapters, and
+registration is not a grant or an invocation broker. See `PHASE-6.1-6.4.md` before adding real
+transports or routing; avoid embedding provider logic into the scheduler.

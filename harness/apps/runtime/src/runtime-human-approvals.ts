@@ -189,6 +189,7 @@ export class RuntimeHumanApprovals {
   readonly #redaction: RuntimeRedactionRegistry;
   readonly #evaluate: RuntimeApprovalAuthority["evaluate"] | undefined;
   readonly #now: () => number;
+  readonly #onResolved: ((runId: string) => void) | undefined;
 
   constructor(
     database: SqliteDatabase,
@@ -196,12 +197,14 @@ export class RuntimeHumanApprovals {
       readonly redaction?: RuntimeRedactionRegistry;
       readonly authority?: RuntimeApprovalAuthority;
       readonly now?: () => number;
+      readonly onResolved?: (runId: string) => void;
     } = {},
   ) {
     this.#database = database;
     this.#redaction = options.redaction ?? new RuntimeRedactionRegistry();
     this.#evaluate = options.authority?.evaluate.bind(options.authority);
     this.#now = options.now ?? Date.now;
+    this.#onResolved = options.onResolved;
   }
 
   get(approvalId: string): DurableApprovalRecord {
@@ -363,119 +366,133 @@ export class RuntimeHumanApprovals {
       canonicalRuntimeJson({ decision, payload: JSON.parse(responseJson) as SafeJson }),
     );
     const suppliedHash = tokenHash(resumeToken);
-    return this.#database.commit((connection) => {
-      const row = load(connection, approvalId);
-      if (
-        !timingSafeEqual(Buffer.from(row.resumeTokenHash, "hex"), Buffer.from(suppliedHash, "hex"))
-      ) {
-        throw new RuntimeApprovalError("APPROVAL_INVALID_TOKEN");
-      }
-      // A lost HTTP response can be retried even after the run subsequently advances.
-      if (row.status !== "pending") {
-        if (row.status === decision && row.responseHash === responseHash) {
-          return { approval: publicRecord(row), duplicate: true };
-        }
-        throw new RuntimeApprovalError("APPROVAL_CONFLICT");
-      }
-      const now = this.now();
-      assertPending(row, now);
-      const frontier = this.frontier(connection, row.runId, row.opIndex, decision === "approved");
-      const gate = frontier.ops.find((op) => op.opIndex === row.opIndex);
-      if (
-        frontier.runStatus !== "waiting" ||
-        frontier.compiledPlanId !== row.compiledPlanId ||
-        gate?.status !== "waiting" ||
-        gate.attemptsStarted !== 0
-      ) {
-        throw new RuntimeApprovalError("APPROVAL_CONFLICT");
-      }
-      connection
-        .prepare(
-          `UPDATE approvals SET status = ?, response_json = ?, response_hash = ?,
-          resolved_at_ms = ? WHERE approval_id = ? AND status = 'pending'`,
-        )
-        .run(decision, responseJson, responseHash, now, approvalId);
-      let readyOrder = Math.max(-1, ...frontier.ops.map((op) => op.readyOrder ?? -1)) + 1;
-      const ops = frontier.ops.map((op): RecoveredOpFrontier => {
-        if (decision === "rejected") {
-          if (["completed", "skipped", "failed", "cancelled"].includes(op.status)) return op;
-          return { ...op, status: "cancelled", readyOrder: null, retryNotBeforeMs: null };
-        }
-        if (op.opIndex === row.opIndex) {
-          return { ...op, status: "completed", attemptsStarted: 1, attemptBudgetUsed: 1 };
-        }
+    return this.#database
+      .commit((connection) => {
+        const row = load(connection, approvalId);
         if (
-          op.status === "pending" &&
-          frontier.executionIr.ops[op.opIndex]?.dependencies.includes(row.opIndex)
+          !timingSafeEqual(
+            Buffer.from(row.resumeTokenHash, "hex"),
+            Buffer.from(suppliedHash, "hex"),
+          )
         ) {
-          const remainingDependencies = op.remainingDependencies - 1;
-          if (remainingDependencies < 0) throw new RuntimeApprovalError("APPROVAL_CONFLICT");
-          return {
-            ...op,
-            remainingDependencies,
-            status: remainingDependencies === 0 ? "ready" : "pending",
-            readyOrder: remainingDependencies === 0 ? readyOrder++ : null,
-          };
+          throw new RuntimeApprovalError("APPROVAL_INVALID_TOKEN");
         }
-        return op;
-      });
-      if (decision === "approved") {
+        // A lost HTTP response can be retried even after the run subsequently advances.
+        if (row.status !== "pending") {
+          if (row.status === decision && row.responseHash === responseHash) {
+            return { approval: publicRecord(row), duplicate: true };
+          }
+          throw new RuntimeApprovalError("APPROVAL_CONFLICT");
+        }
+        const now = this.now();
+        assertPending(row, now);
+        const frontier = this.frontier(connection, row.runId, row.opIndex, decision === "approved");
+        const gate = frontier.ops.find((op) => op.opIndex === row.opIndex);
+        if (
+          frontier.runStatus !== "waiting" ||
+          frontier.compiledPlanId !== row.compiledPlanId ||
+          gate?.status !== "waiting" ||
+          gate.attemptsStarted !== 0
+        ) {
+          throw new RuntimeApprovalError("APPROVAL_CONFLICT");
+        }
         connection
           .prepare(
-            `INSERT INTO node_attempts (
+            `UPDATE approvals SET status = ?, response_json = ?, response_hash = ?,
+          resolved_at_ms = ? WHERE approval_id = ? AND status = 'pending'`,
+          )
+          .run(decision, responseJson, responseHash, now, approvalId);
+        let readyOrder = Math.max(-1, ...frontier.ops.map((op) => op.readyOrder ?? -1)) + 1;
+        const ops = frontier.ops.map((op): RecoveredOpFrontier => {
+          if (decision === "rejected") {
+            if (["completed", "skipped", "failed", "cancelled"].includes(op.status)) return op;
+            return { ...op, status: "cancelled", readyOrder: null, retryNotBeforeMs: null };
+          }
+          if (op.opIndex === row.opIndex) {
+            return { ...op, status: "completed", attemptsStarted: 1, attemptBudgetUsed: 1 };
+          }
+          if (
+            op.status === "pending" &&
+            frontier.executionIr.ops[op.opIndex]?.dependencies.includes(row.opIndex)
+          ) {
+            const remainingDependencies = op.remainingDependencies - 1;
+            if (remainingDependencies < 0) throw new RuntimeApprovalError("APPROVAL_CONFLICT");
+            return {
+              ...op,
+              remainingDependencies,
+              status: remainingDependencies === 0 ? "ready" : "pending",
+              readyOrder: remainingDependencies === 0 ? readyOrder++ : null,
+            };
+          }
+          return op;
+        });
+        if (decision === "approved") {
+          connection
+            .prepare(
+              `INSERT INTO node_attempts (
             run_id, op_index, iteration, attempt, logical_effect_id, status, input_refs_json,
             output_refs_json, error_json, usage_json, started_at_ms, finished_at_ms
           ) VALUES (?, ?, 0, 1, ?, 'completed', '{}', ?, NULL, NULL, ?, ?)`,
-          )
-          .run(
-            row.runId,
-            row.opIndex,
-            row.logicalEffectId,
-            canonicalRuntimeJson({
-              response: { kind: "inline", value: JSON.parse(responseJson) as SafeJson },
-            }),
-            row.createdAtMs,
-            now,
-          );
-      } else {
-        connection
-          .prepare(
-            `UPDATE approvals SET status = 'cancelled', response_json = 'null',
+            )
+            .run(
+              row.runId,
+              row.opIndex,
+              row.logicalEffectId,
+              canonicalRuntimeJson({
+                response: { kind: "inline", value: JSON.parse(responseJson) as SafeJson },
+              }),
+              row.createdAtMs,
+              now,
+            );
+        } else {
+          connection
+            .prepare(
+              `UPDATE approvals SET status = 'cancelled', response_json = 'null',
             response_hash = ?, resolved_at_ms = ? WHERE run_id = ? AND status = 'pending'`,
-          )
-          .run(digest("cancelled"), now, row.runId);
-      }
-      appendEvent(
-        connection,
-        row.runId,
-        "harness.approval.resolved",
-        now,
-        { approvalId, decision },
-        row.opIndex,
-      );
-      const edges = frontier.controlEdges.map((edge) => {
-        if (
-          decision === "approved" &&
-          frontier.executionIr.controlEdges[edge.edgeIndex]?.from.op === row.opIndex
-        ) {
-          return { ...edge, status: "completed" as const };
+            )
+            .run(digest("cancelled"), now, row.runId);
         }
-        return edge;
+        appendEvent(
+          connection,
+          row.runId,
+          "harness.approval.resolved",
+          now,
+          { approvalId, decision },
+          row.opIndex,
+        );
+        const edges = frontier.controlEdges.map((edge) => {
+          if (
+            decision === "approved" &&
+            frontier.executionIr.controlEdges[edge.edgeIndex]?.from.op === row.opIndex
+          ) {
+            return { ...edge, status: "completed" as const };
+          }
+          return edge;
+        });
+        checkpoint(connection, { ...frontier, controlEdges: edges }, ops, now);
+        const status =
+          decision === "rejected"
+            ? "cancelled"
+            : ops.every((op) => op.status === "completed")
+              ? "completed"
+              : ops.some((op) => op.status === "waiting")
+                ? "waiting"
+                : "running";
+        connection
+          .prepare("UPDATE runs SET status = ?, finished_at_ms = ? WHERE run_id = ?")
+          .run(status, status === "cancelled" || status === "completed" ? now : null, row.runId);
+        return { approval: publicRecord(load(connection, approvalId)), duplicate: false };
+      })
+      .then((result) => {
+        // Wake-ups are hints, not part of the decision transaction. Retrying an
+        // already-committed response may safely notify again; startup also rescans.
+        try {
+          this.#onResolved?.(result.approval.runId);
+        } catch {
+          /* Durable result wins. */
+        }
+        return result;
       });
-      checkpoint(connection, { ...frontier, controlEdges: edges }, ops, now);
-      const status =
-        decision === "rejected"
-          ? "cancelled"
-          : ops.every((op) => op.status === "completed")
-            ? "completed"
-            : ops.some((op) => op.status === "waiting")
-              ? "waiting"
-              : "running";
-      connection
-        .prepare("UPDATE runs SET status = ?, finished_at_ms = ? WHERE run_id = ?")
-        .run(status, status === "cancelled" || status === "completed" ? now : null, row.runId);
-      return { approval: publicRecord(load(connection, approvalId)), duplicate: false };
-    });
   }
 
   private now(): number {

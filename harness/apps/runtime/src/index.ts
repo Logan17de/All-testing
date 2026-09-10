@@ -70,3 +70,11 @@ export {
   canonicalRuntimeJson,
   type SafeJson,
 } from "./runtime-redaction.js";
+
+export {
+  RuntimeRunDispatcher,
+  type RuntimeDispatchReport,
+  type RuntimeExecutionOptions,
+  type RuntimeNodeExecution,
+  type RuntimeNodeExecutionResult,
+} from "./runtime-run-dispatcher.js";

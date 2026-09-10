@@ -168,15 +168,17 @@ Goal: make side effects and privilege boundaries explicit before broad real-worl
 - [x] 5.14 Return machine-readable permission denials with stable code, safe reason, and remediation metadata.
 - [x] 5.15 Add payload/log redaction registry and secret deny list.
 - [x] 5.16 Add origin/CSRF protection where applicable for the local UI/API boundary.
-- [ ] 5.17 Integrate automatic daemon dispatch and scheduler wake-up with durable human gates; prove run → gate → shutdown → resume → privileged effect through the same scheduler.
+- [x] 5.17 Integrate automatic daemon dispatch and scheduler wake-up with durable human gates; prove run → gate → shutdown → resume → privileged effect through the same scheduler.
 
-**Batch scope:** 5.10–5.16 are implemented at the host service/API boundary for quiescent,
-iteration-zero plain DAGs. See `PHASE-5.10-5.16.md` for supported behavior, token handling,
-redaction wiring, and trust limits. The service releases a durable ready frontier but does not
-itself invoke downstream effects. 5.17 makes the remaining automatic-dispatch integration explicit;
-it must not be hidden by marking the whole product checkpoint complete.
+**Batch scope:** 5.10–5.16 provide the durable service/API boundary. 5.17 now connects
+that boundary to the existing `PlainDagRun`: automatic startup scan, host dispatch, quiescent
+suspension, post-commit approval wake-up, output reuse, and current capability checks. An actual
+process-kill/restart regression proves the supported plain-DAG path. See `PHASE-5.17.md`.
 
-**Checkpoint:** a privileged effect can pause for approval, survive process shutdown, resume once, and cannot exceed compiled/runtime capabilities. Automatic end-to-end checkpoint closeout remains pending 5.17.
+**Checkpoint:** closed for iteration-zero plain DAGs with linear human gates and a trusted host
+execution adapter. Unclassified pre-crash attempts are held for recovery, never blindly replayed.
+Generic run submission, supplied graph inputs, secret-aware adapter wiring, structured-control
+execution, and the visual UI remain separate work; this is not the full v0.1 product checkpoint.
 
 ---
 
@@ -184,10 +186,10 @@ it must not be hidden by marking the whole product checkpoint complete.
 
 Goal: prove provider/tool neutrality through plugins, not core branches.
 
-- [ ] 6.1 Define public `ModelAdapter` contract in the plugin API.
-- [ ] 6.2 Define public `ToolAdapter`/tool manifest contract in the plugin API.
-- [ ] 6.3 Add model/tool registries as plugin services.
-- [ ] 6.4 Add scripted/mock model and tool adapters for deterministic tests.
+- [x] 6.1 Define public `ModelAdapter` contract in the plugin API.
+- [x] 6.2 Define public `ToolAdapter`/tool manifest contract in the plugin API.
+- [x] 6.3 Add model/tool registries as plugin services.
+- [x] 6.4 Add scripted/mock model and tool adapters for deterministic tests.
 - [ ] 6.5 Implement the generic OpenAI-compatible model adapter as a first-party plugin.
 - [ ] 6.6 Add provider-specific OpenAI adapter only where current OpenAI behavior requires it.
 - [ ] 6.7 Support custom base URL and credential references.
@@ -326,7 +328,9 @@ microVM sandbox by default
 
 ## Next action
 
-**5.17 — Connect the durable human-gate service to automatic daemon dispatch and scheduler wake-up.**
+**6.5 — Implement the generic OpenAI-compatible model adapter as a first-party plugin.**
 
-5.10–5.16 are implemented as one batch. Preserve the validation boundary and current host
-permission checks while closing the end-to-end execution checkpoint; then continue Phase 6.
+5.17 and 6.1–6.4 are implemented together. Provider-neutral contracts, registration services,
+and scripted offline adapters are available; real HTTP transports, runtime adapter-node/broker
+wiring, provider selection/tracing, and native filesystem/shell tools remain Phase 6 work.
+Preserve current capability checks, secret-safe sinks, and the shared retry budget.

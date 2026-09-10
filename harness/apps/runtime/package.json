@@ -4,16 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm --prefix ../.. run build --workspace @zet-harness/db && tsc -p tsconfig.build.json",
+    "build": "npm --prefix ../.. run build --workspace @zet-harness/db --workspace @zet-harness/scheduler && tsc -p tsconfig.build.json",
     "start": "npm run build && node dist/main.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src --max-warnings=0",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@zet-harness/db": "0.0.0"
+    "@zet-harness/db": "0.0.0",
+    "@zet-harness/scheduler": "0.0.0"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.0.0",
+    "@zet-harness/graph": "0.0.0"
   }
 }

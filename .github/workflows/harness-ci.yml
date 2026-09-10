@@ -73,15 +73,22 @@ jobs:
         run: npm run test:plugin-smoke --workspace @zet-harness/core
 
       - name: Startup smoke
+        id: startup
         run: npm run test:startup
 
       - name: Build
         run: npm run build
 
       - name: Baseline check
+        id: baseline
         env:
           ZET_BASELINE_PLATFORM: ${{ matrix.os }}
         run: npm run baseline:ci
+
+      - name: Runtime timing diagnostics
+        if: failure() && (steps.startup.outcome == 'failure' || steps.baseline.outcome == 'failure')
+        timeout-minutes: 1
+        run: node scripts/runtime-timing-diagnostics.mjs
 
       - name: Upload baseline report
         if: always()

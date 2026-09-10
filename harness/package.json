@@ -13,7 +13,7 @@
     "dev": "npm run dev --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit -p tsconfig.json && tsc --noEmit -p scripts/tsconfig.json",
-    "test": "npm run build --workspace @zet-harness/db && vitest run --passWithNoTests",
+    "test": "npm run build --workspace @zet-harness/runtime && vitest run --passWithNoTests",
     "test:startup": "npm run build --workspace @zet-harness/runtime && node scripts/runtime-startup-smoke.mjs && node scripts/startup-smoke.mjs",
     "baseline": "npm run build --workspace @zet-harness/runtime && vitest bench scripts/lightweight-baseline.bench.ts --outputJson=tmp/baseline/bench.json",
     "baseline:ci": "npm run baseline && node --experimental-strip-types scripts/check-lightweight-baseline.ts",

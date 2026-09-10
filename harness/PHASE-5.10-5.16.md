@@ -1,5 +1,11 @@
 # Phase 5.10–5.16 — Durable approvals and protected local API
 
+## Follow-up status
+
+Phase 5.17 now supplies the automatic daemon dispatch and scheduler wake-up integration described
+as pending in this historical batch document. See `PHASE-5.17.md` for the current execution path
+and remaining scope limits. The service/API contracts below remain unchanged.
+
 ## Scope
 
 This batch implements the approval, suspension, resume, denial, redaction, and browser-protection
