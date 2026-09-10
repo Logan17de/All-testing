@@ -4,7 +4,7 @@ set -euo pipefail
 COMFY_ROOT="${COMFY_ROOT:-/content/ComfyUI}"
 PORT="${COMFY_PORT:-8188}"
 LOG_DIR="${H3_LOG_DIR:-/content/h3_comfy_logs}"
-VRAM_MODE="${H3_VRAM_MODE:-normalvram}"
+VRAM_MODE="${H3_VRAM_MODE:-auto}"
 RESERVE_VRAM_GB="${H3_RESERVE_VRAM_GB:-4}"
 PREVIEW_METHOD="${H3_PREVIEW_METHOD:-none}"
 mkdir -p "$LOG_DIR"
@@ -17,33 +17,64 @@ export CUDA_MODULE_LOADING="${CUDA_MODULE_LOADING:-LAZY}"
 VRAM_ARGS=()
 case "$VRAM_MODE" in
   highvram) VRAM_ARGS+=(--highvram) ;;
-  normalvram) VRAM_ARGS+=(--normalvram) ;;
+  # Legacy notebooks set normalvram. Modern ComfyUI has no such CLI flag;
+  # leave its default memory manager enabled rather than forcing highvram.
+  auto|default|normalvram) ;;
   lowvram) VRAM_ARGS+=(--lowvram) ;;
-  *) echo "ERROR: H3_VRAM_MODE must be highvram, normalvram, or lowvram"; exit 2 ;;
+  *) echo "ERROR: H3_VRAM_MODE must be auto, default, normalvram, highvram, or lowvram"; exit 2 ;;
 esac
 VRAM_ARGS+=(--reserve-vram "$RESERVE_VRAM_GB" --preview-method "$PREVIEW_METHOD")
 
-if curl -fsS "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
+COMFY_ARGS=(--listen 0.0.0.0 --port "$PORT" --disable-auto-launch "${VRAM_ARGS[@]}")
+
+# Launch or reuse ComfyUI. The notebook's legacy normalvram setting is accepted.
+if curl -fsS --connect-timeout 2 --max-time 3 "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
   echo "✅ Existing ComfyUI is healthy on port $PORT; reusing it."
 else
+  # Validate with the installed ComfyUI parser before loading CUDA or models.
+  # Do not use --help for validation: argparse can exit before rejecting flags.
+  if ! (
+    cd "$COMFY_ROOT"
+    python - "${COMFY_ARGS[@]}" <<'PYCLI'
+import comfy.options
+comfy.options.enable_args_parsing()
+import comfy.cli_args
+print("ComfyUI CLI argument check: PASSED")
+PYCLI
+  ) >"$LOG_DIR/cli-check.log" 2>&1; then
+    echo "ERROR: ComfyUI argument preflight failed. No server was started."
+    cat "$LOG_DIR/cli-check.log"
+    exit 2
+  fi
+  cat "$LOG_DIR/cli-check.log"
   echo "Starting ComfyUI on port $PORT..."
-  echo "VRAM mode: $VRAM_MODE | reserved: ${RESERVE_VRAM_GB} GB | preview: $PREVIEW_METHOD"
+  echo "VRAM policy: $VRAM_MODE | reserved: ${RESERVE_VRAM_GB} GB | preview: $PREVIEW_METHOD"
+  case "$VRAM_MODE" in
+    auto|default|normalvram) echo "Using ComfyUI's default memory manager (no explicit VRAM mode flag)." ;;
+  esac
   pkill -f "python.*main.py.*--port $PORT" >/dev/null 2>&1 || true
   (
     cd "$COMFY_ROOT"
-    nohup python main.py --listen 0.0.0.0 --port "$PORT" --disable-auto-launch "${VRAM_ARGS[@]}" \
-      >"$LOG_DIR/comfyui.log" 2>&1 &
-    echo $! >"$LOG_DIR/comfyui.pid"
-  )
+    exec nohup python main.py "${COMFY_ARGS[@]}"
+  ) >"$LOG_DIR/comfyui.log" 2>&1 </dev/null &
+  COMFY_PID=$!
+  echo "$COMFY_PID" >"$LOG_DIR/comfyui.pid"
 
   for _ in $(seq 1 90); do
-    if curl -fsS "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
+    if curl -fsS --connect-timeout 2 --max-time 3 "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
       break
+    fi
+    if ! kill -0 "$COMFY_PID" 2>/dev/null; then
+      EXIT_STATUS=0
+      wait "$COMFY_PID" || EXIT_STATUS=$?
+      echo "ERROR: ComfyUI exited before becoming ready (exit $EXIT_STATUS). Last log lines:"
+      tail -n 100 "$LOG_DIR/comfyui.log" || true
+      exit 3
     fi
     sleep 2
   done
 
-  if ! curl -fsS "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
+  if ! curl -fsS --connect-timeout 2 --max-time 3 "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
     echo "ERROR: ComfyUI did not become ready. Last log lines:"
     tail -n 100 "$LOG_DIR/comfyui.log" || true
     exit 3
