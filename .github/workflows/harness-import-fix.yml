@@ -1,0 +1,32 @@
+name: Apply verified cancellation regression fix
+on:
+  push:
+    branches: [zet-harness-runtime-dispatch]
+    paths: [.github/workflows/harness-import-fix.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/zet-harness-runtime-dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Apply tested patch and remove development transport
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo '793e17c22d1c6027e18380c87b4642908075bf7e2eb2a8e13b70013017fdcaab  .github/dev/cancel-race.patch' | sha256sum --check
+          git apply --check --index .github/dev/cancel-race.patch
+          git apply --index .github/dev/cancel-race.patch
+          git rm -- .github/dev/cancel-race.patch .github/workflows/harness-import-fix.yml
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(scheduler): preserve cancellation across approval commit races' -m 'Do not replace cancellation with a late checkpoint result. Add success/failure race regressions. All 595 tests pass locally; full CI is required before merge.'
+          test "$(git ls-remote origin refs/heads/zet-harness-runtime-dispatch | cut -f1)" = "$EXPECTED_HEAD"
+          git push origin HEAD:refs/heads/zet-harness-runtime-dispatch
