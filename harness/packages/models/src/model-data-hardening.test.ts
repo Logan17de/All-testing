@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { AdapterInvocationContext, ModelRequest, ModelStreamEvent } from "@zet-harness/plugin-api";
+import type {
+  AdapterInvocationContext,
+  ModelRequest,
+  ModelStreamEvent,
+} from "@zet-harness/plugin-api";
 
 import { abortable, parseJson, readModelJson } from "./model-http.js";
 import { assertModelJson } from "./model-json.js";
@@ -8,10 +12,17 @@ import { createOpenAICompatibleModelAdapter } from "./openai-compatible-model.js
 
 function context(): AdapterInvocationContext {
   return {
-    runId: "r", opIndex: 0, iteration: 0, attempt: 1, logicalEffectId: "e",
+    runId: "r",
+    opIndex: 0,
+    iteration: 0,
+    attempt: 1,
+    logicalEffectId: "e",
     signal: new AbortController().signal,
     retryBudget: {
-      maxAttempts: 1, usedAttempts: 1, remainingAttempts: 0, repeatAuthorized: false,
+      maxAttempts: 1,
+      usedAttempts: 1,
+      remainingAttempts: 0,
+      repeatAuthorized: false,
       reportInternalRetries: () => 1,
     },
   };
@@ -23,7 +34,10 @@ const request: ModelRequest = {
 
 function adapter(fetch: typeof globalThis.fetch) {
   return createOpenAICompatibleModelAdapter({
-    id: "bounded", baseUrl: "https://example.test/v1", model: "pinned-model", fetch,
+    id: "bounded",
+    baseUrl: "https://example.test/v1",
+    model: "pinned-model",
+    fetch,
     features: { tools: true },
   });
 }
@@ -89,9 +103,9 @@ describe("model data and completion hardening", () => {
     const response = new Response(new ReadableStream<Uint8Array>({ cancel }), {
       headers: { "content-type": "text/plain" },
     });
-    await expect(
-      readModelJson(response, 1024, new AbortController().signal),
-    ).rejects.toMatchObject({ code: "MODEL_RESPONSE_INVALID" });
+    await expect(readModelJson(response, 1024, new AbortController().signal)).rejects.toMatchObject(
+      { code: "MODEL_RESPONSE_INVALID" },
+    );
     expect(cancel).toHaveBeenCalledOnce();
   });
 
@@ -99,25 +113,44 @@ describe("model data and completion hardening", () => {
     "does not expose a tool call from a response that finished as %s",
     async (reason) => {
       const delta = {
-        choices: [{
-          index: 0,
-          delta: { tool_calls: [{
-            index: 0, id: "call-1", type: "function",
-            function: { name: "lookup", arguments: "{}" },
-          }] },
-          finish_reason: reason,
-        }],
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call-1",
+                  type: "function",
+                  function: { name: "lookup", arguments: "{}" },
+                },
+              ],
+            },
+            finish_reason: reason,
+          },
+        ],
       };
       const wire = `data: ${JSON.stringify(delta)}\n\ndata: [DONE]\n\n`;
-      const model = adapter(() => Promise.resolve(new Response(wire, {
-        headers: { "content-type": "text/event-stream" },
-      })));
+      const model = adapter(() =>
+        Promise.resolve(
+          new Response(wire, {
+            headers: { "content-type": "text/event-stream" },
+          }),
+        ),
+      );
       const events: ModelStreamEvent[] = [];
-      await expect((async () => {
-        for await (const event of model.stream!({
-          ...request, tools: [{ name: "lookup", inputSchema: { type: "object" } }],
-        }, context())) events.push(event);
-      })()).rejects.toMatchObject({ code: "MODEL_RESPONSE_INVALID" });
+      await expect(
+        (async () => {
+          for await (const event of model.stream!(
+            {
+              ...request,
+              tools: [{ name: "lookup", inputSchema: { type: "object" } }],
+            },
+            context(),
+          ))
+            events.push(event);
+        })(),
+      ).rejects.toMatchObject({ code: "MODEL_RESPONSE_INVALID" });
       expect(events).toEqual([]);
     },
   );

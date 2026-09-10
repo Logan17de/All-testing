@@ -156,11 +156,17 @@ describe("OpenAI-compatible model transport", () => {
   it("supports explicit legacy token limits without unchecked provider options", async () => {
     const fetch = jsonFetch();
     await make(fetch, { tokenLimitField: "max_tokens" }).generate(
-      { ...request, maxOutputTokens: 5, options: { openai: { temperature: 0, reasoning_effort: "low" } } },
+      {
+        ...request,
+        maxOutputTokens: 5,
+        options: { openai: { temperature: 0, reasoning_effort: "low" } },
+      },
       context(),
     );
     expect(JSON.parse(requestBody(fetch.mock.calls[0]?.[1]))).toMatchObject({
-      max_tokens: 5, temperature: 0, reasoning_effort: "low",
+      max_tokens: 5,
+      temperature: 0,
+      reasoning_effort: "low",
     });
     await expect(
       make(fetch).generate({ ...request, model: "unverified-model" }, context()),
@@ -170,7 +176,11 @@ describe("OpenAI-compatible model transport", () => {
   it("pins factory options and snapshots input before asynchronous credential resolution", async () => {
     const fetch = jsonFetch();
     const options = {
-      id: "test", model: "original", baseUrl: "https://example.test/v1", fetch, credentialPort: "apiKey",
+      id: "test",
+      model: "original",
+      baseUrl: "https://example.test/v1",
+      fetch,
+      credentialPort: "apiKey",
     };
     const adapter = createOpenAICompatibleModelAdapter(options);
     options.baseUrl = "https://other.test/v1";
@@ -197,23 +207,37 @@ describe("OpenAI-compatible model transport", () => {
 
   it("maps schema output, assistant calls and tool results without invoking tools", async () => {
     const fetch = jsonFetch({
-      choices: [{
-        message: {
-          role: "assistant", content: null,
-          tool_calls: [{
-            type: "function", id: "call-2",
-            function: { name: "lookup", arguments: '{"query":"x"}' },
-          }],
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                type: "function",
+                id: "call-2",
+                function: { name: "lookup", arguments: '{"query":"x"}' },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
         },
-        finish_reason: "tool_calls",
-      }],
+      ],
     });
     const adapter = make(fetch, { features: { tools: true, structuredOutput: true } });
     const value: ModelRequest = {
       messages: [
         ...request.messages,
-        { role: "assistant", parts: [{ kind: "tool-call", callId: "call-1", name: "lookup", arguments: { query: "old" } }] },
-        { role: "tool", parts: [{ kind: "tool-result", callId: "call-1", value: { found: true } }] },
+        {
+          role: "assistant",
+          parts: [
+            { kind: "tool-call", callId: "call-1", name: "lookup", arguments: { query: "old" } },
+          ],
+        },
+        {
+          role: "tool",
+          parts: [{ kind: "tool-result", callId: "call-1", value: { found: true } }],
+        },
       ],
       tools: [{ name: "lookup", inputSchema: { type: "object" } }],
       outputSchema: { type: "object", additionalProperties: false },
@@ -229,7 +253,9 @@ describe("OpenAI-compatible model transport", () => {
       json_schema: { name: "harness_output", strict: true, schema: value.outputSchema },
     });
     expect(body.messages).toContainEqual({
-      role: "tool", tool_call_id: "call-1", content: '{"found":true}',
+      role: "tool",
+      tool_call_id: "call-1",
+      content: '{"found":true}',
     });
   });
 
@@ -237,28 +263,43 @@ describe("OpenAI-compatible model transport", () => {
     const fetch = jsonFetch();
     const resolveImage = vi.fn(() => Promise.resolve(new Uint8Array([1, 2, 3])));
     const adapter = make(fetch, { features: { vision: true }, resolveImage });
-    await adapter.generate({
-      messages: [{ role: "user", parts: [{ kind: "image", artifactRef: "blob:opaque-id", mediaType: "image/png" }] }],
-    }, context());
+    await adapter.generate(
+      {
+        messages: [
+          {
+            role: "user",
+            parts: [{ kind: "image", artifactRef: "blob:opaque-id", mediaType: "image/png" }],
+          },
+        ],
+      },
+      context(),
+    );
     const body = requestBody(fetch.mock.calls[0]?.[1]);
     expect(body).toContain("data:image/png;base64,AQID");
     expect(body).not.toContain("blob:opaque-id");
     expect(resolveImage).toHaveBeenCalledOnce();
   });
 
-  it.each([400, 401, 429, 500])("normalizes HTTP %s without exposing its body or retrying", async (status) => {
-    const fetch = vi.fn<typeof globalThis.fetch>(() =>
-      Promise.resolve(new Response("private-provider-details", { status })),
-    );
-    const ctx = context();
-    const error: unknown = await make(fetch).generate(request, ctx).catch((value: unknown) => value);
-    expect(error).toMatchObject({
-      code: "MODEL_HTTP_ERROR", status, retryable: status === 429 || status >= 500,
-    });
-    expect(JSON.stringify(error)).not.toContain("private-provider-details");
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(ctx.retryBudget.reportInternalRetries).not.toHaveBeenCalled();
-  });
+  it.each([400, 401, 429, 500])(
+    "normalizes HTTP %s without exposing its body or retrying",
+    async (status) => {
+      const fetch = vi.fn<typeof globalThis.fetch>(() =>
+        Promise.resolve(new Response("private-provider-details", { status })),
+      );
+      const ctx = context();
+      const error: unknown = await make(fetch)
+        .generate(request, ctx)
+        .catch((value: unknown) => value);
+      expect(error).toMatchObject({
+        code: "MODEL_HTTP_ERROR",
+        status,
+        retryable: status === 429 || status >= 500,
+      });
+      expect(JSON.stringify(error)).not.toContain("private-provider-details");
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(ctx.retryBudget.reportInternalRetries).not.toHaveBeenCalled();
+    },
+  );
 
   it("preserves pre-abort identity and times out an uncooperative transport", async () => {
     const controller = new AbortController();
@@ -268,7 +309,10 @@ describe("OpenAI-compatible model transport", () => {
     await expect(make(fetch).generate(request, context(controller.signal))).rejects.toBe(reason);
     expect(fetch).not.toHaveBeenCalled();
     await expect(
-      make(() => new Promise<Response>(() => undefined), { timeoutMs: 5 }).generate(request, context()),
+      make(() => new Promise<Response>(() => undefined), { timeoutMs: 5 }).generate(
+        request,
+        context(),
+      ),
     ).rejects.toMatchObject({ code: "MODEL_TIMEOUT" });
   });
 
@@ -277,13 +321,25 @@ describe("OpenAI-compatible model transport", () => {
       make(jsonFetch(), { maxResponseBytes: 10 }).generate(request, context()),
     ).rejects.toMatchObject({ code: "MODEL_RESPONSE_LIMIT" });
     const unknownTool = {
-      choices: [{
-        message: { role: "assistant", tool_calls: [{ type: "function", id: "x", function: { name: "unoffered", arguments: "{}" } }] },
-        finish_reason: "tool_calls",
-      }],
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            tool_calls: [
+              { type: "function", id: "x", function: { name: "unoffered", arguments: "{}" } },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
     };
-    for (const value of ["{", JSON.stringify({ ...completion, usage: { total_tokens: -1 } }), JSON.stringify(unknownTool)]) {
-      const fetch = () => Promise.resolve(new Response(value, { headers: { "content-type": "application/json" } }));
+    for (const value of [
+      "{",
+      JSON.stringify({ ...completion, usage: { total_tokens: -1 } }),
+      JSON.stringify(unknownTool),
+    ]) {
+      const fetch = () =>
+        Promise.resolve(new Response(value, { headers: { "content-type": "application/json" } }));
       await expect(make(fetch).generate(request, context())).rejects.toMatchObject({
         code: "MODEL_RESPONSE_INVALID",
       });
@@ -291,8 +347,12 @@ describe("OpenAI-compatible model transport", () => {
   });
 
   it("does not expose network/credential exceptions or trust forged error prototypes", async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>(() => Promise.reject(new Error("private-network-details")));
-    const error: unknown = await make(fetch).generate(request, context()).catch((value: unknown) => value);
+    const fetch = vi.fn<typeof globalThis.fetch>(() =>
+      Promise.reject(new Error("private-network-details")),
+    );
+    const error: unknown = await make(fetch)
+      .generate(request, context())
+      .catch((value: unknown) => value);
     expect(error).toMatchObject({ code: "MODEL_NETWORK_ERROR" });
     expect(JSON.stringify(error)).not.toContain("private-network-details");
     await expect(
@@ -301,37 +361,74 @@ describe("OpenAI-compatible model transport", () => {
     const forged = Object.create(ModelTransportError.prototype) as ModelTransportError;
     Object.defineProperty(forged, "message", { value: "private-forged-details" });
     const imageAdapter = make(fetch, {
-      features: { vision: true }, resolveImage: () => Promise.reject(forged),
+      features: { vision: true },
+      resolveImage: () => Promise.reject(forged),
     });
     const imageRequest: ModelRequest = {
-      messages: [{ role: "user", parts: [{ kind: "image", artifactRef: "x", mediaType: "image/png" }] }],
+      messages: [
+        { role: "user", parts: [{ kind: "image", artifactRef: "x", mediaType: "image/png" }] },
+      ],
     };
-    const imageError: unknown = await imageAdapter.generate(imageRequest, context()).catch((value: unknown) => value);
+    const imageError: unknown = await imageAdapter
+      .generate(imageRequest, context())
+      .catch((value: unknown) => value);
     expect(imageError).toMatchObject({ code: "MODEL_RESPONSE_INVALID" });
     expect(String(imageError)).not.toContain("private-forged-details");
   });
 
   it.each([1, 2, 7, 4096])("assembles UTF-8/CRLF fragments at chunk width %s", async (width) => {
-    const wire = ": comment\r\n\r\n" +
-      event({ id: "stream-1", choices: [{ index: 0, delta: { role: "assistant", content: "こんにちは" }, finish_reason: null }] }) +
+    const wire =
+      ": comment\r\n\r\n" +
+      event({
+        id: "stream-1",
+        choices: [
+          { index: 0, delta: { role: "assistant", content: "こんにちは" }, finish_reason: null },
+        ],
+      }) +
       event({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }) +
-      event({ choices: [], usage: completion.usage }) + "data: [DONE]\r\n\r\n";
+      event({ choices: [], usage: completion.usage }) +
+      "data: [DONE]\r\n\r\n";
     const events = await collect(make(() => Promise.resolve(sse(wire, width))));
     expect(events.map((item) => item.type)).toEqual(["text-delta", "usage", "completed"]);
     expect(events[2]).toMatchObject({
-      result: { message: { parts: [{ kind: "text", text: "こんにちは" }] }, usage: { totalTokens: 7 } },
+      result: {
+        message: { parts: [{ kind: "text", text: "こんにちは" }] },
+        usage: { totalTokens: 7 },
+      },
     });
   });
 
   it("collects parallel tool arguments by index and emits only complete calls", async () => {
-    const wire = event({
-      choices: [{ index: 0, delta: { tool_calls: [
-        { index: 1, id: "b", type: "function", function: { name: "lookup", arguments: '{"q":' } },
-        { index: 0, id: "a", function: { name: "lookup", arguments: "{}" } },
-      ] }, finish_reason: null }],
-    }) + event({
-      choices: [{ index: 0, delta: { tool_calls: [{ index: 1, function: { arguments: '"日本"}' } }] }, finish_reason: "tool_calls" }],
-    }) + "data: [DONE]\n\n";
+    const wire =
+      event({
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 1,
+                  id: "b",
+                  type: "function",
+                  function: { name: "lookup", arguments: '{"q":' },
+                },
+                { index: 0, id: "a", function: { name: "lookup", arguments: "{}" } },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      }) +
+      event({
+        choices: [
+          {
+            index: 0,
+            delta: { tool_calls: [{ index: 1, function: { arguments: '"日本"}' } }] },
+            finish_reason: "tool_calls",
+          },
+        ],
+      }) +
+      "data: [DONE]\n\n";
     const events = await collect(
       make(() => Promise.resolve(sse(wire)), { features: { tools: true } }),
       { ...request, tools: [{ name: "lookup", inputSchema: { type: "object" } }] },
@@ -342,27 +439,38 @@ describe("OpenAI-compatible model transport", () => {
   });
 
   it("does not complete or retry a truncated stream", async () => {
-    const wire = event({ choices: [{ index: 0, delta: { content: "partial" }, finish_reason: "stop" }] });
+    const wire = event({
+      choices: [{ index: 0, delta: { content: "partial" }, finish_reason: "stop" }],
+    });
     const fetch = vi.fn<typeof globalThis.fetch>(() => Promise.resolve(sse(wire)));
     const events: ModelStreamEvent[] = [];
     const adapter = make(fetch);
-    await expect((async () => {
-      for await (const item of adapter.stream!(request, context())) events.push(item);
-    })()).rejects.toMatchObject({ code: "MODEL_STREAM_TRUNCATED" });
+    await expect(
+      (async () => {
+        for await (const item of adapter.stream!(request, context())) events.push(item);
+      })(),
+    ).rejects.toMatchObject({ code: "MODEL_STREAM_TRUNCATED" });
     expect(events.map((item) => item.type)).toEqual(["text-delta"]);
     expect(fetch).toHaveBeenCalledOnce();
   });
 
   it("cancels the response when its consumer stops early", async () => {
     const cancel = vi.fn();
-    const response = new Response(new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode(event({
-          choices: [{ index: 0, delta: { content: "partial" }, finish_reason: null }],
-        })));
-      },
-      cancel,
-    }), { headers: { "content-type": "text/event-stream" } });
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              event({
+                choices: [{ index: 0, delta: { content: "partial" }, finish_reason: null }],
+              }),
+            ),
+          );
+        },
+        cancel,
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
     for await (const item of make(() => Promise.resolve(response)).stream!(request, context())) {
       expect(item.type).toBe("text-delta");
       break;
@@ -372,13 +480,19 @@ describe("OpenAI-compatible model transport", () => {
 
   it("declares demand without implying tool/vision support or authority", () => {
     const plugin = createOpenAICompatiblePlugin({
-      id: "local", baseUrl: "http://localhost:11434/v1", model: "local-model", features: { streaming: false },
+      id: "local",
+      baseUrl: "http://localhost:11434/v1",
+      model: "local-model",
+      features: { streaming: false },
     });
     expect(plugin.manifest.capabilities).toEqual([{ id: "network:http" }]);
     const adapter = make(vi.fn(), { features: { streaming: false } });
     expect(adapter.stream).toBeUndefined();
     expect(adapter.manifest.features).toEqual({
-      streaming: false, tools: false, vision: false, structuredOutput: false,
+      streaming: false,
+      tools: false,
+      vision: false,
+      structuredOutput: false,
     });
   });
 });

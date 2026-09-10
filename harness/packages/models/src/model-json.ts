@@ -33,10 +33,8 @@ export function assertModelJson(value: unknown, maxTextChars = Number.MAX_SAFE_I
       for (const key of keys) {
         if (array !== undefined && key === "length") continue;
         if (typeof key !== "string") invalid();
-        if (
-          array !== undefined &&
-          (!/^(0|[1-9]\d*)$/.test(key) || Number(key) >= array.length)
-        ) invalid();
+        if (array !== undefined && (!/^(0|[1-9]\d*)$/.test(key) || Number(key) >= array.length))
+          invalid();
         text(key);
         const descriptor = Object.getOwnPropertyDescriptor(item, key);
         if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor))

@@ -145,9 +145,11 @@ export function createModelHttp(options: ModelHttpOptions, path: string) {
   try {
     if (options.baseUrl.includes("\\")) throw new Error();
     endpoint = new URL(options.baseUrl);
-    if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error();
+    if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash)
+      throw new Error();
     const local = ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname);
-    if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && local)) throw new Error();
+    if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && local))
+      throw new Error();
     endpoint.pathname = `${endpoint.pathname.replace(/\/+$/, "")}/${path}`;
   } catch {
     throw new ModelTransportError("MODEL_CONFIGURATION_INVALID");

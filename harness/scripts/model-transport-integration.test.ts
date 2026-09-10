@@ -66,11 +66,13 @@ describe("first-party model transport integration", () => {
   it("blocks network use before invocation and shares the existing outer retry budget", async () => {
     const host = new PluginHost();
     const calls: number[] = [];
-    const fetch = vi.fn<typeof globalThis.fetch>(() => Promise.resolve(
-      calls.length === 1
-        ? new Response("unexposed-details", { status: 503 })
-        : Response.json(completion),
-    ));
+    const fetch = vi.fn<typeof globalThis.fetch>(() =>
+      Promise.resolve(
+        calls.length === 1
+          ? new Response("unexposed-details", { status: 503 })
+          : Response.json(completion),
+      ),
+    );
     const plugin = createOpenAICompatiblePlugin({
       id: "retry-transport",
       baseUrl: "https://example.test/v1",
@@ -141,7 +143,8 @@ describe("first-party model transport integration", () => {
     const host = new PluginHost();
     try {
       const address = server.address();
-      if (address === null || typeof address === "string") throw new Error("Expected test listener.");
+      if (address === null || typeof address === "string")
+        throw new Error("Expected test listener.");
       await host.activate(
         createOpenAICompatiblePlugin({
           id: "local",
@@ -159,7 +162,7 @@ describe("first-party model transport integration", () => {
     } finally {
       await host.dispose();
       await new Promise<void>((resolve, reject) => {
-        server.close((error) => error === undefined ? resolve() : reject(error));
+        server.close((error) => (error === undefined ? resolve() : reject(error)));
       });
     }
   });

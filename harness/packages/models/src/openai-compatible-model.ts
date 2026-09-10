@@ -58,7 +58,8 @@ function nonempty(value: unknown): string {
     value.length === 0 ||
     value !== value.trim() ||
     value.includes("\0")
-  ) requestError();
+  )
+    requestError();
   return value;
 }
 
@@ -100,14 +101,20 @@ function generationOptions(options: JsonObject | undefined): Record<string, unkn
         if (
           typeof value !== "string" ||
           !["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value)
-        ) requestError();
+        )
+          requestError();
         result[key] = value;
         break;
       case "stop":
         if (
           typeof value !== "string" &&
-          !(Array.isArray(value) && value.length <= 4 && value.every((item) => typeof item === "string"))
-        ) requestError();
+          !(
+            Array.isArray(value) &&
+            value.length <= 4 &&
+            value.every((item) => typeof item === "string")
+          )
+        )
+          requestError();
         result[key] = value;
         break;
       default:
@@ -233,9 +240,15 @@ export function createOpenAICompatibleModelAdapter(
       : { contextWindowTokens: limit(options.features.contextWindowTokens, 1) }),
   });
   if (
-    [features.streaming, features.tools, features.vision, features.structuredOutput, includeStreamUsage]
-      .some((flag) => typeof flag !== "boolean")
-  ) requestError();
+    [
+      features.streaming,
+      features.tools,
+      features.vision,
+      features.structuredOutput,
+      includeStreamUsage,
+    ].some((flag) => typeof flag !== "boolean")
+  )
+    requestError();
   if (features.vision && resolveImage === undefined) requestError();
   const manifest: ModelAdapterManifest = immutable({
     id: nonempty(options.id),
@@ -259,10 +272,15 @@ export function createOpenAICompatibleModelAdapter(
     if (request.model !== undefined && request.model !== model) requestError();
     if (!Array.isArray(request.messages) || request.messages.length === 0) requestError();
     const body: Record<string, unknown> = {
-      ...generationOptions(request.options), model, stream, n: 1, store: false,
+      ...generationOptions(request.options),
+      model,
+      stream,
+      n: 1,
+      store: false,
     };
     if (request.maxOutputTokens !== undefined) {
-      if (!Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens < 1) requestError();
+      if (!Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens < 1)
+        requestError();
       body[tokenLimitField] = request.maxOutputTokens;
     }
     const offered = new Set<string>();
@@ -293,7 +311,8 @@ export function createOpenAICompatibleModelAdapter(
     let imageBytes = 0;
     for (const message of request.messages as readonly ModelMessage[]) {
       signal.throwIfAborted();
-      if (!["system", "developer", "user", "assistant", "tool"].includes(message.role)) requestError();
+      if (!["system", "developer", "user", "assistant", "tool"].includes(message.role))
+        requestError();
       if (!Array.isArray(message.parts)) requestError();
       const content: Record<string, unknown>[] = [];
       const calls: Record<string, unknown>[] = [];
@@ -304,7 +323,9 @@ export function createOpenAICompatibleModelAdapter(
           messages.push({
             role: "tool",
             tool_call_id: nonempty(part.callId),
-            content: JSON.stringify(part.isError ? { isError: true, value: part.value } : part.value),
+            content: JSON.stringify(
+              part.isError ? { isError: true, value: part.value } : part.value,
+            ),
           });
         }
         continue;
@@ -314,14 +335,24 @@ export function createOpenAICompatibleModelAdapter(
           if (typeof part.text !== "string") requestError();
           content.push({ type: "text", text: part.text });
         } else if (part.kind === "image") {
-          if (message.role !== "user" || !features.vision || resolveImage === undefined) requestError();
-          if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(part.mediaType)) requestError();
+          if (message.role !== "user" || !features.vision || resolveImage === undefined)
+            requestError();
+          if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(part.mediaType))
+            requestError();
           nonempty(part.artifactRef);
           const bytes = await abortable(resolveImage(immutable(part), signal), signal);
-          if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0 || bytes.byteLength > maxImageBytes) requestError();
+          if (
+            !(bytes instanceof Uint8Array) ||
+            bytes.byteLength === 0 ||
+            bytes.byteLength > maxImageBytes
+          )
+            requestError();
           imageBytes += 4 * Math.ceil(bytes.byteLength / 3);
           if (imageBytes > http.maxRequestBytes) requestError();
-          content.push({ type: "image_url", image_url: { url: encodeImage(bytes, part.mediaType) } });
+          content.push({
+            type: "image_url",
+            image_url: { url: encodeImage(bytes, part.mediaType) },
+          });
         } else if (part.kind === "tool-call") {
           if (message.role !== "assistant" || !features.tools) requestError();
           calls.push({
@@ -363,11 +394,13 @@ export function createOpenAICompatibleModelAdapter(
       if (message.role !== "assistant") throw new ModelTransportError("MODEL_RESPONSE_INVALID");
       const parts: ModelMessagePart[] = [];
       if (message.content != null) {
-        if (typeof message.content !== "string") throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+        if (typeof message.content !== "string")
+          throw new ModelTransportError("MODEL_RESPONSE_INVALID");
         parts.push({ kind: "text", text: message.content });
       }
       if (message.refusal != null) {
-        if (typeof message.refusal !== "string") throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+        if (typeof message.refusal !== "string")
+          throw new ModelTransportError("MODEL_RESPONSE_INVALID");
         parts.push({ kind: "text", text: message.refusal });
       }
       if (message.tool_calls !== undefined) {
@@ -379,11 +412,17 @@ export function createOpenAICompatibleModelAdapter(
           const item = record(raw);
           const fn = record(item.function);
           if (
-            item.type !== "function" || typeof item.id !== "string" ||
-            typeof fn.name !== "string" || typeof fn.arguments !== "string" || ids.has(item.id)
-          ) throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+            item.type !== "function" ||
+            typeof item.id !== "string" ||
+            typeof fn.name !== "string" ||
+            typeof fn.arguments !== "string" ||
+            ids.has(item.id)
+          )
+            throw new ModelTransportError("MODEL_RESPONSE_INVALID");
           ids.add(item.id);
-          parts.push(toolCall({ id: item.id, name: fn.name, arguments: fn.arguments }, prepared.offered));
+          parts.push(
+            toolCall({ id: item.id, name: fn.name, arguments: fn.arguments }, prepared.offered),
+          );
         }
       }
       return buildResult(
@@ -442,21 +481,27 @@ export function createOpenAICompatibleModelAdapter(
         }
         for (const field of ["content", "refusal"]) {
           if (delta[field] == null) continue;
-          if (typeof delta[field] !== "string") throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+          if (typeof delta[field] !== "string")
+            throw new ModelTransportError("MODEL_RESPONSE_INVALID");
           const value = delta[field];
           if (field === "refusal") refused = true;
           text.push(value);
           if (value !== "") yield { type: "text-delta", text: value };
         }
         if (delta.tool_calls !== undefined) {
-          if (!Array.isArray(delta.tool_calls)) throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+          if (!Array.isArray(delta.tool_calls))
+            throw new ModelTransportError("MODEL_RESPONSE_INVALID");
           for (const raw of delta.tool_calls) {
             const item = record(raw);
             const index = item.index;
             if (
-              typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || index >= 128 ||
+              typeof index !== "number" ||
+              !Number.isSafeInteger(index) ||
+              index < 0 ||
+              index >= 128 ||
               (item.type !== undefined && item.type !== "function")
-            ) throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+            )
+              throw new ModelTransportError("MODEL_RESPONSE_INVALID");
             const call = calls.get(index) ?? { id: "", name: "", arguments: "" };
             if (item.id !== undefined) {
               if (typeof item.id !== "string" || (call.id !== "" && call.id !== item.id)) {
@@ -468,7 +513,8 @@ export function createOpenAICompatibleModelAdapter(
               const fn = record(item.function);
               for (const field of ["name", "arguments"] as const) {
                 if (fn[field] !== undefined) {
-                  if (typeof fn[field] !== "string") throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+                  if (typeof fn[field] !== "string")
+                    throw new ModelTransportError("MODEL_RESPONSE_INVALID");
                   call[field] += fn[field];
                 }
               }
@@ -478,18 +524,24 @@ export function createOpenAICompatibleModelAdapter(
         }
         if (choice.finish_reason != null) finishReason = finish(choice.finish_reason);
       }
-      if (!done || finishReason === undefined) throw new ModelTransportError("MODEL_STREAM_TRUNCATED");
+      if (!done || finishReason === undefined)
+        throw new ModelTransportError("MODEL_STREAM_TRUNCATED");
       const parts: ModelMessagePart[] = [];
       if (text.length > 0) parts.push({ kind: "text", text: text.join("") });
       const ids = new Set<string>();
-      const completedCalls = [...calls].sort(([left], [right]) => left - right).map(([, call]) => {
-        if (ids.has(call.id)) throw new ModelTransportError("MODEL_RESPONSE_INVALID");
-        ids.add(call.id);
-        return toolCall(call, prepared.offered);
-      });
+      const completedCalls = [...calls]
+        .sort(([left], [right]) => left - right)
+        .map(([, call]) => {
+          if (ids.has(call.id)) throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+          ids.add(call.id);
+          return toolCall(call, prepared.offered);
+        });
       parts.push(...completedCalls);
       const result = buildResult(
-        parts, refused ? "content-filter" : finishReason, measuredUsage, providerRequestId,
+        parts,
+        refused ? "content-filter" : finishReason,
+        measuredUsage,
+        providerRequestId,
       );
       for (const call of completedCalls) {
         session.signal.throwIfAborted();
