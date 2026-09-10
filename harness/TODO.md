@@ -190,7 +190,7 @@ Goal: prove provider/tool neutrality through plugins, not core branches.
 - [x] 6.2 Define public `ToolAdapter`/tool manifest contract in the plugin API.
 - [x] 6.3 Add model/tool registries as plugin services.
 - [x] 6.4 Add scripted/mock model and tool adapters for deterministic tests.
-- [ ] 6.5 Implement the generic OpenAI-compatible model adapter as a first-party plugin.
+- [x] 6.5 Implement the generic OpenAI-compatible model adapter as a first-party plugin.
 - [ ] 6.6 Add provider-specific OpenAI adapter only where current OpenAI behavior requires it.
 - [ ] 6.7 Support custom base URL and credential references.
 - [ ] 6.8 Add model capability metadata: tools, vision, structured output, context, reasoning/options when supported.
@@ -207,6 +207,12 @@ Goal: prove provider/tool neutrality through plugins, not core branches.
 - [ ] 6.19 Add `git.status`, `git.diff`, and approval-gated `git.commit`.
 - [ ] 6.20 Record file changes for writes using path + before/after hashes.
 - [ ] 6.21 Detect/report Windows long-path limitations at runtime startup.
+
+**Transport scope:** 6.5 supplies host-pinned base URLs and scoped credential access, explicit
+feature metadata, bounded transient SSE, and reported token usage. These are transport-side
+pieces of 6.7/6.8/6.10/6.11, not completed daemon/broker integration. The real PluginHost and
+scheduler tests plus a loopback HTTP fixture do not claim a paid cloud or installed local-model
+run. See `PHASE-6.5.md`; retain the open integration items until their complete paths are proven.
 
 **Checkpoint:** the same compiled graph runs with mock, cloud/OpenAI-compatible, and local OpenAI-compatible model endpoints, while tool calls share the same capability/trace path.
 
@@ -328,9 +334,10 @@ microVM sandbox by default
 
 ## Next action
 
-**6.5 — Implement the generic OpenAI-compatible model adapter as a first-party plugin.**
+**6.6 — Add the provider-specific OpenAI boundary where the native protocol requires it.**
 
-5.17 and 6.1–6.4 are implemented together. Provider-neutral contracts, registration services,
-and scripted offline adapters are available; real HTTP transports, runtime adapter-node/broker
-wiring, provider selection/tracing, and native filesystem/shell tools remain Phase 6 work.
-Preserve current capability checks, secret-safe sinks, and the shared retry budget.
+6.5 provides the generic Chat Completions transport and first-party registration path. Preserve
+its bounded payloads, safe errors, host-owned configuration, cancellation, and one-attempt contract.
+Then finish the open 6.7–6.12 integration paths: runtime adapter-node/broker wiring, credential
+injection, provider selection/tracing, transient streams, final usage, and real endpoint proof.
+Native filesystem/shell/git tools remain later Phase 6 work.
