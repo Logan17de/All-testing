@@ -95,9 +95,12 @@ Explicit remaining work:
 ## Regression coverage
 
 `durable-scheduler-lifecycle.test.ts` covers restore invariants, interrupt admission, commit failure,
-revocation during asynchronous admission, cancellation, and pause behavior. The runtime integration
-tests use actual plugin registration/compiler lowering, persist a run, suspend, restart the daemon,
-and resume through the protected HTTP API. A separate child-process regression kills the waiting
-runtime and verifies a fresh process executes the privileged write exactly once. Duplicate resumes,
-concurrent wake hints, retry budgets, parallel failures, protected outputs, and injected SQLite
-completion failure are also covered. The original compiler identity vectors remain unchanged.
+revocation during asynchronous admission, cancellation, and pause behavior. Cancellation during an
+in-flight approval checkpoint preserves the original cancellation reason on both late success and
+late failure; it never publishes waiting over cancelled readiness or invokes a downstream effect.
+The runtime integration tests use actual plugin registration/compiler lowering, persist a run,
+suspend, restart the daemon, and resume through the protected HTTP API. A separate child-process
+regression kills the waiting runtime and verifies a fresh process executes the privileged write
+exactly once. Duplicate resumes, concurrent wake hints, retry budgets, parallel failures, protected
+outputs, and injected SQLite completion failure are also covered. The original compiler identity
+vectors remain unchanged.
