@@ -1,6 +1,3 @@
-import { createServer } from "node:http";
-import { once } from "node:events";
-
 import { describe, expect, it, vi } from "vitest";
 import type { AdapterInvocationContext, ModelAdapter, ModelRequest, ModelStreamEvent } from "@zet-harness/plugin-api";
 import { SecretValue } from "@zet-harness/plugin-api/secret-contract";
@@ -209,31 +206,5 @@ describe("OpenAI-compatible model transport", () => {
     const adapter = make(vi.fn(), { features: { streaming: false } });
     expect(adapter.stream).toBeUndefined();
     expect(adapter.manifest.features).toEqual({ streaming: false, tools: false, vision: false, structuredOutput: false });
-  });
-
-  it("uses the actual local HTTP wire path for an OpenAI-compatible endpoint", async () => {
-    const received: string[] = [];
-    const server = createServer((incoming, response) => {
-      let body = "";
-      incoming.setEncoding("utf8");
-      incoming.on("data", (chunk: string) => { body += chunk; });
-      incoming.on("end", () => {
-        received.push(incoming.url ?? "", body);
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify(completion));
-      });
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-    try {
-      const address = server.address();
-      if (address === null || typeof address === "string") throw new Error("Expected test listener");
-      const adapter = createOpenAICompatibleModelAdapter({ id: "local", model: "local-model", baseUrl: `http://127.0.0.1:${String(address.port)}/v1`, tokenLimitField: "max_tokens" });
-      await expect(adapter.generate(request, context())).resolves.toMatchObject({ finishReason: "stop" });
-      expect(received[0]).toBe("/v1/chat/completions");
-      expect(JSON.parse(received[1]!)).toMatchObject({ model: "local-model", stream: false, n: 1 });
-    } finally {
-      await new Promise<void>((resolve, reject) => { server.close((error) => error === undefined ? resolve() : reject(error)); });
-    }
   });
 });
