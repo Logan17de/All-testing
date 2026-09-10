@@ -50,6 +50,38 @@ describe("durable scheduler lifecycle", () => {
     expect(run.snapshot().readiness.ops[0]?.status).toBe("cancelled");
   });
 
+  it.each([false, true])(
+    "preserves cancellation during an in-flight approval commit (rejects=%s)",
+    async (rejectCommit) => {
+      const ir = gatePlan();
+      const scheduler = new SchedulerConcurrency(1);
+      const entered = deferred();
+      const release = deferred();
+      const executor = vi.fn();
+      const run = new PlainDagRun(ir, scheduler.createRun(ir), executor, {
+        durability: {
+          suspend: async () => {
+            entered.resolve();
+            await release.promise;
+            if (rejectCommit) throw new Error("late checkpoint failure");
+          },
+        },
+      });
+      const work = run.execute();
+      await entered.promise;
+      const reason = new Error("user cancelled while committing approval");
+      run.cancel(reason);
+      release.resolve();
+      await expect(work).rejects.toBe(reason);
+      expect(run.snapshot().readiness.ops.map((op) => op.status)).toEqual([
+        "cancelled",
+        "cancelled",
+      ]);
+      expect(run.snapshot().attempts).toEqual([0, 0]);
+      expect(executor).not.toHaveBeenCalled();
+    },
+  );
+
   it("requires a host handler instead of invoking interrupt plugin code", () => {
     const ir = gatePlan();
     const scheduler = new SchedulerConcurrency(1);

@@ -601,11 +601,15 @@ export class PlainDagRun {
             if (!this.suspendedForHuman) {
               this.assertInvocationCapabilities(op, operation);
               await this.#durability.suspend!({ op, operation });
-              this.readiness.waitReadyOp(op);
-              this.suspendedForHuman = true;
+              // Cancellation may have terminalized readiness while the host committed.
+              // A late success/failure must not replace the user's cancellation reason.
+              if (!this.signal.aborted) {
+                this.readiness.waitReadyOp(op);
+                this.suspendedForHuman = true;
+              }
             }
           } catch (error) {
-            this.recordFailure(error);
+            if (!this.signal.aborted) this.recordFailure(error);
           }
         }
         break;
