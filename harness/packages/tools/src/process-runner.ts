@@ -103,7 +103,7 @@ class BoundedOutput {
  * killed through `taskkill /T`. POSIX children are spawned detached so the
  * negative PID addresses the process group.
  */
-function terminateProcessTree(child: ChildProcess, force: boolean): void {
+export function terminateProcessTree(child: ChildProcess, force: boolean): void {
   const pid = child.pid;
   if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
 

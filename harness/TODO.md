@@ -305,6 +305,12 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 
 ## Phase 10 — MCP, custom-node SDK, trust tiers
 
+**MCP scope:** 10.3–10.5 add a dependency-free MCP stdio client and translate a server's tools
+into ordinary `ToolAdapter`s in the normal registry — there is no separate MCP execution engine.
+Each server gets its own `mcp:<id>` capability, and an unknown remote tool is classified
+conservatively as an external write with manual recovery. A server's `readOnlyHint` is a claim, not
+a guarantee, so it relaxes nothing unless a host explicitly opts in. See `PHASE-10-MCP.md`.
+
 **Third-party plugin scope:** 10.1, 10.2, 10.6, 10.7 and 10.8 make the harness externally
 extensible. A package is described by an inert `zet-plugin.json` that is read before any of its
 code is imported, integrity digests are verified before the entry module loads, a plugin may only
@@ -315,9 +321,9 @@ location by a test so a broken example fails CI. See `PHASE-10.md`. MCP (10.3–
 
 - [x] 10.1 Add plugin config and enable/disable list.
 - [x] 10.2 Add local folder/package plugin loading.
-- [ ] 10.3 Add MCP client/config/discovery.
-- [ ] 10.4 Translate MCP tool schemas into the normal tool/plugin registry rather than a separate tool engine.
-- [ ] 10.5 Apply normal capability, approval, and tracing rules to MCP tools.
+- [x] 10.3 Add MCP client/config/discovery.
+- [x] 10.4 Translate MCP tool schemas into the normal tool/plugin registry rather than a separate tool engine.
+- [x] 10.5 Apply normal capability, approval, and tracing rules to MCP tools.
 - [x] 10.6 Add custom-node SDK around the frozen public contracts.
 - [x] 10.7 Add plugin/package manifests with integrity, license, minimum harness version, node list, and requested capabilities.
 - [x] 10.8 Keep installation separate from capability granting.
