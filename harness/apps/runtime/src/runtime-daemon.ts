@@ -13,6 +13,7 @@ import {
   type SqliteMigration,
 } from "@zet-harness/db";
 import { DURABLE_APPROVALS_MIGRATION } from "@zet-harness/db/durable-approval-records";
+import { DURABLE_FILE_CHANGES_MIGRATION } from "@zet-harness/db/durable-file-change-records";
 
 import { RuntimeEventStream, type RuntimeStreamEvent } from "./runtime-event-stream.js";
 import { inspectRuntimeHealth } from "./runtime-health.js";
@@ -42,6 +43,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_EVENTS_MIGRATION,
   DURABLE_CHECKPOINTS_MIGRATION,
   DURABLE_APPROVALS_MIGRATION,
+  DURABLE_FILE_CHANGES_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 

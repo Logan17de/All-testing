@@ -202,11 +202,19 @@ Goal: prove provider/tool neutrality through plugins, not core branches.
 - [x] 6.14 Add project-root path resolution and traversal/symlink protection.
 - [x] 6.15 Implement Windows containment rules: junctions, case folding, short names, UNC/drive-relative paths.
 - [x] 6.16 Add controlled `fs.write`.
-- [ ] 6.17 Add safe read-only command allowlist and controlled `shell.run`.
-- [ ] 6.18 Add process-tree cancellation and output/time limits.
-- [ ] 6.19 Add `git.status`, `git.diff`, and approval-gated `git.commit`.
-- [ ] 6.20 Record file changes for writes using path + before/after hashes.
+- [x] 6.17 Add safe read-only command allowlist and controlled `shell.run`.
+- [x] 6.18 Add process-tree cancellation and output/time limits.
+- [x] 6.19 Add `git.status`, `git.diff`, and approval-gated `git.commit`.
+- [x] 6.20 Record file changes for writes using path + before/after hashes.
 - [x] 6.21 Detect/report Windows long-path limitations at runtime startup.
+
+**Process scope:** 6.17–6.20 add the bounded process runner, the declarative command
+allowlist, `shell.run`, the git tools and durable file-change records (migration 7). No shell is
+ever used: commands are spawned directly with an argument vector, and the allowlist is empty until
+a host configures one. `git.commit` exists only when the host supplies an approval callback wired
+to the durable human-approval boundary. See `PHASE-6.17-6.20.md`. Registering these tools into the
+daemon executor, and writing a `file_changes` row automatically from `fs.write`, remain open host
+wiring.
 
 **Filesystem scope:** 6.13–6.16 and 6.21 add the workspace path resolver, the first-party
 native filesystem plugin, and the startup path-limit probe. Windows containment rules are enforced
