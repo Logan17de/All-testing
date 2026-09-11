@@ -261,7 +261,6 @@ describe("RuntimeDaemon", () => {
           failures: [],
           configDefects: [],
           isolated: [],
-          isolated: [],
         },
       });
     } finally {

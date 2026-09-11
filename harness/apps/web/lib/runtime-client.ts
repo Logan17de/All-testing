@@ -43,6 +43,7 @@ export interface PluginReport {
     readonly message: string;
   }[];
   readonly configDefects: readonly string[];
+  readonly isolated: readonly string[];
 }
 
 export type RuntimeFetch<T> =

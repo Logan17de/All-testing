@@ -32,7 +32,13 @@ function CapabilityList({
   );
 }
 
-function PluginCard({ plugin }: { readonly plugin: PluginView }) {
+function PluginCard({
+  plugin,
+  isolated,
+}: {
+  readonly plugin: PluginView;
+  readonly isolated: boolean;
+}) {
   return (
     <article className="card">
       <header className="cardHead">
@@ -42,9 +48,23 @@ function PluginCard({ plugin }: { readonly plugin: PluginView }) {
             {plugin.id} · v{plugin.version} · {plugin.license}
           </p>
         </div>
-        <span className={`badge badge--${plugin.enabled ? "on" : "off"}`}>
-          {plugin.enabled ? "Enabled" : "Disabled"}
-        </span>
+        <div className="badges">
+          {plugin.enabled ? (
+            <span
+              className={`badge badge--${isolated ? "isolated" : "trusted"}`}
+              title={
+                isolated
+                  ? "Runs in its own sandboxed process; withheld capabilities are unavailable to it."
+                  : "Runs in the harness process with full Node privileges."
+              }
+            >
+              {isolated ? "Isolated" : "In-process"}
+            </span>
+          ) : null}
+          <span className={`badge badge--${plugin.enabled ? "on" : "off"}`}>
+            {plugin.enabled ? "Enabled" : "Disabled"}
+          </span>
+        </div>
       </header>
 
       {plugin.declaredNodes.length > 0 ? (
@@ -114,6 +134,14 @@ export default async function PluginsPage() {
             is granted there too — installing a plugin never authorizes it.
           </p>
 
+          <p className="muted">
+            An <strong>isolated</strong> plugin runs in its own sandboxed process, where the
+            capabilities you withheld are genuinely unavailable to it. An{" "}
+            <strong>in-process</strong> plugin runs with full Node privileges; grants still govern
+            the harness&apos;s own surfaces, but not what the plugin imports directly. Add{" "}
+            <code>&quot;isolated&quot;: true</code> for anything you have not read.
+          </p>
+
           {report.data.configDefects.length > 0 ? (
             <div className="panel panel--warn">
               <h2 className="panelTitle">Configuration problems</h2>
@@ -151,7 +179,11 @@ export default async function PluginsPage() {
           ) : (
             <div className="cards">
               {report.data.installed.map((plugin) => (
-                <PluginCard key={plugin.id} plugin={plugin} />
+                <PluginCard
+                  key={plugin.id}
+                  plugin={plugin}
+                  isolated={report.data.isolated.includes(plugin.id)}
+                />
               ))}
             </div>
           )}

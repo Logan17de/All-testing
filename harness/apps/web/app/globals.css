@@ -323,3 +323,24 @@ code {
   font-size: 0.88rem;
   color: #fbbf24;
 }
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Isolation is the safer tier, so it reads as reassurance rather than alarm;
+   in-process is informational, not an error. */
+.badge--isolated {
+  background: #07223a;
+  color: #7cc4fa;
+  border: 1px solid #14416b;
+}
+
+.badge--trusted {
+  background: #2a1f05;
+  color: #fbbf24;
+  border: 1px solid #4d3a0b;
+}
