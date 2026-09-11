@@ -198,15 +198,22 @@ Goal: prove provider/tool neutrality through plugins, not core branches.
 - [ ] 6.10 Add streamed model events without durably storing every token.
 - [ ] 6.11 Capture token/usage/cost metadata when exposed.
 - [ ] 6.12 Prove llama.cpp/Ollama through local HTTP/OpenAI-compatible configuration rather than embedding model runtimes.
-- [ ] 6.13 Add safe `fs.list` and `fs.read` through a first-party native-tools plugin.
-- [ ] 6.14 Add project-root path resolution and traversal/symlink protection.
-- [ ] 6.15 Implement Windows containment rules: junctions, case folding, short names, UNC/drive-relative paths.
-- [ ] 6.16 Add controlled `fs.write`.
+- [x] 6.13 Add safe `fs.list` and `fs.read` through a first-party native-tools plugin.
+- [x] 6.14 Add project-root path resolution and traversal/symlink protection.
+- [x] 6.15 Implement Windows containment rules: junctions, case folding, short names, UNC/drive-relative paths.
+- [x] 6.16 Add controlled `fs.write`.
 - [ ] 6.17 Add safe read-only command allowlist and controlled `shell.run`.
 - [ ] 6.18 Add process-tree cancellation and output/time limits.
 - [ ] 6.19 Add `git.status`, `git.diff`, and approval-gated `git.commit`.
 - [ ] 6.20 Record file changes for writes using path + before/after hashes.
-- [ ] 6.21 Detect/report Windows long-path limitations at runtime startup.
+- [x] 6.21 Detect/report Windows long-path limitations at runtime startup.
+
+**Filesystem scope:** 6.13–6.16 and 6.21 add the workspace path resolver, the first-party
+native filesystem plugin, and the startup path-limit probe. Windows containment rules are enforced
+on every platform so a graph authored on Linux cannot mean something different on Windows. The
+write tool is whole-file replacement only, which is what makes its declared idempotency honest,
+and it emits before/after hashes without yet persisting them. See `PHASE-6.13-6.21.md`; shell,
+git, process-tree cancellation and durable file-change records remain open.
 
 **Transport scope:** 6.5 supplies host-pinned base URLs and scoped credential access, explicit
 feature metadata, bounded transient SSE, and reported token usage. These are transport-side

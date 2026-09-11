@@ -78,3 +78,10 @@ export {
   type RuntimeNodeExecution,
   type RuntimeNodeExecutionResult,
 } from "./runtime-run-dispatcher.js";
+export {
+  LEGACY_WINDOWS_MAX_PATH,
+  probeRuntimePathLimits,
+  type PathLimitProbeOutcome,
+  type ProbeRuntimePathLimitsOptions,
+  type RuntimePathLimitReport,
+} from "./runtime-path-limits.js";

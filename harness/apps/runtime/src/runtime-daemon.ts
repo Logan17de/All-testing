@@ -31,6 +31,7 @@ import {
   type RuntimeExecutionOptions,
   type RuntimeDispatchReport,
 } from "./runtime-run-dispatcher.js";
+import { probeRuntimePathLimits, type RuntimePathLimitReport } from "./runtime-path-limits.js";
 import { RuntimeRedactionRegistry } from "./runtime-redaction.js";
 
 export const DEFAULT_RUNTIME_DATABASE_PATH = resolve("data", "zet-harness.sqlite");
@@ -51,11 +52,22 @@ export interface RuntimeDaemonOptions {
   readonly permissionAuthority?: RuntimeApprovalAuthority;
   readonly redaction?: RuntimeRedactionRegistry;
   readonly execution?: RuntimeExecutionOptions;
+  /**
+   * Probe host path limits during startup. Defaults to true.
+   *
+   * The probe is advisory and never fails startup; a host that runs many short
+   * lived daemons can disable it rather than repeating the same measurement.
+   */
+  readonly probePathLimits?: boolean;
+  /** Injection point for tests; the default probe writes under the temp directory. */
+  readonly pathLimitProbe?: () => Promise<RuntimePathLimitReport>;
 }
 export interface RuntimeDaemonSnapshot {
   readonly state: RuntimeDaemonState;
   readonly api: RuntimeHttpServerSnapshot;
   readonly database: SqliteDatabaseSnapshot;
+  /** Populated once startup has probed the host; undefined when disabled. */
+  readonly pathLimits: RuntimePathLimitReport | undefined;
 }
 
 /** Owns transport, journal, human waits and redaction; a wait never retains a live task. */
@@ -71,6 +83,8 @@ export class RuntimeDaemon {
   private readonly stoppedPromise: Promise<void>;
   private readonly resolveStopped: () => void;
   private stopPromise: Promise<boolean> | undefined;
+  private readonly pathLimitProbe: (() => Promise<RuntimePathLimitReport>) | undefined;
+  private pathLimits: RuntimePathLimitReport | undefined;
 
   constructor(options: RuntimeDaemonOptions = {}) {
     this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
@@ -106,6 +120,10 @@ export class RuntimeDaemon {
         }),
       { approvals: this.approvals, redaction: this.redaction },
     );
+    this.pathLimitProbe =
+      options.probePathLimits === false
+        ? undefined
+        : (options.pathLimitProbe ?? (() => probeRuntimePathLimits()));
     let resolveStopped!: () => void;
     this.stoppedPromise = new Promise<void>((resolve) => {
       resolveStopped = resolve;
@@ -118,6 +136,7 @@ export class RuntimeDaemon {
       state: this.state,
       api: this.httpServer.snapshot(),
       database: this.database.snapshot(),
+      pathLimits: this.pathLimits,
     });
   }
 
@@ -161,6 +180,12 @@ export class RuntimeDaemon {
     this.database.open();
     try {
       runSqliteMigrations(this.database.connection(), this.migrations);
+      // Measure host path limits before anything can write a project file, so a
+      // Windows MAX_PATH limitation is reported rather than discovered later as
+      // an unexplained tool failure. The probe is advisory: it never throws.
+      if (this.pathLimitProbe !== undefined) {
+        this.pathLimits = await this.pathLimitProbe();
+      }
       await this.httpServer.start();
     } catch (error) {
       this.database.close();

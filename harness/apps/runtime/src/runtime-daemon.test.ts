@@ -22,6 +22,9 @@ const createDaemon = (migrations?: readonly SqliteMigration[]): RuntimeDaemon =>
   new RuntimeDaemon({
     api: { port: 0 },
     database: { path: SQLITE_MEMORY_PATH },
+    // Lifecycle assertions compare the whole snapshot, so the advisory
+    // path-limit probe stays off here and is exercised by its own tests.
+    probePathLimits: false,
     ...(migrations === undefined ? {} : { migrations }),
   });
 
@@ -221,6 +224,7 @@ describe("RuntimeDaemon", () => {
     const daemon = new RuntimeDaemon({
       api: { port: address.port },
       database: { path: SQLITE_MEMORY_PATH },
+      probePathLimits: false,
     });
 
     try {
@@ -289,5 +293,73 @@ describe("RuntimeDaemon", () => {
     expect(daemon.snapshot().state).toBe("stopped");
     expect(daemon.snapshot().database.state).toBe("closed");
     await expect(daemon.start()).rejects.toThrow(TypeError);
+  });
+});
+
+describe("RuntimeDaemon path-limit reporting", () => {
+  const stubReport = Object.freeze({
+    platform: "win32",
+    longPathsUsableByRuntime: false,
+    probe: "unsupported" as const,
+    recommendedExternalPathLimit: 260,
+    warnings: Object.freeze(["Windows long paths are unavailable."]),
+  });
+
+  it("reports no path limits before startup", () => {
+    const daemon = new RuntimeDaemon({
+      api: { port: 0 },
+      database: { path: SQLITE_MEMORY_PATH },
+      pathLimitProbe: () => Promise.resolve(stubReport),
+    });
+    expect(daemon.snapshot().pathLimits).toBeUndefined();
+  });
+
+  it("publishes the probe result in the snapshot after startup", async () => {
+    const daemon = new RuntimeDaemon({
+      api: { port: 0 },
+      database: { path: SQLITE_MEMORY_PATH },
+      pathLimitProbe: () => Promise.resolve(stubReport),
+    });
+    await daemon.start();
+    try {
+      expect(daemon.snapshot().pathLimits).toEqual(stubReport);
+    } finally {
+      await daemon.stop();
+    }
+  });
+
+  it("skips the probe when it is disabled", async () => {
+    let probed = false;
+    const daemon = new RuntimeDaemon({
+      api: { port: 0 },
+      database: { path: SQLITE_MEMORY_PATH },
+      probePathLimits: false,
+      pathLimitProbe: () => {
+        probed = true;
+        return Promise.resolve(stubReport);
+      },
+    });
+    await daemon.start();
+    try {
+      expect(probed).toBe(false);
+      expect(daemon.snapshot().pathLimits).toBeUndefined();
+    } finally {
+      await daemon.stop();
+    }
+  });
+
+  it("runs the real probe by default and reports this host", async () => {
+    const daemon = new RuntimeDaemon({
+      api: { port: 0 },
+      database: { path: SQLITE_MEMORY_PATH },
+    });
+    await daemon.start();
+    try {
+      const limits = daemon.snapshot().pathLimits;
+      expect(limits?.platform).toBe(process.platform);
+      expect(limits?.recommendedExternalPathLimit).toBeGreaterThan(0);
+    } finally {
+      await daemon.stop();
+    }
   });
 });
