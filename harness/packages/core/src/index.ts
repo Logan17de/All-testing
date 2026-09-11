@@ -27,3 +27,23 @@ export {
   type AdapterPluginPin,
   type AdapterResolution,
 } from "./adapter-catalog.js";
+export {
+  MODEL_ROUTING_DECISION_EVENT_TYPE,
+  MODEL_ROUTING_DECISION_SCHEMA_VERSION,
+  routeModel,
+  type ModelCandidateEvaluation,
+  type ModelRejectionReason,
+  type ModelRequirements,
+  type ModelRoutingDecision,
+  type ModelRoutingOutcome,
+  type RouteModelOptions,
+} from "./model-router.js";
+export {
+  ModelStreamError,
+  accumulateUsage,
+  consumeModelStream,
+  type ConsumedModelStream,
+  type ModelStreamObserver,
+  type ModelStreamStatistics,
+  type UsageTotals,
+} from "./model-stream-sink.js";
