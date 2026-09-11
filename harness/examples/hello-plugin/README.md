@@ -106,6 +106,13 @@ generates the manifest's `nodes` array from your definitions, so the two cannot 
 The SDK is built only on the public plugin contracts. It gives you nothing a hand-written plugin
 could not do, which is the point: there is no privileged authoring path.
 
+## A note on trust
+
+By default a plugin runs in the harness process with full Node privileges, which is fine for
+plugins you wrote. For anything else, set `"isolated": true` in the plugin configuration: the
+plugin then runs in its own sandboxed process where the capabilities it was not granted are
+genuinely unavailable, even to code that imports `node:fs` directly.
+
 ## What a plugin cannot do
 
 - **Grant itself a capability.** Declarations are demand; the host's policy is the only authority.

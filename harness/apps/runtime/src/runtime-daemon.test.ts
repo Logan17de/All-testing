@@ -58,6 +58,7 @@ describe("RuntimeDaemon", () => {
         activated: [],
         failures: [],
         configDefects: [],
+        isolated: [],
       },
     });
 
@@ -223,6 +224,7 @@ describe("RuntimeDaemon", () => {
         activated: [],
         failures: [],
         configDefects: [],
+        isolated: [],
       },
     });
 
@@ -258,6 +260,8 @@ describe("RuntimeDaemon", () => {
           activated: [],
           failures: [],
           configDefects: [],
+          isolated: [],
+          isolated: [],
         },
       });
     } finally {
@@ -298,6 +302,7 @@ describe("RuntimeDaemon", () => {
         activated: [],
         failures: [],
         configDefects: [],
+        isolated: [],
       },
     });
     await expect(daemon.start()).rejects.toThrow(

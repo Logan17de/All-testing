@@ -108,6 +108,7 @@ export class RuntimeDaemon {
   private readonly pluginOptions: RuntimePluginOptions | undefined;
   private pluginHost: PluginHost | undefined;
   private pluginReport: RuntimePluginReport;
+  private pluginSandboxes: readonly { readonly close: () => Promise<void> }[] = [];
 
   constructor(options: RuntimeDaemonOptions = {}) {
     this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
@@ -222,6 +223,7 @@ export class RuntimeDaemon {
         const loaded = await loadRuntimePlugins(this.pluginOptions);
         this.pluginHost = loaded.host;
         this.pluginReport = loaded.report;
+        this.pluginSandboxes = loaded.sandboxes;
       }
       await this.httpServer.start();
     } catch (error) {
@@ -261,7 +263,12 @@ export class RuntimeDaemon {
 
   private async stopOnce(): Promise<boolean> {
     const draining = this.dispatcher?.stop();
-    const pluginCleanup = this.pluginHost?.dispose().catch(() => undefined);
+    const pluginCleanup = Promise.all([
+      this.pluginHost?.dispose().catch(() => undefined),
+      // A sandboxed plugin is its own process; leaving it running would
+      // outlive the runtime that started it.
+      ...this.pluginSandboxes.map((sandbox) => sandbox.close().catch(() => undefined)),
+    ]);
     try {
       await this.httpServer.stop();
     } finally {

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
+import type { JsonObject, JsonValue } from "@zet-harness/plugin-api";
 import {
   PluginHost,
   findPluginConfig,
@@ -14,6 +15,8 @@ import {
   discoverPluginPackages,
   enforceDeclaredNodes,
   loadPluginPackage,
+  startIsolatedPlugin,
+  type IsolatedPlugin,
   type PluginInstallationView,
   type PluginLoadFailure,
 } from "@zet-harness/plugin-loader";
@@ -30,6 +33,8 @@ export interface RuntimePluginOptions {
   readonly requireIntegrity?: boolean;
   /** Reported to packages that declare `minHarnessVersion`. */
   readonly harnessVersion?: string;
+  /** Project root an isolated plugin may reach when granted filesystem access. */
+  readonly workspaceRoot?: string;
 }
 
 export interface RuntimePluginReport {
@@ -42,12 +47,29 @@ export interface RuntimePluginReport {
   readonly failures: readonly PluginLoadFailure[];
   /** Problems in the configuration document itself. */
   readonly configDefects: readonly string[];
+  /** Ids of plugins running in their own sandboxed process. */
+  readonly isolated: readonly string[];
 }
 
 interface LoadedPluginState {
   readonly host: PluginHost;
   readonly report: RuntimePluginReport;
   readonly policies: ReadonlyMap<string, CapabilityPermissionPolicy>;
+  /** Sandboxed children, which the caller must close on shutdown. */
+  readonly sandboxes: readonly IsolatedPlugin[];
+}
+
+/**
+ * Narrow plugin config to a plain object.
+ *
+ * The sandbox passes config to the child as JSON, and only an object shape is
+ * meaningful there. A scalar or array is dropped rather than coerced.
+ */
+function objectConfig(value: JsonValue | undefined): JsonObject | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  // `Array.isArray` does not narrow a readonly array out of the union, so the
+  // assertion states what the guard above already established.
+  return value as JsonObject;
 }
 
 async function readConfigDocument(path: string): Promise<{
@@ -111,6 +133,8 @@ export async function loadRuntimePlugins(
   const activated: string[] = [];
   const failures: PluginLoadFailure[] = [...discovery.failures];
   const policies = new Map<string, CapabilityPermissionPolicy>();
+  const sandboxes: IsolatedPlugin[] = [];
+  const isolated: string[] = [];
 
   for (const discovered of discovery.packages) {
     const entry: ResolvedPluginConfig | undefined = findPluginConfig(
@@ -135,11 +159,28 @@ export async function loadRuntimePlugins(
       // The policy comes from host configuration alone. The plugin's declared
       // capabilities are demand and contribute nothing to what it receives.
       policies.set(discovered.manifest.id, pluginCapabilityPolicy(entry));
-      await host.activate(
-        enforceDeclaredNodes(loaded),
-        entry.config === undefined ? undefined : entry.config,
-      );
-      activated.push(discovered.manifest.id);
+
+      if (entry.isolated) {
+        // The plugin's own code never runs in this process. Its grants become
+        // Node permission-model flags on the child, so a capability the host
+        // withheld is unavailable even to code that imports node:fs directly.
+        const sandbox = await startIsolatedPlugin(loaded, discovered.directory, {
+          grantedCapabilities: entry.grantedCapabilities,
+          ...(options.workspaceRoot === undefined ? {} : { workspaceRoot: options.workspaceRoot }),
+          ...(objectConfig(entry.config) === undefined
+            ? {}
+            : { config: objectConfig(entry.config) as JsonObject }),
+        });
+        sandboxes.push(sandbox);
+        isolated.push(discovered.manifest.id);
+        activated.push(discovered.manifest.id);
+      } else {
+        await host.activate(
+          enforceDeclaredNodes(loaded),
+          entry.config === undefined ? undefined : entry.config,
+        );
+        activated.push(discovered.manifest.id);
+      }
     } catch (error: unknown) {
       policies.delete(discovered.manifest.id);
       failures.push(
@@ -155,12 +196,14 @@ export async function loadRuntimePlugins(
   return {
     host,
     policies,
+    sandboxes: Object.freeze(sandboxes),
     report: Object.freeze({
       directory,
       installed: Object.freeze(installed),
       activated: Object.freeze(activated),
       failures: Object.freeze(failures),
       configDefects: Object.freeze(configDefects),
+      isolated: Object.freeze(isolated),
     }),
   };
 }
@@ -173,5 +216,6 @@ export function emptyPluginReport(directory: string): RuntimePluginReport {
     activated: Object.freeze([]),
     failures: Object.freeze([]),
     configDefects: Object.freeze([]),
+    isolated: Object.freeze([]),
   });
 }

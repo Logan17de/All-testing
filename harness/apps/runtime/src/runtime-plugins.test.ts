@@ -352,3 +352,93 @@ describe("plugins HTTP endpoint", () => {
     }
   });
 });
+
+describe("isolated plugins", () => {
+  it("runs in-process unless the configuration asks for isolation", async () => {
+    await installPackage("demo");
+    await writeConfig({ plugins: [{ id: "com.example.demo", enabled: true }] });
+    const loaded = await loadRuntimePlugins({ directory: pluginsDirectory });
+    try {
+      expect(loaded.report.isolated).toEqual([]);
+      expect(loaded.sandboxes).toEqual([]);
+      expect(loaded.host.nodes.has("demo.echo", "1")).toBe(true);
+    } finally {
+      await loaded.host.dispose();
+    }
+  });
+
+  it("starts a sandboxed child when isolation is requested", async () => {
+    await installPackage("demo");
+    await writeConfig({
+      plugins: [{ id: "com.example.demo", enabled: true, isolated: true }],
+    });
+    const loaded = await loadRuntimePlugins({
+      directory: pluginsDirectory,
+      workspaceRoot: pluginsDirectory,
+    });
+    try {
+      expect(loaded.report.isolated).toEqual(["com.example.demo"]);
+      expect(loaded.report.activated).toEqual(["com.example.demo"]);
+      expect(loaded.sandboxes).toHaveLength(1);
+      // The plugin's code runs in the child, so it registers nothing here.
+      expect(loaded.host.nodes.has("demo.echo", "1")).toBe(false);
+    } finally {
+      for (const sandbox of loaded.sandboxes) await sandbox.close();
+      await loaded.host.dispose();
+    }
+  }, 40_000);
+
+  it("exposes the sandboxed plugin's node through the proxy", async () => {
+    await installPackage("demo");
+    await writeConfig({
+      plugins: [{ id: "com.example.demo", enabled: true, isolated: true }],
+    });
+    const loaded = await loadRuntimePlugins({ directory: pluginsDirectory });
+    try {
+      const sandbox = loaded.sandboxes[0];
+      expect(sandbox?.nodes.map((node) => node.manifest.type)).toEqual(["demo.echo"]);
+    } finally {
+      for (const sandbox of loaded.sandboxes) await sandbox.close();
+      await loaded.host.dispose();
+    }
+  }, 40_000);
+
+  it("sandboxes with no filesystem grant by default", async () => {
+    await installPackage("demo");
+    await writeConfig({
+      plugins: [{ id: "com.example.demo", enabled: true, isolated: true }],
+    });
+    const loaded = await loadRuntimePlugins({
+      directory: pluginsDirectory,
+      workspaceRoot: pluginsDirectory,
+    });
+    try {
+      const flags = loaded.sandboxes[0]?.sandboxFlags ?? [];
+      expect(flags).toContain("--permission");
+      expect(flags.some((flag) => flag.startsWith("--allow-fs-write="))).toBe(false);
+    } finally {
+      for (const sandbox of loaded.sandboxes) await sandbox.close();
+      await loaded.host.dispose();
+    }
+  }, 40_000);
+
+  it("stops sandboxed plugins when the daemon stops", async () => {
+    await installPackage("demo");
+    await writeConfig({
+      plugins: [{ id: "com.example.demo", enabled: true, isolated: true }],
+    });
+
+    const daemon = new RuntimeDaemon({
+      api: { port: 0 },
+      database: { path: SQLITE_MEMORY_PATH },
+      probePathLimits: false,
+      plugins: { directory: pluginsDirectory },
+    });
+
+    await daemon.start();
+    expect(daemon.snapshot().plugins.isolated).toEqual(["com.example.demo"]);
+    await daemon.stop();
+    // A sandbox is its own process; shutdown must not leave it running.
+    expect(daemon.snapshot().state).toBe("stopped");
+  }, 40_000);
+});

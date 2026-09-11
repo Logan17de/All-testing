@@ -23,6 +23,47 @@ npm run dev --workspace @zet-harness/web
 
 Set `HARNESS_RUNTIME_URL` if the daemon listens somewhere other than the default.
 
+## Before you enable a plugin
+
+A plugin runs in one of two tiers, and you choose which per plugin.
+
+### Isolated (recommended for anything you did not write)
+
+Set `"isolated": true` in your plugin configuration. The plugin then runs in its own child process
+started under Node's permission model, and the capabilities you granted become the only
+operating-system surfaces it has.
+
+This is a real boundary, not a convention. A plugin that imports `node:fs` directly and calls
+`writeFileSync` still fails with `ERR_ACCESS_DENIED` unless you granted `fs:write`, and a plugin
+granted `fs:write` can still only reach the workspace root — not the rest of your disk. Both are
+covered by tests.
+
+| Grant | What the sandbox permits |
+|---|---|
+| *(none)* | Read its own package directory, and nothing else |
+| `fs:read` | Read the workspace root |
+| `fs:write` | Read and write the workspace root |
+| `process:exec` | Start child processes |
+
+The sandbox also receives a minimal environment, so an isolated plugin cannot read your API keys
+out of `process.env`.
+
+**One real limit:** Node's permission model does not cover network access. An isolated plugin can
+still open sockets. Network capabilities are enforced at the harness's own brokered surfaces only.
+
+### In-process (trusted)
+
+The default. The plugin runs inside the harness with full Node privileges, which is cheap and fine
+for plugins you wrote or have read. Capability grants still govern the harness's brokered
+surfaces, but they do not confine the plugin's own imports.
+
+Treat enabling an in-process plugin exactly as you would treat running any program someone sent
+you. Prefer signed packages, and set `requireIntegrity` so unsigned ones are refused.
+
+Whichever tier you choose, these are always enforced: a plugin cannot register a node it did not
+declare, cannot load if its files were tampered with, cannot ship an identity different from the
+one you reviewed, and cannot start at all unless you enable it.
+
 ## Installing a plugin
 
 A plugin is a directory containing a `zet-plugin.json` manifest and an entry module. Copy it into
@@ -34,6 +75,7 @@ the harness plugins directory, then enable it in `plugins.json` in that same dir
     {
       "id": "com.example.hello",
       "enabled": true,
+      "isolated": true,
       "grantedCapabilities": [],
       "config": {}
     }

@@ -14,7 +14,8 @@
     "@zet-harness/db": "0.0.0",
     "@zet-harness/scheduler": "0.0.0",
     "@zet-harness/plugin-loader": "0.0.0",
-    "@zet-harness/core": "0.0.0"
+    "@zet-harness/core": "0.0.0",
+    "@zet-harness/plugin-api": "0.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

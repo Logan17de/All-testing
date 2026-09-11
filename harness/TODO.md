@@ -305,6 +305,13 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 
 ## Phase 10 — MCP, custom-node SDK, trust tiers
 
+**Trust tiers:** 10.9 adds a process-isolated tier alongside the trusted in-process one, chosen
+per plugin with `"isolated": true`. Grants become Node permission-model flags on the child, so a
+plugin that imports `node:fs` directly still cannot write without `fs:write`, and a plugin granted
+`fs:write` still cannot leave the workspace root. Node's permission model does not cover network
+access, so that remains enforced only at the harness's brokered surfaces. The WASI tier (10.10)
+stays open. See `PHASE-10-ISOLATION.md`.
+
 **MCP scope:** 10.3–10.5 add a dependency-free MCP stdio client and translate a server's tools
 into ordinary `ToolAdapter`s in the normal registry — there is no separate MCP execution engine.
 Each server gets its own `mcp:<id>` capability, and an unknown remote tool is classified
@@ -327,7 +334,7 @@ location by a test so a broken example fails CI. See `PHASE-10.md`. MCP (10.3–
 - [x] 10.6 Add custom-node SDK around the frozen public contracts.
 - [x] 10.7 Add plugin/package manifests with integrity, license, minimum harness version, node list, and requested capabilities.
 - [x] 10.8 Keep installation separate from capability granting.
-- [ ] 10.9 Add execution trust tiers: trusted in-process, process-isolated, optional WASI for untrusted portable compute.
+- [x] 10.9 Add execution trust tiers: trusted in-process, process-isolated, optional WASI for untrusted portable compute.
 - [ ] 10.10 Add WASI sandbox only after the capability broker is mature.
 - [ ] 10.11 Add npm/Git plugin installation only after local loading is solid.
 

@@ -16,6 +16,14 @@ export interface PluginConfigEntry {
   readonly enabled?: boolean;
   readonly grantedCapabilities?: readonly CapabilityId[];
   readonly deniedCapabilities?: readonly CapabilityId[];
+  /**
+   * Run this plugin in an isolated child process.
+   *
+   * Defaults to false, because isolation costs a process per plugin and the
+   * first-party plugins a host ships are already trusted. Turn it on for any
+   * plugin you have not read.
+   */
+  readonly isolated?: boolean;
   /** Opaque plugin configuration data. Never interpreted as permission. */
   readonly config?: JsonValue;
 }
@@ -43,6 +51,7 @@ export interface ResolvedPluginConfig {
   readonly enabled: boolean;
   readonly grantedCapabilities: readonly CapabilityId[];
   readonly deniedCapabilities: readonly CapabilityId[];
+  readonly isolated: boolean;
   readonly config: JsonValue | undefined;
 }
 
@@ -162,6 +171,7 @@ export function validatePluginConfig(document: unknown): PluginConfigValidation 
           "plugins[].deniedCapabilities",
           defects,
         ),
+        isolated: raw["isolated"] === true,
         config: (raw["config"] ?? undefined) as JsonValue | undefined,
       }),
     );

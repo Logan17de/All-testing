@@ -14,3 +14,13 @@ export {
   type PluginLoadFailure,
   type PluginLoadFailureCode,
 } from "./plugin-loader.js";
+export {
+  PluginIsolationError,
+  deriveSandboxFlags,
+  isPluginIsolationError,
+  startIsolatedPlugin,
+  type IsolatedPlugin,
+  type IsolatedPluginOptions,
+  type IsolationFailureCode,
+  type SandboxGrantInput,
+} from "./isolated-plugin.js";
