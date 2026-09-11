@@ -37,6 +37,7 @@ After a successful full run, try 0.75 MP. Only move back toward 0.90 MP after pr
 - `../MiniMax_H3_ComfyUI_Colab.ipynb` — main Colab notebook
 - `install_comfy_h3.sh` — installs/updates ComfyUI and the latest H3 Extender
 - `download_models.py` — downloads GPU-specific H3 model profiles
+- `download_ltx_models.py` — installs LTX-2.5 models plus the official ComfyUI T2V/I2V/FLF2V workflows into the **same** `/content/ComfyUI`
 - `prepare_workflow.py` — creates the optimized Full Batch workflow plus a safe Clip-by-Clip fallback
 - `launch_comfy.sh` — starts ComfyUI with memory-safe defaults and exposes it through Pinggy
 
@@ -52,9 +53,78 @@ loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors
 
 The weights are downloaded at runtime and are **not committed to Git**.
 
+## LTX-2.5 text-to-video in the same Colab ComfyUI
+
+LTX-2.5 is natively supported by current ComfyUI, so **do not install a second ComfyUI**. The existing setup cell already updates `/content/ComfyUI` from the current ComfyUI repository.
+
+Before downloading LTX-2.5:
+
+1. Open `https://huggingface.co/Lightricks/LTX-2.5` once and click **Agree and Access**.
+2. Add a Colab secret named `HF_TOKEN` containing a Hugging Face read token.
+3. Run the normal H3 notebook through its ComfyUI install/update step.
+4. Run the following extra cell before launching ComfyUI:
+
+```python
+import os, subprocess, sys
+from google.colab import userdata
+
+try:
+    token = userdata.get('HF_TOKEN')
+    if token:
+        os.environ['HF_TOKEN'] = token
+except Exception:
+    pass
+
+MODEL_ROOT = f'{DRIVE_ROOT}/models' if PERSIST_MODELS_TO_DRIVE else '/content/ComfyUI/models'
+cmd = [
+    sys.executable,
+    '/content/minimax_h3_comfy/download_ltx_models.py',
+    '--comfy-root', '/content/ComfyUI',
+    '--model-root', MODEL_ROOT,
+]
+
+# Optional: also install the much larger LTX-2.3 T2V set.
+INSTALL_LTX23 = False
+if INSTALL_LTX23:
+    cmd.append('--install-ltx23')
+
+subprocess.run(cmd, check=True)
+```
+
+### LTX-2.5 files installed by default
+
+```text
+models/
+├── diffusion_models/
+│   └── ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+├── text_encoders/
+│   ├── gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+│   └── gemma4_e2b_it_int8_convrot.safetensors
+├── vae/
+│   ├── ltx-2.5-video-vae-bf16.safetensors
+│   └── ltx-2.5-audio-vae-bf16.safetensors
+├── latent_upscale_models/
+│   └── ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors
+└── model_patches/
+    └── ltx-2.5-duration-head-bf16.safetensors
+```
+
+The INT8 ConvRot transformer/text encoder are the official ComfyUI-oriented lower-memory variants. The prompt-enhancer Gemma file is included so the official template can use `prompt_enhance` without another download.
+
+### LTX workflows installed automatically
+
+The installer downloads the current official Comfy-Org templates into `/content/ComfyUI/user/default/workflows/`:
+
+- `LTX_2.5_T2V.json` — text → synchronized video/audio
+- `LTX_2.5_I2V.json` — first image + prompt → synchronized video/audio
+- `LTX_2.5_FLF2V.json` — first frame + last frame + prompt → connected video/audio
+- `LTX_2.3_T2V.json` — only when `--install-ltx23` is enabled
+
+For the YouTube pipeline, start with **LTX_2.5_T2V** for generated B-roll and **LTX_2.5_I2V** when animating a generated still. Use **FLF2V** when you already know both the beginning and ending composition.
+
 ## Colab defaults
 
-Model weights stay on the Colab VM by default because loading large H3 weights through Google Drive/FUSE is much slower. Output, user state and Extender caches remain Drive-backed so completed work survives runtime resets.
+Model weights stay on the Colab VM by default because loading large video-model weights through Google Drive/FUSE is much slower. Output, user state and Extender caches remain Drive-backed so completed work survives runtime resets.
 
 ```text
 MyDrive/MiniMax_H3_ComfyUI/
@@ -68,6 +138,9 @@ Set `PERSIST_MODELS_TO_DRIVE = True` only when avoiding model downloads matters 
 
 - `MiniMax_H3_G4_Optimized_FullBatch.json` — first choice
 - `MiniMax_H3_G4_Optimized_Safe_ClipByClip.json` — OOM fallback
+- `LTX_2.5_T2V.json` — official LTX-2.5 text-to-video
+- `LTX_2.5_I2V.json` — official LTX-2.5 image-to-video
+- `LTX_2.5_FLF2V.json` — official LTX-2.5 first/last-frame-to-video
 
 For Full Batch, keep 10-second clips at 0.60 MP for the first test. If an exact project still OOMs, use the Clip-by-Clip workflow without changing prompts or references.
 
