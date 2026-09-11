@@ -335,7 +335,14 @@ location by a test so a broken example fails CI. See `PHASE-10.md`. MCP (10.3–
 
 ## Phase 11 — Packaging and optional scale-out
 
-- [ ] 11.1 Add Windows-friendly install/start flow.
+**Start flow:** 11.1 adds `npm start`, which runs the runtime daemon and the web UI together. It is
+dependency-free on purpose — a "start the app" script that needs its own install step is a worse
+first experience — and spawns npm's JavaScript entry through the current Node binary, because
+`npm.cmd` cannot be spawned on Windows without a shell. If either half exits, the other is stopped
+rather than leaving a half-started system that looks healthy.
+
+
+- [x] 11.1 Add Windows-friendly install/start flow.
 - [ ] 11.2 Add config wizard.
 - [ ] 11.3 Add backup/export/import UI/CLI.
 - [ ] 11.4 Add optional desktop shell only if it improves distribution.

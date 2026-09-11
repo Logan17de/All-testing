@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",
+    "start": "node scripts/start-harness.mjs",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit -p tsconfig.json && tsc --noEmit -p scripts/tsconfig.json",
     "test": "npm run build --workspace @zet-harness/runtime && vitest run --passWithNoTests",

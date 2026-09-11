@@ -1,384 +1,151 @@
-# Zet Harness — Plugin Architecture
+# Writing and installing plugins
 
-Zet Harness should have a **small kernel and a wide plugin door**.
+Zet Harness is extensible by design. Everything it can do beyond its core — nodes, tools, model
+adapters — arrives as a plugin, and the authoring surface an outside developer gets is exactly the
+one first-party plugins use. There is no privileged path.
 
-The design principle is inspired by plugin-first harnesses such as DeepSeek Harness, but Zet Harness will use a much smaller native TypeScript plugin kernel rather than adopting a large composition framework.
+## Running the harness
 
-The key rule:
+From `harness/`:
 
-> Built-in capabilities and third-party capabilities should use the same public registration APIs whenever practical.
-
-That prevents the core from becoming a collection of hard-coded special cases and lets us replace or extend models, tools, memory, UI, auth, and workflows without rewriting the runtime.
-
-## 1. What the kernel owns
-
-The non-replaceable kernel should stay tiny:
-
-```text
-plugin lifecycle
-service registry
-plugin API compatibility check
-event dispatch
-configuration loading
-registration/disposal tracking
-core security boundaries
+```sh
+npm ci
+npm start
 ```
 
-The kernel should **not** contain provider-specific logic or integration-specific behavior.
+That starts the runtime daemon and the web UI together. The UI is at `http://localhost:3000`; the
+daemon listens on `http://127.0.0.1:3211`. To run them separately:
 
-## 2. What plugins may contribute
-
-A plugin can eventually contribute one or more capabilities:
-
-```text
-model providers
-model metadata/capabilities
-tools
-commands
-services
-runtime hooks
-event subscribers
-memory/retrieval providers
-credential/auth providers
-subscription/usage providers
-settings schemas
-API routes
-UI panels/actions
-background event sources
-external workers
+```sh
+npm run start --workspace @zet-harness/runtime
+npm run dev --workspace @zet-harness/web
 ```
 
-Not every extension point must be implemented on day one. The public shape should allow us to add these without breaking the kernel.
+Set `HARNESS_RUNTIME_URL` if the daemon listens somewhere other than the default.
 
-## 3. Minimal plugin contract
+## Installing a plugin
 
-Conceptual TypeScript shape:
-
-```ts
-export interface HarnessPlugin {
-  manifest: PluginManifest;
-  activate(ctx: PluginContext): void | Promise<void>;
-}
-
-export interface PluginManifest {
-  id: string;
-  name: string;
-  version: string;
-  apiVersion: 1;
-  capabilities?: string[];
-}
-
-export interface PluginContext {
-  services: ServiceRegistry;
-  events: EventBus;
-  models: ModelRegistry;
-  tools: ToolRegistry;
-  hooks: HookRegistry;
-  config: unknown;
-  onDispose(fn: () => void | Promise<void>): void;
-}
-```
-
-Every registration returns or records a disposer.
-
-When a plugin unloads, registrations are unwound in reverse order. This keeps tests, reloads, and failures deterministic.
-
-## 4. Stable public package
-
-Third-party plugins must not import private files from `@zet-harness/core`.
-
-Create a small public package:
-
-```text
-@zet-harness/plugin-api
-```
-
-It should contain only:
-
-- plugin types;
-- service tokens/contracts;
-- registration interfaces;
-- capability identifiers;
-- compatibility helpers.
-
-It should have **zero or near-zero runtime dependencies**.
-
-The implementation of the registries stays inside the harness core.
-
-## 5. Built-ins use the plugin API
-
-As the runtime grows, first-party features should register through the same mechanism.
-
-Examples:
-
-```text
-builtin.sqlite
-builtin.agent-loop
-builtin.openai-compatible
-builtin.native-tools
-builtin.memory-basic
-builtin.web
-```
-
-We do not need to convert every file into a plugin immediately. The rule is that new extension-facing capabilities should not get a private registration mechanism unavailable to third-party plugins.
-
-## 6. Model plugins
-
-A model/provider plugin may register one or more providers:
-
-```text
-OpenAI-compatible
-Anthropic
-Qwen-specific
-local Ollama/vLLM
-subscription-backed providers
-future providers
-```
-
-The kernel sees only the common provider contract and capability metadata.
-
-A model plugin can also contribute:
-
-- auth flow;
-- model discovery;
-- reasoning-level metadata;
-- usage/quota reporting;
-- provider-specific settings.
-
-This is how we leave room for subscription plugins similar in spirit to the provider plugins already used in our DeepSeek Harness experiments.
-
-## 7. Tool plugins
-
-A tool plugin registers tools through the normal tool registry.
-
-The plugin does not decide whether a tool may run. The harness permission/execution path remains authoritative.
-
-```text
-plugin → register tool
-model → request tool
-harness → validate + permission check
-harness → execute
-harness → trace result
-```
-
-This ensures native tools and plugin tools appear in the same trace and approval UI.
-
-## 8. Important security truth
-
-An **in-process JavaScript plugin is trusted code**.
-
-A manifest that says `permissions: ["filesystem.read"]` cannot stop malicious plugin code from importing Node filesystem APIs directly.
-
-Therefore v1 has two explicit trust modes:
-
-### Trusted in-process plugin
-
-- fastest;
-- lowest overhead;
-- normal default for our own/local plugins;
-- full Node process privileges;
-- manifest capabilities are descriptive/configuration-level, not a security sandbox.
-
-### Isolated plugin (later)
-
-Community/untrusted plugins can later run in a child process or worker with a narrow RPC interface.
-
-The isolated mode can enforce real resource/tool boundaries, but it is intentionally deferred because it adds process and protocol complexity.
-
-Never claim that an in-process plugin is sandboxed when it is not.
-
-## 9. Lazy loading
-
-Disabled plugins should cost almost nothing.
-
-At boot:
-
-```text
-read enabled plugin specs
-→ validate manifests
-→ dynamic import enabled entries
-→ activate
-```
-
-Do not scan/import every installed package on every boot.
-
-Heavy plugins should defer their own expensive initialization until their capability is first used where possible.
-
-## 10. Plugin configuration
-
-Keep configuration boring and inspectable.
-
-Initial format can be JSON/JSONC rather than adding YAML machinery:
+A plugin is a directory containing a `zet-plugin.json` manifest and an entry module. Copy it into
+the harness plugins directory, then enable it in `plugins.json` in that same directory:
 
 ```json
 {
   "plugins": [
     {
-      "package": "@zet-harness/plugin-openai-compatible",
+      "id": "com.example.hello",
       "enabled": true,
-      "config": {
-        "baseUrl": "http://127.0.0.1:8000/v1"
-      }
+      "grantedCapabilities": [],
+      "config": {}
     }
   ]
 }
 ```
 
-Secrets should be referenced by environment/credential keys rather than stored inline.
+Two rules are worth stating plainly, because they are enforced rather than advisory:
 
-## 11. Install sources
+- **A plugin is disabled until you enable it.** Copying a folder in is not enough. `enabled` must
+  be a literal `true`.
+- **Installing is not authorizing.** A package's `requestedCapabilities` is what it *asks* for.
+  What it *receives* is `grantedCapabilities`, which only you can set. The Plugins page shows both,
+  so you can always see what a plugin wanted and did not get.
 
-Eventually support:
+The daemon loads enabled plugins at startup. A plugin that fails to load is reported on the
+Plugins page and never prevents the harness from starting.
 
-```text
-built-in plugin id
-local folder
-npm package
-Git repository/package spec
-```
+## Writing a plugin
 
-Installation and execution are separate concerns. A plugin may be installed but disabled.
+Start from [`examples/hello-plugin/`](./examples/hello-plugin/README.md). It is a complete working
+plugin with **no dependencies and no build step** — one JSON file and one JavaScript file.
 
-The first plugin milestone only needs built-ins + local path/package loading. Marketplace/discovery can come later.
-
-## 12. Profiles
-
-A lightweight profile is simply a named plugin/config composition.
-
-Examples:
-
-```text
-minimal
-  sqlite
-  openai-compatible
-  native-tools
-
-coding
-  + git
-  + shell
-  + github
-
-creative
-  + comfyui
-  + blender
-
-headless
-  same runtime capabilities
-  no web UI plugin
-```
-
-Profiles should be plain configuration, not separate runtimes.
-
-## 13. Event and hook model
-
-Keep two concepts separate:
-
-### Events
-
-Facts that already happened:
-
-```text
-run.started
-model.completed
-tool.completed
-todo.updated
-```
-
-Multiple listeners may observe them.
-
-### Hooks
-
-Controlled extension points that can influence behavior:
-
-```text
-context.beforeBuild
-model.beforeRequest
-tool.beforeExecute
-run.beforeComplete
-```
-
-Hooks must be ordered and bounded. A plugin must not be able to create an invisible infinite hook chain.
-
-## 14. UI extensions
-
-Do not make UI plugins block the server-side plugin system.
-
-Server/runtime plugins come first.
-
-Later a plugin may declare UI contributions such as:
-
-```text
-settings section
-sidebar item
-run-inspector panel
-tool result renderer
-provider login panel
-```
-
-UI code must load only when the relevant plugin is enabled.
-
-## 15. Compatibility
-
-Every plugin declares an API version.
-
-For v1:
-
-```text
-apiVersion: 1
-```
-
-The host refuses incompatible plugin API versions with a clear error before activation.
-
-Do not expose unstable internal classes as public plugin API merely because they are convenient.
-
-## 16. Failure behavior
-
-One bad optional plugin must not corrupt the runtime.
-
-Activation flow:
-
-```text
-load manifest
-→ validate
-→ activate in tracked scope
-→ if activation fails, dispose partial registrations
-→ report plugin failure
-```
-
-Required/built-in plugins may fail startup. Optional plugins should normally be disabled with a visible error while the remaining harness can still start.
-
-## 17. Plugin development experience
-
-A plugin author should eventually need only:
-
-```text
-package.json
-src/index.ts
-```
-
-and a small dependency on `@zet-harness/plugin-api`.
-
-Target package metadata:
+The manifest:
 
 ```json
 {
-  "name": "example-zet-plugin",
-  "zetHarness": {
-    "apiVersion": 1,
-    "entry": "./dist/index.js"
-  }
+  "manifestVersion": 1,
+  "id": "com.example.hello",
+  "name": "Hello Example",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "license": "MIT",
+  "entry": "./index.mjs",
+  "requestedCapabilities": [],
+  "nodes": [{ "type": "example.reverse-text", "version": "1", "title": "Reverse text" }]
 }
 ```
 
-The exact manifest will be frozen only after the first two real plugins exist.
+The entry module default-exports an object with a `manifest` and an `activate(context)` function.
+`activate` registers nodes, tools or model adapters through the context it is given.
 
-## 18. First proof
+### Rules the loader enforces
 
-Before model/provider complexity grows, prove the architecture with two tiny plugins:
+| Rule | Why |
+|---|---|
+| Manifest is read before any of your code is imported | A person can review a package without running it |
+| `id` and `version` must match your runtime manifest | A package cannot advertise one identity and register another |
+| You may only register node types listed in `nodes` | Otherwise reviewing the manifest would mean nothing |
+| `entry` and integrity paths must stay inside the package | A manifest is untrusted input even on your own disk |
+| Integrity digests are checked **before** the import | Verifying after execution would verify nothing |
 
-1. a built-in plugin that registers one service/tool;
-2. an external/local test plugin using only `@zet-harness/plugin-api`.
+### Signing a package
 
-Both should activate, register, execute, and dispose through the exact same host path.
+Add sha256 digests so tampering is detectable. Hosts can refuse unsigned packages entirely.
 
-If that works, we have the wide door without making the core heavy.
+```json
+"integrity": {
+  "algorithm": "sha256",
+  "files": { "index.mjs": "<digest>" }
+}
+```
+
+Regenerate after every change to the file:
+
+```bash
+node -e "const f=require('fs'),c=require('crypto');console.log(c.createHash('sha256').update(f.readFileSync('index.mjs')).digest('hex'))"
+```
+
+### Behavior metadata
+
+Each node declares how it behaves. The scheduler uses this to decide whether an interrupted
+attempt may be repeated, so state it honestly:
+
+| Field | Safe default | When it differs |
+|---|---|---|
+| `primitiveFamily` | `pure` | `effect` if you touch anything outside the harness |
+| `effect` | `none` | `external-read` or `external-write` |
+| `idempotency` | `not-applicable` | `idempotent` only if repeating truly reaches the same state |
+| `recovery` | `rerun` | `manual` when a repeat is not safe |
+| `requiredCapabilities` | `[]` | e.g. `["fs:read"]`, also listed in the manifest |
+
+A pure node can be rerun freely after a crash. Anything else cannot, and the harness will not
+guess on your behalf.
+
+### TypeScript
+
+`@zet-harness/plugin-sdk` provides `definePureNode`, `defineEffectNode`, `definePlugin` and
+`describeNodesForManifest`. `definePureNode` fills in behavior metadata because pure nodes are
+genuinely safe to rerun; `defineEffectNode` deliberately makes you state effect, idempotency and
+recovery yourself.
+
+`describeNodesForManifest(nodes)` generates the manifest's `nodes` array from your definitions, so
+the code and the manifest cannot drift apart.
+
+## Using MCP servers
+
+Model Context Protocol servers work without writing a plugin at all. Their tools are translated
+into ordinary harness tools and travel the same capability, approval and tracing path as anything
+else — there is no separate MCP engine.
+
+Each server gets its own capability, `mcp:<server-id>`, so authorizing a filesystem server does
+not authorize an unrelated one.
+
+One thing to know: MCP tool annotations such as `readOnlyHint` are **claims by the server**, not
+guarantees. Every MCP tool is therefore treated as an external write that is unsafe to repeat
+unless you explicitly opt into trusting a server's hints.
+
+## What a plugin cannot do
+
+- Grant itself a capability. Declarations are demand; your configuration is the only authority.
+- Register a node type its manifest does not declare.
+- Read outside its own package through manifest paths.
+- Ship a different identity than the one reviewed.
+- Take down the harness by failing to load.
