@@ -54,9 +54,10 @@ if [[ -n "$H3_DRIVE_ROOT" ]]; then
   mkdir -p "$H3_DRIVE_ROOT"/{models,output,user}
 
   if [[ "$H3_PERSIST_MODELS" == "1" ]]; then
-    echo "Using Drive-backed H3 model folders: $H3_DRIVE_ROOT/models"
+    echo "Using Drive-backed ComfyUI model folders: $H3_DRIVE_ROOT/models"
     echo "NOTE: local VM model storage is faster; Drive-backed weights are for convenience only."
-    for sub in diffusion_models text_encoders vae loras; do
+    # Keep every model family used by H3 + LTX in the same Drive-backed model root.
+    for sub in diffusion_models text_encoders vae loras checkpoints latent_upscale_models model_patches; do
       mkdir -p "$H3_DRIVE_ROOT/models/$sub"
       rm -rf "$COMFY_ROOT/models/$sub"
       ln -s "$H3_DRIVE_ROOT/models/$sub" "$COMFY_ROOT/models/$sub"
@@ -76,6 +77,9 @@ mkdir -p \
   "$COMFY_ROOT/models/text_encoders" \
   "$COMFY_ROOT/models/vae" \
   "$COMFY_ROOT/models/loras" \
+  "$COMFY_ROOT/models/checkpoints" \
+  "$COMFY_ROOT/models/latent_upscale_models" \
+  "$COMFY_ROOT/models/model_patches" \
   "$COMFY_ROOT/input" \
   "$COMFY_ROOT/output" \
   "$COMFY_ROOT/user/default/workflows"
