@@ -133,6 +133,19 @@ runtime build pre-builds them.
 This surfaced as a real failure: the process-kill recovery test started failing because its child
 process could not import TypeScript from the built runtime.
 
+## From plugin to executed run
+
+A plugin registering a node is only useful if the scheduler can invoke it.
+`createPluginNodeExecutor` is that link: it resolves a node type to whichever loaded plugin
+provides it — in-process first, then sandboxes — checks the capability policy, and executes.
+
+The check happens in host code on **every** invocation, not once at load. A node's declared
+`requiredCapabilities` are demand; this is where demand meets the host's decision.
+
+One rule is worth naming: a plugin with no policy entry is treated as granting **nothing**, not as
+unrestricted. Failing open for an unmapped plugin would quietly undo the capability model, so a
+test pins that behaviour.
+
 ## Verification
 
 Run from `harness/`:
@@ -144,8 +157,9 @@ npm run format:check
 npm test
 ```
 
-1116 tests pass, up from 945. New coverage is 33 loader tests, 47 manifest tests, 29 config
-tests, 32 SDK tests, 19 runtime startup and HTTP tests, and 11 example-plugin integration tests.
+1176 tests pass, up from 945. New coverage is 33 loader tests, 47 manifest tests, 29 config
+tests, 32 SDK tests, 24 runtime startup and HTTP tests, 12 plugin-executor tests, and 11
+example-plugin integration tests.
 
 ## Not included
 

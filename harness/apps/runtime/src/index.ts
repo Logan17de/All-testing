@@ -85,3 +85,18 @@ export {
   type ProbeRuntimePathLimitsOptions,
   type RuntimePathLimitReport,
 } from "./runtime-path-limits.js";
+export {
+  PluginExecutionError,
+  createPluginNodeExecutor,
+  isPluginExecutionError,
+  type PluginExecutionDenialCode,
+  type PluginNodeExecutorOptions,
+} from "./runtime-plugin-executor.js";
+export {
+  DEFAULT_PLUGINS_DIRECTORY,
+  DEFAULT_PLUGIN_CONFIG_FILENAME,
+  emptyPluginReport,
+  loadRuntimePlugins,
+  type RuntimePluginOptions,
+  type RuntimePluginReport,
+} from "./runtime-plugins.js";
