@@ -15,6 +15,8 @@ import {
 import { DURABLE_APPROVALS_MIGRATION } from "@zet-harness/db/durable-approval-records";
 import { DURABLE_FILE_CHANGES_MIGRATION } from "@zet-harness/db/durable-file-change-records";
 
+import type { PluginHost } from "@zet-harness/core";
+
 import { RuntimeEventStream, type RuntimeStreamEvent } from "./runtime-event-stream.js";
 import { inspectRuntimeHealth } from "./runtime-health.js";
 import {
@@ -33,6 +35,13 @@ import {
   type RuntimeDispatchReport,
 } from "./runtime-run-dispatcher.js";
 import { probeRuntimePathLimits, type RuntimePathLimitReport } from "./runtime-path-limits.js";
+import {
+  DEFAULT_PLUGINS_DIRECTORY,
+  emptyPluginReport,
+  loadRuntimePlugins,
+  type RuntimePluginOptions,
+  type RuntimePluginReport,
+} from "./runtime-plugins.js";
 import { RuntimeRedactionRegistry } from "./runtime-redaction.js";
 
 export const DEFAULT_RUNTIME_DATABASE_PATH = resolve("data", "zet-harness.sqlite");
@@ -63,6 +72,13 @@ export interface RuntimeDaemonOptions {
   readonly probePathLimits?: boolean;
   /** Injection point for tests; the default probe writes under the temp directory. */
   readonly pathLimitProbe?: () => Promise<RuntimePathLimitReport>;
+  /**
+   * Third-party plugin loading.
+   *
+   * Omit to run with no plugin directory at all. Supplying it does not enable
+   * any plugin: each package still has to be enabled in the plugin config.
+   */
+  readonly plugins?: RuntimePluginOptions;
 }
 export interface RuntimeDaemonSnapshot {
   readonly state: RuntimeDaemonState;
@@ -70,6 +86,8 @@ export interface RuntimeDaemonSnapshot {
   readonly database: SqliteDatabaseSnapshot;
   /** Populated once startup has probed the host; undefined when disabled. */
   readonly pathLimits: RuntimePathLimitReport | undefined;
+  /** What was installed, enabled and activated at startup. */
+  readonly plugins: RuntimePluginReport;
 }
 
 /** Owns transport, journal, human waits and redaction; a wait never retains a live task. */
@@ -87,6 +105,9 @@ export class RuntimeDaemon {
   private stopPromise: Promise<boolean> | undefined;
   private readonly pathLimitProbe: (() => Promise<RuntimePathLimitReport>) | undefined;
   private pathLimits: RuntimePathLimitReport | undefined;
+  private readonly pluginOptions: RuntimePluginOptions | undefined;
+  private pluginHost: PluginHost | undefined;
+  private pluginReport: RuntimePluginReport;
 
   constructor(options: RuntimeDaemonOptions = {}) {
     this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
@@ -120,12 +141,18 @@ export class RuntimeDaemon {
           database: this.database,
           migrations: this.migrations,
         }),
-      { approvals: this.approvals, redaction: this.redaction },
+      {
+        approvals: this.approvals,
+        redaction: this.redaction,
+        plugins: () => this.pluginReport,
+      },
     );
     this.pathLimitProbe =
       options.probePathLimits === false
         ? undefined
         : (options.pathLimitProbe ?? (() => probeRuntimePathLimits()));
+    this.pluginOptions = options.plugins;
+    this.pluginReport = emptyPluginReport(options.plugins?.directory ?? DEFAULT_PLUGINS_DIRECTORY);
     let resolveStopped!: () => void;
     this.stoppedPromise = new Promise<void>((resolve) => {
       resolveStopped = resolve;
@@ -139,6 +166,7 @@ export class RuntimeDaemon {
       api: this.httpServer.snapshot(),
       database: this.database.snapshot(),
       pathLimits: this.pathLimits,
+      plugins: this.pluginReport,
     });
   }
 
@@ -188,6 +216,13 @@ export class RuntimeDaemon {
       if (this.pathLimitProbe !== undefined) {
         this.pathLimits = await this.pathLimitProbe();
       }
+      if (this.pluginOptions !== undefined) {
+        // A third-party plugin that fails to load is reported, not fatal: one
+        // bad package must not stop the runtime from starting.
+        const loaded = await loadRuntimePlugins(this.pluginOptions);
+        this.pluginHost = loaded.host;
+        this.pluginReport = loaded.report;
+      }
       await this.httpServer.start();
     } catch (error) {
       this.database.close();
@@ -219,12 +254,19 @@ export class RuntimeDaemon {
     return this.stoppedPromise;
   }
 
+  /** Node/model/tool catalogs contributed by activated plugins. */
+  get plugins(): PluginHost | undefined {
+    return this.pluginHost;
+  }
+
   private async stopOnce(): Promise<boolean> {
     const draining = this.dispatcher?.stop();
+    const pluginCleanup = this.pluginHost?.dispose().catch(() => undefined);
     try {
       await this.httpServer.stop();
     } finally {
       await draining;
+      await pluginCleanup;
       await this.database.drainWrites();
       this.database.close();
     }

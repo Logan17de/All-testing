@@ -108,6 +108,31 @@ activates it through the ordinary `PluginHost`, executes its node and checks the
 verifies its integrity. The example is what an outside author copies, so a broken example is worse
 than no example; this test fails CI if it stops working.
 
+## Reaching it from the running app
+
+A plugin system nobody can reach is not extensibility, so `RuntimeDaemon` loads plugins at startup
+when given a `plugins` option. It discovers every installed package, activates only the ones the
+configuration enables, and builds each plugin's capability policy from host grants alone.
+
+**A failing plugin never stops the daemon.** A third-party package is not trusted to be correct,
+and one bad plugin taking down the whole runtime would make installing anything unreasonably
+risky. Failures are collected into the startup report instead.
+
+`GET /api/plugins` serves that report read-only, so a UI can show what is installed alongside what
+each package asked for and what it received. Enabling a plugin or granting a capability stays a
+configuration decision; a `POST` to that endpoint is refused with 405.
+
+### A build-chain consequence
+
+`apps/runtime` compiles to real JavaScript and runs from `dist`, so everything it imports at
+runtime must be built JavaScript too. `@zet-harness/plugin-api`, `core` and `plugin-loader`
+previously exported raw `./src/index.ts`, which was fine while only tests imported them. They now
+carry `tsconfig.build.json` and dual `types`/`default` exports like `db` and `scheduler`, and the
+runtime build pre-builds them.
+
+This surfaced as a real failure: the process-kill recovery test started failing because its child
+process could not import TypeScript from the built runtime.
+
 ## Verification
 
 Run from `harness/`:
@@ -119,8 +144,8 @@ npm run format:check
 npm test
 ```
 
-1097 tests pass, up from 945. New coverage is 33 loader tests, 47 manifest tests, 29 config tests,
-32 SDK tests, and 11 example-plugin integration tests.
+1116 tests pass, up from 945. New coverage is 33 loader tests, 47 manifest tests, 29 config
+tests, 32 SDK tests, 19 runtime startup and HTTP tests, and 11 example-plugin integration tests.
 
 ## Not included
 
@@ -128,5 +153,6 @@ npm test
 - Execution trust tiers and WASI isolation (10.9–10.10): every plugin currently runs in-process and
   fully trusted once enabled, so capability grants are the only boundary
 - npm/Git installation (10.11), which the plan gates behind solid local loading
-- A UI for browsing and enabling plugins; `describeInstallation` produces the view model, but
-  rendering it belongs to Phase 7
+- A UI for browsing and enabling plugins; the view model and `/api/plugins` exist, but rendering
+  belongs to Phase 7
+- Editing plugin configuration through the API; enabling and granting stay file-based decisions

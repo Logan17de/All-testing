@@ -4,11 +4,21 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./node-behavior-policy": "./src/node-behavior-policy.ts",
-    "./secret-contract": "./src/secret-contract.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./node-behavior-policy": {
+      "types": "./src/node-behavior-policy.ts",
+      "default": "./dist/node-behavior-policy.js"
+    },
+    "./secret-contract": {
+      "types": "./src/secret-contract.ts",
+      "default": "./dist/secret-contract.js"
+    }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src --max-warnings=0",
     "test": "vitest run --passWithNoTests"

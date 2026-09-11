@@ -76,6 +76,7 @@ export class RuntimeHttpServer {
   private readonly requestedPort: number;
   private readonly eventStream: RuntimeEventStream;
   private readonly healthProvider: RuntimeHealthProvider;
+  private readonly pluginsProvider: (() => unknown) | undefined;
   private readonly eventClients = new Map<ServerResponse, () => void>();
   private readonly security: RuntimeApiSecurity;
   private readonly redaction: RuntimeRedactionRegistry;
@@ -92,12 +93,15 @@ export class RuntimeHttpServer {
     services: {
       readonly approvals?: RuntimeHumanApprovals;
       readonly redaction?: RuntimeRedactionRegistry;
+      /** Read-only view of installed plugins for the local UI. */
+      readonly plugins?: () => unknown;
     } = {},
   ) {
     this.host = options.host ?? DEFAULT_RUNTIME_HOST;
     this.requestedPort = options.port ?? DEFAULT_RUNTIME_PORT;
     this.eventStream = eventStream;
     this.healthProvider = healthProvider;
+    this.pluginsProvider = services.plugins;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
     this.approvals = services.approvals;
     this.security = new RuntimeApiSecurity(options.allowedOrigins);
@@ -215,6 +219,17 @@ export class RuntimeHttpServer {
         }
         const health = this.readHealth();
         writeJson(response, health.status === "ok" ? 200 : 503, health);
+        return;
+      }
+      if (url.pathname === "/api/plugins") {
+        if (request.method !== "GET") {
+          response.setHeader("allow", "GET");
+          writeJson(response, 405, { error: "method_not_allowed", allowed: ["GET"] });
+          return;
+        }
+        // Read-only. Enabling a plugin or granting it a capability is a
+        // configuration decision, never an HTTP call the UI can make.
+        writeJson(response, 200, this.pluginsProvider?.() ?? { installed: [], activated: [] });
         return;
       }
       if (url.pathname === "/api/events") {

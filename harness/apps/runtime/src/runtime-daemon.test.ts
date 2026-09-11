@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   DURABLE_EVENTS_TABLE,
@@ -17,6 +17,10 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { RUNTIME_DATABASE_MIGRATIONS, RuntimeDaemon } from "./runtime-daemon.js";
+
+// The daemon defaults its plugins directory to `plugins` under the process
+// working directory; these lifecycle tests never configure one.
+const DEFAULT_PLUGIN_DIRECTORY = resolve("plugins");
 
 const createDaemon = (migrations?: readonly SqliteMigration[]): RuntimeDaemon =>
   new RuntimeDaemon({
@@ -48,6 +52,13 @@ describe("RuntimeDaemon", () => {
       state: "idle",
       api: { state: "idle", host: "127.0.0.1", port: null, eventClients: 0 },
       database: { state: "closed", path: SQLITE_MEMORY_PATH, inMemory: true },
+      plugins: {
+        directory: DEFAULT_PLUGIN_DIRECTORY,
+        installed: [],
+        activated: [],
+        failures: [],
+        configDefects: [],
+      },
     });
 
     expect(await daemon.start()).toBe(true);
@@ -206,6 +217,13 @@ describe("RuntimeDaemon", () => {
       state: "idle",
       api: { state: "idle", host: "127.0.0.1", port: null, eventClients: 0 },
       database: { state: "closed", path: SQLITE_MEMORY_PATH, inMemory: true },
+      plugins: {
+        directory: DEFAULT_PLUGIN_DIRECTORY,
+        installed: [],
+        activated: [],
+        failures: [],
+        configDefects: [],
+      },
     });
 
     await daemon.stop();
@@ -234,6 +252,13 @@ describe("RuntimeDaemon", () => {
         state: "idle",
         api: { state: "idle", host: "127.0.0.1", port: null, eventClients: 0 },
         database: { state: "closed", path: SQLITE_MEMORY_PATH, inMemory: true },
+        plugins: {
+          directory: DEFAULT_PLUGIN_DIRECTORY,
+          installed: [],
+          activated: [],
+          failures: [],
+          configDefects: [],
+        },
       });
     } finally {
       await daemon.stop();
@@ -267,6 +292,13 @@ describe("RuntimeDaemon", () => {
       state: "stopped",
       api: { state: "stopped", host: "127.0.0.1", port: null, eventClients: 0 },
       database: { state: "closed", path: SQLITE_MEMORY_PATH, inMemory: true },
+      plugins: {
+        directory: DEFAULT_PLUGIN_DIRECTORY,
+        installed: [],
+        activated: [],
+        failures: [],
+        configDefects: [],
+      },
     });
     await expect(daemon.start()).rejects.toThrow(
       "Runtime daemon cannot restart after it has stopped.",
