@@ -305,14 +305,22 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 
 ## Phase 10 — MCP, custom-node SDK, trust tiers
 
-- [ ] 10.1 Add plugin config and enable/disable list.
-- [ ] 10.2 Add local folder/package plugin loading.
+**Third-party plugin scope:** 10.1, 10.2, 10.6, 10.7 and 10.8 make the harness externally
+extensible. A package is described by an inert `zet-plugin.json` that is read before any of its
+code is imported, integrity digests are verified before the entry module loads, a plugin may only
+register the node types its manifest declares, and requested capabilities are never turned into
+grants. `examples/hello-plugin/` is a complete dependency-free plugin, loaded from its real
+location by a test so a broken example fails CI. See `PHASE-10.md`. MCP (10.3–10.5), trust tiers
+(10.9–10.10) and remote installation (10.11) remain open.
+
+- [x] 10.1 Add plugin config and enable/disable list.
+- [x] 10.2 Add local folder/package plugin loading.
 - [ ] 10.3 Add MCP client/config/discovery.
 - [ ] 10.4 Translate MCP tool schemas into the normal tool/plugin registry rather than a separate tool engine.
 - [ ] 10.5 Apply normal capability, approval, and tracing rules to MCP tools.
-- [ ] 10.6 Add custom-node SDK around the frozen public contracts.
-- [ ] 10.7 Add plugin/package manifests with integrity, license, minimum harness version, node list, and requested capabilities.
-- [ ] 10.8 Keep installation separate from capability granting.
+- [x] 10.6 Add custom-node SDK around the frozen public contracts.
+- [x] 10.7 Add plugin/package manifests with integrity, license, minimum harness version, node list, and requested capabilities.
+- [x] 10.8 Keep installation separate from capability granting.
 - [ ] 10.9 Add execution trust tiers: trusted in-process, process-isolated, optional WASI for untrusted portable compute.
 - [ ] 10.10 Add WASI sandbox only after the capability broker is mature.
 - [ ] 10.11 Add npm/Git plugin installation only after local loading is solid.

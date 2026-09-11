@@ -1,0 +1,16 @@
+export {
+  describeInstallation,
+  discoverPluginPackages,
+  enforceDeclaredNodes,
+  loadPluginPackage,
+  verifyPackageIntegrity,
+  type DiscoveredPluginPackage,
+  type IntegrityVerification,
+  type LoadPluginOptions,
+  type LoadedPluginPackage,
+  type PluginDiscoveryOptions,
+  type PluginDiscoveryResult,
+  type PluginInstallationView,
+  type PluginLoadFailure,
+  type PluginLoadFailureCode,
+} from "./plugin-loader.js";

@@ -1,0 +1,25 @@
+{
+  "manifestVersion": 1,
+  "id": "com.example.hello",
+  "name": "Hello Example",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "license": "MIT",
+  "description": "A minimal example plugin showing how to add a custom node.",
+  "entry": "./index.mjs",
+  "minHarnessVersion": "0.1.0",
+  "requestedCapabilities": [],
+  "nodes": [
+    {
+      "type": "example.reverse-text",
+      "version": "1",
+      "title": "Reverse text"
+    }
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "index.mjs": "0ae1969e5eb34965b1671cc426af55d57bf2803e012cbce6932ab9ba729bb9a8"
+    }
+  }
+}

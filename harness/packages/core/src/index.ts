@@ -47,3 +47,27 @@ export {
   type ModelStreamStatistics,
   type UsageTotals,
 } from "./model-stream-sink.js";
+export {
+  PLUGIN_PACKAGE_MANIFEST_FILENAME,
+  PLUGIN_PACKAGE_MANIFEST_VERSION,
+  reconcilePluginGrants,
+  validatePluginPackageManifest,
+  type DeclaredPluginNode,
+  type PluginInstallRecord,
+  type PluginManifestDefect,
+  type PluginManifestDefectCode,
+  type PluginManifestValidation,
+  type PluginPackageIntegrity,
+  type PluginPackageManifest,
+} from "./plugin-package-manifest.js";
+export {
+  findPluginConfig,
+  pluginCapabilityPolicy,
+  validatePluginConfig,
+  type PluginConfigDefect,
+  type PluginConfigDefectCode,
+  type PluginConfigDocument,
+  type PluginConfigEntry,
+  type PluginConfigValidation,
+  type ResolvedPluginConfig,
+} from "./plugin-config.js";
