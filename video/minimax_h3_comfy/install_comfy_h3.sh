@@ -6,6 +6,7 @@ H3_DRIVE_ROOT="${H3_DRIVE_ROOT:-}"
 H3_PERSIST_MODELS="${H3_PERSIST_MODELS:-0}"
 H3_PERSIST_OUTPUT="${H3_PERSIST_OUTPUT:-1}"
 EXTENDER_DIR="$COMFY_ROOT/custom_nodes/ComfyUI_MiniMax_H3_Extender"
+LATENT_UPSCALER_DIR="$COMFY_ROOT/custom_nodes/Comfyui_Minimax_h3_latent_Upscaler"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "== MiniMax H3 + ComfyUI setup =="
@@ -27,6 +28,7 @@ python -m pip install -q -r "$COMFY_ROOT/requirements.txt"
 python -m pip install -q -U "huggingface_hub[hf_xet]" requests imageio-ffmpeg websocket-client
 
 mkdir -p "$COMFY_ROOT/custom_nodes"
+
 if [[ -d "$EXTENDER_DIR/.git" ]]; then
   echo "Updating MiniMax H3 Extender..."
   # Our UI compatibility patch modifies extender.js; reset that generated patch
@@ -39,6 +41,19 @@ else
 fi
 if [[ -f "$EXTENDER_DIR/requirements.txt" ]]; then
   python -m pip install -q -r "$EXTENDER_DIR/requirements.txt"
+fi
+
+# Required by H3_Local_OpenSource_MaxQuality_T2V.json.
+# Provides the MinimaxH3LatentUpscaler3D node.
+if [[ -d "$LATENT_UPSCALER_DIR/.git" ]]; then
+  echo "Updating MiniMax H3 Latent Upscaler..."
+  git -C "$LATENT_UPSCALER_DIR" pull --ff-only
+else
+  echo "Installing MiniMax H3 Latent Upscaler..."
+  git clone --depth 1 https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git "$LATENT_UPSCALER_DIR"
+fi
+if [[ -f "$LATENT_UPSCALER_DIR/requirements.txt" ]]; then
+  python -m pip install -q -r "$LATENT_UPSCALER_DIR/requirements.txt"
 fi
 
 if [[ -f "$SCRIPT_DIR/patch_extender_ui.py" ]]; then
@@ -86,9 +101,12 @@ mkdir -p \
 
 # Remove stale bytecode after updating custom nodes in a reused runtime.
 find "$EXTENDER_DIR" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+find "$LATENT_UPSCALER_DIR" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
 echo
 echo "Setup complete."
-echo "ComfyUI:  $COMFY_ROOT"
-echo "Extender: $EXTENDER_DIR"
+echo "ComfyUI:          $COMFY_ROOT"
+echo "Extender:         $EXTENDER_DIR"
+echo "Latent Upscaler:  $LATENT_UPSCALER_DIR"
 git -C "$EXTENDER_DIR" log -1 --oneline || true
+git -C "$LATENT_UPSCALER_DIR" log -1 --oneline || true
