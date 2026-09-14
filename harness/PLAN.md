@@ -141,12 +141,12 @@ Phase 8  Loops + projects + agent mode     🚧 IN PROGRESS
            ├─ groundwork: routers/joins execute inside scheduler runs          ✅
            ├─ groundwork: durable, restart-safe routers/joins                  ✅
            ├─ groundwork: built-in control nodes + control edges in editor     ✅
-           ├─ 8.1 explicit bounded loop regions                                 ▶ CURRENT
+           ├─ 8.1 explicit bounded loop regions                                 ✅
            │    ├─ loop regions + lowering in the compiler                      ✅
            │    ├─ iterations in the scheduler                                  ✅
-           │    └─ iterations in durable dispatch                               ▶ next
-           ├─ 8.2 independent hard loop bounds                                  ⏳
-           ├─ 8.3 loop iteration/attempt identity in durability records         ⏳
+           │    └─ iterations in durable dispatch                               ✅
+           ├─ 8.2 independent hard loop bounds                                  ▶ CURRENT
+           ├─ 8.3 loop iteration/attempt identity in durability records         ✅
            ├─ 8.4 subgraph lowering/namespacing, no uncontrolled recursion      ⏳
            ├─ 8.5–8.9 projects, conversations, goals/todos, IDs, next todo      ⏳
            ├─ 8.10–8.13 context builder, goal/todo actions, agent loop, blocked ⏳
@@ -168,7 +168,7 @@ Phase 11 Packaging + optional scale-out    🚧 1/9
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ✅ Complete |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ✅ Complete except 6.12 (needs a real local model endpoint) |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ✅ Complete — **v0.1 boundary reached** |
-| **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | 🚧 In progress — control-flow groundwork for 8.1 (see `PHASE-8.md`) |
+| **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | 🚧 In progress — control flow, 8.1 loops and 8.3 iteration identity done; 8.2 next (see `PHASE-8.md`) |
 | **9 — Replay/Fork + Memory + Triggers + External clients** | recorded replay, checkpoint forks, lightweight memory, cron/webhook/API triggers, Copycat/client bridge | ⏳ Later |
 | **10 — MCP + Custom-node SDK + Trust tiers** | MCP through normal tool registry, local plugin loading, SDK/package manifests, process/WASI isolation options | ✅ Complete except 10.10 (WASI) and 10.11 (npm/Git install) |
 | **11 — Packaging + Optional scale-out** | Windows setup, config wizard, backup/import/export, optional desktop shell, optional Postgres/remote workers | 🚧 11.1 done; 11.2–11.9 pending |

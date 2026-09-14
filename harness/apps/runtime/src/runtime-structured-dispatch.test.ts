@@ -10,11 +10,7 @@ import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "@zet-harness/graph";
 import type { HarnessPlugin, NodeBehavior, NodeDefinition } from "@zet-harness/plugin-api";
 
 import { RUNTIME_DATABASE_MIGRATIONS } from "./runtime-daemon.js";
-import {
-  RuntimeGraphError,
-  compileEditorGraph,
-  createRunFromCompiledGraph,
-} from "./runtime-graphs.js";
+import { compileEditorGraph, createRunFromCompiledGraph } from "./runtime-graphs.js";
 import { RuntimeHumanApprovals } from "./runtime-human-approvals.js";
 import { createPluginNodeExecutor } from "./runtime-plugin-executor.js";
 import { reconstructExecutionFrontier } from "./runtime-recovery.js";
@@ -26,12 +22,15 @@ const dispatchers: RuntimeRunDispatcher[] = [];
 const hosts: PluginHost[] = [];
 /** Labels of the step nodes that actually executed, in order. */
 const ran: string[] = [];
+/** Called after a step node runs, so a test can act mid-run. */
+let afterStep: ((label: string) => void) | undefined;
 
 afterEach(async () => {
   for (const dispatcher of dispatchers.splice(0)) await dispatcher.stop();
   for (const host of hosts.splice(0)) await host.dispose();
   for (const database of databases.splice(0)) database.close();
   ran.length = 0;
+  afterStep = undefined;
 });
 
 const PURE: NodeBehavior = {
@@ -91,6 +90,7 @@ const step: NodeDefinition = {
     const label = request.config["label"];
     const name = typeof label === "string" ? label : "";
     ran.push(name);
+    afterStep?.(name);
     return { outputs: { done: name } };
   },
 };
@@ -127,12 +127,30 @@ const join: NodeDefinition = {
   },
 };
 
+const flag: NodeDefinition = {
+  manifest: {
+    type: "flow.flag",
+    version: "1",
+    title: "Flag",
+    inputs: {},
+    outputs: { again: { schema: { type: "boolean" } } },
+    configSchema: {
+      type: "object",
+      properties: { value: { type: "boolean" } },
+      required: ["value"],
+      additionalProperties: false,
+    },
+    behavior: PURE,
+  },
+  execute: (request) => ({ outputs: { again: request.config["value"] === true } }),
+};
+
 const loop: NodeDefinition = {
   manifest: {
     type: "flow.loop",
     version: "1",
     title: "Loop",
-    inputs: {},
+    inputs: { again: { schema: { type: "boolean" } } },
     outputs: {},
     configSchema: {
       type: "object",
@@ -153,6 +171,7 @@ const flowPlugin: HarnessPlugin = {
     context.nodes.register(route);
     context.nodes.register(join);
     context.nodes.register(loop);
+    context.nodes.register(flag);
   },
 };
 
@@ -393,67 +412,161 @@ describe("durable routers and joins", () => {
   });
 });
 
-describe("loops before the scheduler can iterate them", () => {
-  it("compiles a loop graph but refuses to store a run that could never progress", async () => {
+/**
+ * start → loop ─body→ work [→ stop] ─again→ loop ─done→ finish. With `exitEarly`,
+ * a Flag node inside the body feeds `false` into the loop's `again` input.
+ */
+function loopGraph(options: { readonly exitEarly?: boolean } = {}): GraphJsonV1 {
+  const exitEarly = options.exitEarly === true;
+  return {
+    schemaVersion: GRAPH_JSON_VERSION,
+    graphId: exitEarly ? "loop-early" : "loop-bound",
+    revisionId: "rev-1",
+    inputs: [],
+    outputs: [{ id: "result", schema: true, source: { nodeId: "finish", port: "done" } }],
+    nodes: [
+      { id: "start", type: "flow.step", version: "1", config: { label: "start" } },
+      { id: "loop", type: "flow.loop", version: "1", config: { maxIterations: 3 } },
+      { id: "work", type: "flow.step", version: "1", config: { label: "work" } },
+      ...(exitEarly
+        ? [{ id: "stop", type: "flow.flag", version: "1", config: { value: false } }]
+        : []),
+      { id: "finish", type: "flow.step", version: "1", config: { label: "finish" } },
+    ],
+    edges: [
+      {
+        id: "enter",
+        kind: "control",
+        from: { nodeId: "start" },
+        to: { nodeId: "loop", port: "enter" },
+      },
+      {
+        id: "body",
+        kind: "control",
+        from: { nodeId: "loop", port: "body" },
+        to: { nodeId: "work" },
+      },
+      ...(exitEarly
+        ? [
+            {
+              id: "work-stop",
+              kind: "control" as const,
+              from: { nodeId: "work" },
+              to: { nodeId: "stop" },
+            },
+            {
+              id: "again",
+              kind: "control" as const,
+              from: { nodeId: "stop" },
+              to: { nodeId: "loop", port: "again" },
+            },
+            {
+              id: "again-value",
+              kind: "data" as const,
+              from: { nodeId: "stop", port: "again" },
+              to: { nodeId: "loop", port: "again" },
+            },
+          ]
+        : [
+            {
+              id: "again",
+              kind: "control" as const,
+              from: { nodeId: "work" },
+              to: { nodeId: "loop", port: "again" },
+            },
+          ]),
+      {
+        id: "done",
+        kind: "control",
+        from: { nodeId: "loop", port: "done" },
+        to: { nodeId: "finish" },
+      },
+    ],
+    entrypoints: [{ id: "main", nodeId: "start" }],
+    policies: {
+      maxNodeExecutions: 20,
+      maxParallelism: 2,
+      capabilities: { required: [], optional: [], deny: [] },
+    },
+    options: { defaultEntrypoint: "main" },
+  };
+}
+
+/** Durable attempts of one node as `iteration.attempt`, in order. */
+function attemptsOf(db: SqliteDatabase, runId: string, nodeId: string): readonly string[] {
+  const frontier = reconstructExecutionFrontier(db.connection(), runId);
+  const ir = frontier.executionIr as unknown as {
+    readonly ops: readonly { sourceNodeId: string }[];
+  };
+  const op = ir.ops.findIndex((candidate) => candidate.sourceNodeId === nodeId);
+  const rows = db
+    .connection()
+    .prepare(
+      "SELECT iteration, attempt, status FROM node_attempts WHERE run_id = ? AND op_index = ? ORDER BY iteration, attempt",
+    )
+    .all(runId, op) as {
+    readonly iteration: number;
+    readonly attempt: number;
+    readonly status: string;
+  }[];
+  return rows.map((row) => `${String(row.iteration)}.${String(row.attempt)}:${row.status}`);
+}
+
+describe("durable loops", () => {
+  it("runs a loop body to its bound and then releases the work after it", async () => {
     const db = database();
     const host = await flowHost();
-    const graph: GraphJsonV1 = {
-      schemaVersion: GRAPH_JSON_VERSION,
-      graphId: "loop-graph",
-      revisionId: "rev-1",
-      inputs: [],
-      outputs: [],
-      nodes: [
-        { id: "start", type: "flow.step", version: "1", config: { label: "start" } },
-        { id: "loop", type: "flow.loop", version: "1", config: { maxIterations: 2 } },
-        { id: "work", type: "flow.step", version: "1", config: { label: "work" } },
-        { id: "finish", type: "flow.step", version: "1", config: { label: "finish" } },
-      ],
-      edges: [
-        {
-          id: "enter",
-          kind: "control",
-          from: { nodeId: "start" },
-          to: { nodeId: "loop", port: "enter" },
-        },
-        {
-          id: "body",
-          kind: "control",
-          from: { nodeId: "loop", port: "body" },
-          to: { nodeId: "work" },
-        },
-        {
-          id: "again",
-          kind: "control",
-          from: { nodeId: "work" },
-          to: { nodeId: "loop", port: "again" },
-        },
-        {
-          id: "done",
-          kind: "control",
-          from: { nodeId: "loop", port: "done" },
-          to: { nodeId: "finish" },
-        },
-      ],
-      entrypoints: [{ id: "main", nodeId: "start" }],
-      policies: {
-        maxNodeExecutions: 10,
-        maxParallelism: 2,
-        capabilities: { required: [], optional: [], deny: [] },
-      },
-      options: { defaultEntrypoint: "main" },
-    };
+    const runId = await createRun(db, host, loopGraph());
+    const { dispatcher } = startRuntime(db, host);
 
-    const result = await compileEditorGraph(graph, { host }, new CapabilityPermissionPolicy());
-    expect(result.valid).toBe(true);
-    if (!result.valid) return;
+    expect((await dispatcher.dispatch(runId)).status).toBe("completed");
+    expect(ran).toEqual(["start", "work", "work", "work", "finish"]);
+    expect(attemptsOf(db, runId, "work")).toEqual([
+      "0.1:completed",
+      "1.1:completed",
+      "2.1:completed",
+    ]);
+    expect(nodeStatuses(db, runId)).toEqual({
+      start: "completed",
+      loop: "completed",
+      work: "completed",
+      finish: "completed",
+    });
+  });
 
-    const refusal = createRunFromCompiledGraph(db, result.compiled);
-    await expect(refusal).rejects.toBeInstanceOf(RuntimeGraphError);
-    await expect(refusal).rejects.toMatchObject({ code: "GRAPH_INVALID", statusCode: 422 });
-    const runs = db.connection().prepare("SELECT COUNT(*) AS count FROM runs").get() as {
-      readonly count: number;
+  it("leaves the loop as soon as its again input is false", async () => {
+    const db = database();
+    const host = await flowHost();
+    const runId = await createRun(db, host, loopGraph({ exitEarly: true }));
+    const { dispatcher } = startRuntime(db, host);
+
+    expect((await dispatcher.dispatch(runId)).status).toBe("completed");
+    expect(ran).toEqual(["start", "work", "finish"]);
+    expect(attemptsOf(db, runId, "work")).toEqual(["0.1:completed"]);
+  });
+
+  it("resumes a loop in a fresh runtime after pausing between iterations", async () => {
+    const db = database();
+    const host = await flowHost();
+    const runId = await createRun(db, host, loopGraph());
+
+    const first = startRuntime(db, host);
+    let works = 0;
+    afterStep = (label) => {
+      if (label === "work" && ++works === 2) void first.dispatcher.pauseRun(runId);
     };
-    expect(runs.count).toBe(0);
+    expect((await first.dispatcher.dispatch(runId)).status).toBe("paused");
+    expect(ran).toEqual(["start", "work", "work"]);
+    await first.dispatcher.stop();
+    afterStep = undefined;
+
+    const second = startRuntime(db, host);
+    expect((await second.dispatcher.dispatch(runId)).status).toBe("completed");
+    expect(ran).toEqual(["start", "work", "work", "work", "finish"]);
+    expect(attemptsOf(db, runId, "work")).toEqual([
+      "0.1:completed",
+      "1.1:completed",
+      "2.1:completed",
+    ]);
   });
 });

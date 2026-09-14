@@ -9,7 +9,6 @@ import {
   type PlainDagOpExecution,
   type PlainDagRunOptions,
 } from "./plain-dag-run.js";
-import { RunReadiness } from "./run-readiness.js";
 import { createMockExecutionIr, createMockExecutionOp } from "./testing.js";
 
 const CONTROL_BEHAVIOR = {
@@ -244,21 +243,5 @@ describe("loops the scheduler refuses", () => {
           control: { continueLoop: () => true, selectRouterBranch: () => "x" },
         }),
     ).toThrow("inside a loop body are not supported yet");
-  });
-
-  it("refuses to restore a run with loops, since iterations are not in the snapshot yet", () => {
-    const plan = loopPlan();
-    expect(
-      () =>
-        new PlainDagRun(plan, new SchedulerConcurrency(1).createRun(plan), () => undefined, {
-          restored: {
-            readiness: new RunReadiness(plan).snapshot(),
-            attempts: plan.ops.map(() => 0),
-            attemptBudgetUsed: plan.ops.map(() => 0),
-            retryDelaysMs: plan.ops.map(() => null),
-          },
-          control: { continueLoop: () => true },
-        }),
-    ).toThrow("Restoring a run that contains loops is not supported yet.");
   });
 });

@@ -35,6 +35,7 @@ interface RunNodeState {
 }
 
 interface RunAttempt {
+  readonly iteration: number;
   readonly opIndex: number;
   readonly attempt: number;
   readonly status: string;
@@ -519,9 +520,13 @@ function NodeDetails({
         <p className="muted small">No attempts yet.</p>
       ) : (
         attempts.map((attempt) => (
-          <div key={attempt.attempt} className="attempt">
+          <div key={`${String(attempt.iteration)}-${String(attempt.attempt)}`} className="attempt">
             <div className="attempt__head">
-              <strong>Attempt {String(attempt.attempt)}</strong>
+              <strong>
+                {attempts.some((item) => item.iteration > 0)
+                  ? `Iteration ${String(attempt.iteration)} · attempt ${String(attempt.attempt)}`
+                  : `Attempt ${String(attempt.attempt)}`}
+              </strong>
               <span className={`runStatus runStatus--${attempt.status}`}>{attempt.status}</span>
             </div>
             <p className="muted small">{duration(attempt.startedAtMs, attempt.finishedAtMs)}</p>

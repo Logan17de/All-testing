@@ -181,6 +181,7 @@ describe("editor endpoints on a running daemon", () => {
       "harness.human-approval",
       "harness.join-all",
       "harness.join-any",
+      "harness.loop",
       "harness.route",
       "text.exclaim",
       "text.upper",

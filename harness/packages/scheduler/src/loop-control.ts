@@ -13,6 +13,43 @@ export interface RunLoopPlan {
 
 const NOTHING: ReadonlySet<number> = new Set();
 
+/**
+ * Correct released predecessor sets for loops in a committed frontier.
+ *
+ * Two relations differ from "released once the source completed": a body op's
+ * dependency on its loop op is released as soon as the loop is running, and a
+ * dependency of work outside the body on a body op is released only once the
+ * loop has completed, whatever the body op's own status says.
+ */
+export function applyLoopReleaseRules(
+  ir: ExecutionIrV1,
+  plans: readonly RunLoopPlan[],
+  opStatuses: readonly string[],
+  released: readonly (readonly number[])[],
+): readonly (readonly number[])[] {
+  const sets = released.map((sources) => new Set(sources));
+  for (const plan of plans) {
+    const loopStatus = opStatuses[plan.op];
+    const loopEntered = loopStatus === "running" || loopStatus === "completed";
+    ir.ops.forEach((target, targetOp) => {
+      if (targetOp === plan.op) return;
+      const set = sets[targetOp]!;
+      for (const source of target.dependencies) {
+        if (plan.region.has(targetOp) && source === plan.op) {
+          if (loopEntered) set.add(source);
+          else set.delete(source);
+        } else if (!plan.region.has(targetOp) && plan.region.has(source)) {
+          if (loopStatus === "completed" && opStatuses[source] === "completed") set.add(source);
+          else set.delete(source);
+        }
+      }
+    });
+  }
+  return Object.freeze(
+    sets.map((set) => Object.freeze([...set].sort((left, right) => left - right))),
+  );
+}
+
 export function isLoopOp(ir: ExecutionIrV1, op: number): boolean {
   return ir.ops[op]?.control?.kind === "loop";
 }
@@ -75,13 +112,27 @@ export class RunLoopControl {
   private readonly ownerOf: ReadonlyMap<number, number>;
   private readonly iterations: number[];
 
-  constructor(ir: ExecutionIrV1, readiness: RunReadiness, plans: readonly RunLoopPlan[]) {
+  constructor(
+    ir: ExecutionIrV1,
+    readiness: RunReadiness,
+    plans: readonly RunLoopPlan[],
+    restoredIterations?: readonly number[],
+  ) {
     this.readiness = readiness;
     this.plans = new Map(plans.map((plan) => [plan.op, plan] as const));
     const owners = new Map<number, number>();
     for (const plan of plans) for (const member of plan.region) owners.set(member, plan.op);
     this.ownerOf = owners;
-    this.iterations = ir.ops.map(() => 0);
+    if (restoredIterations !== undefined && restoredIterations.length !== ir.ops.length) {
+      throw new TypeError("Restored loop iterations must cover the exact op domain.");
+    }
+    this.iterations = ir.ops.map((_, op) => {
+      const iteration = restoredIterations?.[op] ?? 0;
+      if (!Number.isSafeInteger(iteration) || iteration < 0) {
+        throw new TypeError(`Restored iteration for op ${String(op)} is invalid.`);
+      }
+      return iteration;
+    });
   }
 
   planFor(loopOp: number): RunLoopPlan | undefined {
@@ -154,6 +205,11 @@ export class RunLoopControl {
     for (const member of plan.region) {
       if (this.readiness.getOpState(member).status === "completed") release(member);
     }
+  }
+
+  /** Loops whose body finished an iteration that has not been decided yet. */
+  undecidedLoops(): readonly number[] {
+    return [...this.plans.keys()].filter((loopOp) => this.iterationFinished(loopOp));
   }
 
   snapshot(): readonly number[] {

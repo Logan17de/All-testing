@@ -140,9 +140,37 @@ graph and confirms no run is stored.
 
 Covered by `packages/scheduler/src/loop-run.test.ts`.
 
-## Remaining slice before 8.1 is complete
+## Slice 6 — durable loops (8.1 complete, and 8.3)
 
-1. **Iterations in durable dispatch.** Key invocations, attempts, outputs and frontier events by
-   iteration, and restore mid-loop.
+Loops now run through the durable dispatcher, survive a restart in the middle of a loop, and can be
+built in the editor.
 
-Items 8.2–8.17 follow in the TODO order once loops run durably.
+- **Iteration identity (8.3).** Frontier events, invocations and attempts are keyed by iteration,
+  so every iteration of a body op has its own logical effect id and attempt history. Recovery keeps
+  every iteration's state, and the dispatcher schedules from the latest one.
+- **Committed loop steps.** Entering a loop commits the loop op as running and releases the start of
+  its body. Each decision commits either the next iteration of every body op, or the loop's
+  completion together with the work after it, before the run acts on it. A body op's completion
+  releases only the rest of its body.
+- **Values across iterations.** Inside a body, an op reads outputs from the same iteration.
+  Everywhere else, including the loop's own `again` input and work after the loop, a value is the
+  source's latest completed one.
+- **Deciding.** A loop continues while its `again` input is `true`; without an `again` input it runs
+  to `maxIterations`. Any other value fails the run.
+- **Restart.** The scheduler restores a running loop op and its iteration numbers, rebuilds which
+  dependencies are released under loop rules, and takes any decision a restart interrupted.
+- **Built-in Loop node.** `harness.loop` has control ports `in`, `repeat`, `body` and `done`, an
+  optional boolean `again` input, and `maxIterations` from 1 to 1000. The editor raises a graph's
+  execution bound to cover its largest loop.
+- **Run inspector.** Nodes carry their current iteration, and attempts are labeled by iteration.
+- **Still refused:** loops together with routers or joins in one graph (`422` when the run is
+  created), and routers, joins, loops or human gates inside a loop body.
+
+Covered by `packages/scheduler/src/loop-restore.test.ts` and the durable loop tests in
+`apps/runtime/src/runtime-structured-dispatch.test.ts`: running to the bound, leaving on
+`again: false`, and resuming in a fresh runtime after pausing between iterations.
+
+## Next
+
+8.2 (independent hard bounds on model calls, tool calls, tokens, cost and wall time), then 8.4
+(subgraphs) and the project, goal and agent-loop items in TODO order.

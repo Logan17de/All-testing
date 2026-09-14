@@ -6,6 +6,7 @@ import {
   CONDITION_NODE_TYPE,
   JOIN_ALL_NODE_TYPE,
   JOIN_ANY_NODE_TYPE,
+  LOOP_NODE_TYPE,
   ROUTE_NODE_TYPE,
   createControlFlowPlugin,
   evaluateCondition,
@@ -32,7 +33,13 @@ describe("built-in control-flow nodes", () => {
         .listManifests()
         .map((manifest) => manifest.type)
         .sort(),
-    ).toEqual([CONDITION_NODE_TYPE, JOIN_ALL_NODE_TYPE, JOIN_ANY_NODE_TYPE, ROUTE_NODE_TYPE]);
+    ).toEqual([
+      CONDITION_NODE_TYPE,
+      JOIN_ALL_NODE_TYPE,
+      JOIN_ANY_NODE_TYPE,
+      LOOP_NODE_TYPE,
+      ROUTE_NODE_TYPE,
+    ]);
   });
 
   it("declares Route and the joins as scheduler-owned control with fixed port names", async () => {

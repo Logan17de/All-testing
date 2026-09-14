@@ -264,9 +264,9 @@ Goal: make the stable graph/compiler/runtime usable without letting the UI becom
 
 Goal: build autonomous agents on the same scheduler rather than creating a second engine.
 
-- [ ] 8.1 Implement explicit bounded loop regions.
+- [x] 8.1 Implement explicit bounded loop regions.
 - [ ] 8.2 Require independent hard bounds such as iterations/model calls/tool calls/tokens/cost/wall time.
-- [ ] 8.3 Preserve exact loop iteration/attempt identity in durability records.
+- [x] 8.3 Preserve exact loop iteration/attempt identity in durability records.
 - [ ] 8.4 Add subgraph compile-time lowering/namespacing; reject uncontrolled recursion initially.
 - [ ] 8.5 Add project schema/CRUD.
 - [ ] 8.6 Add conversations/messages using structured message parts and nullable `parent_message_id` for edit/retry branches.

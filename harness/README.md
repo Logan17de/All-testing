@@ -95,7 +95,7 @@ The visual/editor representation is source code, not runtime state. The schedule
 
 The Harness v0.1 boundary is reached: you can draw a graph, have the compiler check it, run it
 through your own plugins, pause for a person, resume, and inspect durable execution. Phase 8 is in
-progress, starting with the control-flow groundwork loops need. [`PLAN.md`](./PLAN.md) holds the
+progress: routers, joins and bounded loops run durably, and projects and agent mode come next. [`PLAN.md`](./PLAN.md) holds the
 detailed progress tree.
 
 ```text
@@ -107,7 +107,7 @@ Phase 4  Runtime daemon + SQLite            ✅
 Phase 5  Effects + permissions + humans     ✅
 Phase 6  Model + tool adapters              ✅ 20/21 (6.12 needs a real local model endpoint)
 Phase 7  Visual graph + inspector           ✅ ← Harness v0.1 boundary
-Phase 8  Loops + projects + agent mode      🚧 in progress (router/join groundwork)
+Phase 8  Loops + projects + agent mode      🚧 in progress (control flow + loops done)
 Phase 9  Replay + memory + triggers         ⏳
 Phase 10 MCP + custom-node SDK + trust      ✅ 9/11 (10.10 WASI, 10.11 npm/Git install)
 Phase 11 Packaging + optional scale-out     🚧 1/9

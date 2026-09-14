@@ -6,6 +6,7 @@ import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 import {
   hasStructuredControl,
   InvocationPermissionDeniedError,
+  loopPlansOf,
   PlainDagRun,
   reduceStructuredControlFrontier,
   SchedulerConcurrency,
@@ -18,6 +19,12 @@ import {
 
 import type { RuntimeHumanApprovals, RuntimeApprovalAuthority } from "./runtime-human-approvals.js";
 import { applyControlDelta, controlFrontierOf } from "./runtime-control-frontier.js";
+import {
+  currentIterations,
+  currentOps,
+  loopBodyOf,
+  nextReadyOrder,
+} from "./runtime-iteration-frontier.js";
 import {
   DURABLE_CONTROL_EDGE_FRONTIER_EVENT_TYPE,
   DURABLE_ROUTER_SELECTION_EVENT_TYPE,
@@ -79,6 +86,7 @@ function event(
   payload: unknown,
   op: number | null = null,
   attempt: number | null = null,
+  iteration = 0,
 ): void {
   connection
     .prepare(
@@ -90,7 +98,7 @@ function event(
       runId,
       type,
       op,
-      op === null ? null : 0,
+      op === null ? null : iteration,
       attempt,
       Date.now(),
       canonicalRuntimeJson(payload),
@@ -98,7 +106,7 @@ function event(
 }
 
 function publishOp(connection: DatabaseSync, runId: string, state: RecoveredOpFrontier): void {
-  event(connection, runId, "harness.frontier.op", state, state.opIndex);
+  event(connection, runId, "harness.frontier.op", state, state.opIndex, null, state.iteration);
 }
 
 /**
@@ -130,31 +138,36 @@ function plan(frontier: RecoveredExecutionFrontier): ExecutionIrV1 {
   // This is persisted compiler output, not a new source-validation path. Runtime
   // checks below concern supported execution/recovery states only.
   const ir = freeze(structuredClone(frontier.executionIr)) as unknown as ExecutionIrV1;
-  if (
-    ir.ops.some(
-      (op) =>
-        op.control !== undefined && op.control.kind !== "router" && op.control.kind !== "join",
-    ) ||
-    frontier.ops.some((op) => op.iteration !== 0)
-  ) {
-    throw new TypeError(
-      "Durable dispatch currently supports iteration-zero graphs whose only control ops are routers and joins.",
-    );
+  const kinds = new Set(
+    ir.ops.flatMap((op) => (op.control === undefined ? [] : [op.control.kind])),
+  );
+  if ([...kinds].some((kind) => kind !== "router" && kind !== "join" && kind !== "loop")) {
+    throw new TypeError("Durable dispatch supports routers, joins and loops only.");
+  }
+  if (kinds.has("loop") && (kinds.has("router") || kinds.has("join"))) {
+    // The durable control reducer does not track loop iterations yet.
+    throw new TypeError("Durable dispatch does not yet support loops with routers or joins.");
+  }
+  if (!kinds.has("loop") && frontier.ops.some((op) => op.iteration !== 0)) {
+    throw new TypeError("Only loop bodies may run more than one iteration.");
   }
   return ir;
 }
 
 function restore(frontier: RecoveredExecutionFrontier): PlainDagRestoreState {
   const now = Date.now();
+  const ops = currentOps(frontier);
   return {
     readiness: {
-      ops: frontier.ops.map((op) => ({ op: op.opIndex, status: op.status })),
-      remainingDependencies: frontier.ops.map((op) => op.remainingDependencies),
-      readyQueue: frontier.readyQueue.map((op) => op.opIndex),
+      ops: ops.map((op) => ({ op: op.opIndex, status: op.status })),
+      remainingDependencies: ops.map((op) => op.remainingDependencies),
+      readyQueue: frontier.readyQueue
+        .filter((entry) => ops[entry.opIndex]?.iteration === entry.iteration)
+        .map((entry) => entry.opIndex),
     },
-    attempts: frontier.ops.map((op) => op.attemptsStarted),
-    attemptBudgetUsed: frontier.ops.map((op) => op.attemptBudgetUsed),
-    retryDelaysMs: frontier.ops.map((op) =>
+    attempts: ops.map((op) => op.attemptsStarted),
+    attemptBudgetUsed: ops.map((op) => op.attemptBudgetUsed),
+    retryDelaysMs: ops.map((op) =>
       op.retryNotBeforeMs === null ? null : Math.max(0, op.retryNotBeforeMs - now),
     ),
     controlEdges: frontier.controlEdges.map((edge) => edge.status),
@@ -162,6 +175,7 @@ function restore(frontier: RecoveredExecutionFrontier): PlainDagRestoreState {
       routerOp: selection.routerOpIndex,
       branch: selection.branch,
     })),
+    iterations: currentIterations(frontier),
   };
 }
 
@@ -292,14 +306,21 @@ export class RuntimeRunDispatcher {
     if (["completed", "failed", "cancelled"].includes(frontier.runStatus)) {
       return { runId, status: frontier.runStatus as "completed" | "failed" | "cancelled" };
     }
+    const loopOps = new Set(
+      (frontier.executionIr as unknown as ExecutionIrV1).ops.flatMap((op, index) =>
+        op.control?.kind === "loop" ? [index] : [],
+      ),
+    );
+    const latest = currentOps(frontier);
+    // A loop op runs, without an attempt of its own, for as long as its body iterates.
     if (
       frontier.preCrashRunningAttempts.length > 0 ||
-      frontier.ops.some((op) => op.status === "running")
+      latest.some((op) => op.status === "running" && !loopOps.has(op.opIndex))
     ) {
       return { runId, status: "recovery-required", code: "RUNTIME_RECOVERY_REQUIRED" };
     }
-    if (frontier.ops.some((op) => op.status === "waiting")) return { runId, status: "waiting" };
-    if (frontier.ops.some((op) => op.status === "failed")) {
+    if (latest.some((op) => op.status === "waiting")) return { runId, status: "waiting" };
+    if (latest.some((op) => op.status === "failed")) {
       await this.terminalize(runId, "failed");
       return { runId, status: "failed", code: "RUNTIME_EXECUTION_FAILED" };
     }
@@ -336,7 +357,7 @@ export class RuntimeRunDispatcher {
               ...execution,
               runId,
               logicalEffectId: effectIds.get(execution.op)!,
-              inputs: this.inputs(runId, execution),
+              inputs: this.inputs(runId, ir, execution),
             }),
           );
           if (execution.signal.aborted) return;
@@ -361,7 +382,8 @@ export class RuntimeRunDispatcher {
         restored: restore(frontier),
         control: {
           selectRouterBranch: ({ operation, branches }) =>
-            this.routerBranch(runId, operation, branches),
+            this.routerBranch(runId, ir, operation, branches),
+          continueLoop: ({ operation }) => this.loopContinues(runId, ir, operation),
         },
         ...(this.#authority === undefined ? {} : { capabilityAuthority: this.#authority }),
         ...(this.#options.retry === undefined ? {} : { retry: this.#options.retry }),
@@ -369,8 +391,8 @@ export class RuntimeRunDispatcher {
           ? {}
           : { effectRetry: this.#options.effectRetry }),
         durability: {
-          beforeAttempt: async ({ op, attempt }) => {
-            const id = await critical(this.beginAttempt(runId, op, attempt, used(op)));
+          beforeAttempt: async ({ op, attempt, iteration }) => {
+            const id = await critical(this.beginAttempt(runId, op, iteration, attempt, used(op)));
             effectIds.set(op, id);
           },
           attemptFailed: async (context) => {
@@ -379,17 +401,23 @@ export class RuntimeRunDispatcher {
           controlResolved: async ({ op, branch }) => {
             await critical(this.resolveControl(runId, op, branch));
           },
+          loopEntered: async ({ op }) => {
+            await critical(this.enterLoop(runId, op));
+          },
+          loopAdvanced: async ({ op, iteration, decision }) => {
+            await critical(this.advanceLoop(runId, op, iteration, decision));
+          },
           suspend: async ({ op, operation }) => {
             await critical(
               this.#approvals.suspend({ runId, opIndex: op, request: operation.config }),
             );
           },
         },
-        completionBarrier: async ({ op, attempt }) => {
+        completionBarrier: async ({ op, attempt, iteration }) => {
           const result = outputs.get(op);
           if (result === undefined)
             throw new TypeError("Successful executor has no prepared outputs.");
-          await critical(this.completeAttempt(runId, op, attempt, used(op), result));
+          await critical(this.completeAttempt(runId, op, iteration, attempt, used(op), result));
           outputs.delete(op);
         },
       },
@@ -399,14 +427,16 @@ export class RuntimeRunDispatcher {
     try {
       const snapshot = await run.execute();
       const recovered = reconstructExecutionFrontier(this.#database.connection(), runId);
-      if (recovered.ops.every((op) => op.status === "completed" || op.status === "skipped")) {
+      if (
+        currentOps(recovered).every((op) => op.status === "completed" || op.status === "skipped")
+      ) {
         await this.terminalize(runId, "completed");
         return { runId, status: "completed" };
       }
       return {
         runId,
         status:
-          snapshot.suspended && !recovered.ops.some((op) => op.status === "waiting")
+          snapshot.suspended && !currentOps(recovered).some((op) => op.status === "waiting")
             ? "paused"
             : "waiting",
       };
@@ -427,10 +457,13 @@ export class RuntimeRunDispatcher {
   /** A router follows the branch named by the string on its `branch` input. */
   private routerBranch(
     runId: string,
+    ir: ExecutionIrV1,
     operation: ExecutionIrOpV1,
     branches: readonly string[],
   ): string {
-    const value = this.inputs(runId, { operation }).find((input) => input.port === "branch")?.value;
+    const value = this.inputs(runId, ir, { operation }).find(
+      (input) => input.port === "branch",
+    )?.value;
     if (typeof value !== "string" || !branches.includes(value)) {
       throw new TypeError(
         `Router '${operation.sourceNodeId}' needs a 'branch' input naming one of: ${branches.join(", ")}.`,
@@ -443,7 +476,7 @@ export class RuntimeRunDispatcher {
   private resolveControl(runId: string, op: number, branch: string | undefined): Promise<void> {
     return this.#database.commit((connection) => {
       const frontier = reconstructExecutionFrontier(connection, runId);
-      const state = frontier.ops[op];
+      const state = currentOps(frontier)[op];
       if (frontier.runStatus !== "running" || state?.status !== "ready") {
         throw new TypeError("Control resolution conflicts with the current frontier.");
       }
@@ -462,13 +495,151 @@ export class RuntimeRunDispatcher {
     });
   }
 
-  private beginAttempt(runId: string, op: number, attempt: number, used: number): Promise<string> {
+  /** A loop continues while its `again` input is true; without one it runs to its bound. */
+  private loopContinues(runId: string, ir: ExecutionIrV1, operation: ExecutionIrOpV1): boolean {
+    const again = this.inputs(runId, ir, { operation }).find((input) => input.port === "again");
+    if (again === undefined) return true;
+    if (typeof again.value !== "boolean") {
+      throw new TypeError(`Loop '${operation.sourceNodeId}' needs a true or false 'again' input.`);
+    }
+    return again.value;
+  }
+
+  /** Commit that a loop op started running and released the start of its body. */
+  private enterLoop(runId: string, op: number): Promise<void> {
     return this.#database.commit((connection) => {
       const frontier = reconstructExecutionFrontier(connection, runId);
-      const state = frontier.ops[op];
+      const ir = frontier.executionIr as unknown as ExecutionIrV1;
+      const ops = currentOps(frontier);
+      const state = ops[op];
+      const plan = loopPlansOf(ir).find((candidate) => candidate.op === op);
+      if (frontier.runStatus !== "running" || state?.status !== "ready" || plan === undefined) {
+        throw new TypeError("Loop entry conflicts with the current frontier.");
+      }
+      publishOp(connection, runId, {
+        ...state,
+        status: "running",
+        attemptsStarted: 1,
+        attemptBudgetUsed: 1,
+        readyOrder: null,
+        retryNotBeforeMs: null,
+      });
+      let order = nextReadyOrder(frontier);
+      for (const target of plan.bodyTargets) {
+        const targetState = ops[target]!;
+        const remainingDependencies = targetState.remainingDependencies - 1;
+        if (targetState.status !== "pending" || remainingDependencies < 0) {
+          throw new TypeError("Loop entry conflicts with its body's committed state.");
+        }
+        publishOp(connection, runId, {
+          ...targetState,
+          remainingDependencies,
+          status: remainingDependencies === 0 ? "ready" : "pending",
+          readyOrder: remainingDependencies === 0 ? order++ : null,
+        });
+      }
+    });
+  }
+
+  /**
+   * Commit a loop's decision once its body finished an iteration: either the next
+   * iteration of every body op, or the loop's completion and the work after it.
+   */
+  private advanceLoop(
+    runId: string,
+    op: number,
+    iteration: number,
+    decision: "continue" | "exit",
+  ): Promise<void> {
+    return this.#database.commit((connection) => {
+      const frontier = reconstructExecutionFrontier(connection, runId);
+      const ir = frontier.executionIr as unknown as ExecutionIrV1;
+      const ops = currentOps(frontier);
+      const state = ops[op];
+      const plan = loopPlansOf(ir).find((candidate) => candidate.op === op);
+      const members =
+        plan === undefined ? [] : [...plan.region].sort((left, right) => left - right);
+      if (
+        frontier.runStatus !== "running" ||
+        state?.status !== "running" ||
+        plan === undefined ||
+        members.some(
+          (member) =>
+            ops[member]?.iteration !== iteration ||
+            !["completed", "skipped"].includes(ops[member].status),
+        )
+      ) {
+        throw new TypeError("Loop decision conflicts with the current frontier.");
+      }
+      event(
+        connection,
+        runId,
+        "harness.loop.advanced",
+        { iteration, decision },
+        op,
+        null,
+        iteration,
+      );
+      let order = nextReadyOrder(frontier);
+
+      if (decision === "continue") {
+        for (const member of members) {
+          const remainingDependencies = ir.ops[member]!.dependencies.filter((source) =>
+            plan.region.has(source),
+          ).length;
+          publishOp(connection, runId, {
+            opIndex: member,
+            iteration: iteration + 1,
+            status: remainingDependencies === 0 ? "ready" : "pending",
+            remainingDependencies,
+            attemptsStarted: 0,
+            attemptBudgetUsed: 0,
+            readyOrder: remainingDependencies === 0 ? order++ : null,
+            retryNotBeforeMs: null,
+          });
+        }
+        return;
+      }
+
+      publishOp(connection, runId, { ...state, status: "completed", readyOrder: null });
+      for (const target of ops) {
+        if (
+          target.status !== "pending" ||
+          target.opIndex === op ||
+          plan.region.has(target.opIndex)
+        ) {
+          continue;
+        }
+        const releasedNow = ir.ops[target.opIndex]!.dependencies.filter(
+          (source) =>
+            source === op || (plan.region.has(source) && ops[source]?.status === "completed"),
+        ).length;
+        if (releasedNow === 0) continue;
+        const remainingDependencies = target.remainingDependencies - releasedNow;
+        publishOp(connection, runId, {
+          ...target,
+          remainingDependencies,
+          status: remainingDependencies === 0 ? "ready" : "pending",
+          readyOrder: remainingDependencies === 0 ? order++ : null,
+        });
+      }
+    });
+  }
+
+  private beginAttempt(
+    runId: string,
+    op: number,
+    iteration: number,
+    attempt: number,
+    used: number,
+  ): Promise<string> {
+    return this.#database.commit((connection) => {
+      const frontier = reconstructExecutionFrontier(connection, runId);
+      const state = currentOps(frontier)[op];
       if (
         frontier.runStatus !== "running" ||
         state === undefined ||
+        state.iteration !== iteration ||
         !["ready", "retry-wait"].includes(state.status) ||
         state.attemptsStarted !== attempt - 1 ||
         state.attemptBudgetUsed !== used - 1 ||
@@ -478,24 +649,32 @@ export class RuntimeRunDispatcher {
       }
       const previous = connection
         .prepare(
-          "SELECT logical_effect_id AS id FROM node_invocations WHERE run_id = ? AND op_index = ? AND iteration = 0",
+          "SELECT logical_effect_id AS id FROM node_invocations WHERE run_id = ? AND op_index = ? AND iteration = ?",
         )
-        .get(runId, op) as { readonly id: string } | undefined;
+        .get(runId, op, iteration) as { readonly id: string } | undefined;
       const logicalEffectId = previous?.id ?? generateLogicalEffectId();
       if (previous === undefined)
         connection
           .prepare(
-            "INSERT INTO node_invocations (run_id, op_index, iteration, logical_effect_id, created_at_ms) VALUES (?, ?, 0, ?, ?)",
+            "INSERT INTO node_invocations (run_id, op_index, iteration, logical_effect_id, created_at_ms) VALUES (?, ?, ?, ?, ?)",
           )
-          .run(runId, op, logicalEffectId, Date.now());
+          .run(runId, op, iteration, logicalEffectId, Date.now());
       connection
         .prepare(
           `INSERT INTO node_attempts
         (run_id, op_index, iteration, attempt, logical_effect_id, status, input_refs_json, started_at_ms)
-        VALUES (?, ?, 0, ?, ?, 'running', '{}', ?)`,
+        VALUES (?, ?, ?, ?, ?, 'running', '{}', ?)`,
         )
-        .run(runId, op, attempt, logicalEffectId, Date.now());
-      event(connection, runId, "harness.attempt.started", { logicalEffectId }, op, attempt);
+        .run(runId, op, iteration, attempt, logicalEffectId, Date.now());
+      event(
+        connection,
+        runId,
+        "harness.attempt.started",
+        { logicalEffectId },
+        op,
+        attempt,
+        iteration,
+      );
       publishOp(connection, runId, {
         ...state,
         status: "running",
@@ -511,15 +690,16 @@ export class RuntimeRunDispatcher {
   private failAttempt(runId: string, context: PlainDagAttemptFailureContext): Promise<void> {
     return this.#database.commit((connection) => {
       const frontier = reconstructExecutionFrontier(connection, runId);
-      const state = frontier.ops[context.op]!;
+      const state = currentOps(frontier)[context.op]!;
       const runningAttempt = state.status === "running";
       if (
-        !runningAttempt &&
-        !(
-          ["ready", "retry-wait"].includes(state.status) &&
-          state.attemptsStarted === context.attempt &&
-          state.attemptBudgetUsed === context.attemptBudgetUsed
-        )
+        state.iteration !== context.iteration ||
+        (!runningAttempt &&
+          !(
+            ["ready", "retry-wait"].includes(state.status) &&
+            state.attemptsStarted === context.attempt &&
+            state.attemptBudgetUsed === context.attemptBudgetUsed
+          ))
       ) {
         throw new TypeError("Failure does not match the durable attempt.");
       }
@@ -527,9 +707,16 @@ export class RuntimeRunDispatcher {
       if (runningAttempt && context.attempt > 0) {
         const result = connection
           .prepare(
-            "UPDATE node_attempts SET status = 'failed', error_json = ?, finished_at_ms = ? WHERE run_id = ? AND op_index = ? AND iteration = 0 AND attempt = ? AND status = 'running'",
+            "UPDATE node_attempts SET status = 'failed', error_json = ?, finished_at_ms = ? WHERE run_id = ? AND op_index = ? AND iteration = ? AND attempt = ? AND status = 'running'",
           )
-          .run(canonicalRuntimeJson(failure), Date.now(), runId, context.op, context.attempt);
+          .run(
+            canonicalRuntimeJson(failure),
+            Date.now(),
+            runId,
+            context.op,
+            context.iteration,
+            context.attempt,
+          );
         if (result.changes !== 1)
           throw new TypeError("Failure requires exactly one running attempt.");
       }
@@ -540,6 +727,7 @@ export class RuntimeRunDispatcher {
         failure,
         context.op,
         context.attempt || null,
+        context.iteration,
       );
       publishOp(connection, runId, {
         ...state,
@@ -555,6 +743,7 @@ export class RuntimeRunDispatcher {
   private completeAttempt(
     runId: string,
     op: number,
+    iteration: number,
     attempt: number,
     used: number,
     result: { readonly json: string; readonly usage: string | null },
@@ -564,8 +753,13 @@ export class RuntimeRunDispatcher {
         commit: (write) =>
           this.#database.commit((connection) => {
             const frontier = reconstructExecutionFrontier(connection, runId);
-            const state = frontier.ops[op]!;
-            if (state.status !== "running" || state.attemptsStarted !== attempt)
+            const ops = currentOps(frontier);
+            const state = ops[op]!;
+            if (
+              state.status !== "running" ||
+              state.iteration !== iteration ||
+              state.attemptsStarted !== attempt
+            )
               throw new TypeError("Completion conflicts with current attempt.");
             const committed = write(connection);
             publishOp(connection, runId, {
@@ -587,12 +781,14 @@ export class RuntimeRunDispatcher {
               );
               return committed;
             }
-            let order =
-              frontier.ops.reduce((max, item) => Math.max(max, item.readyOrder ?? -1), -1) + 1;
-            for (const target of frontier.ops) {
+            // A body op releases only the rest of its body; the loop's exit releases the rest.
+            const body = loopBodyOf(ir, op);
+            let order = nextReadyOrder(frontier);
+            for (const target of ops) {
               if (
                 target.status !== "pending" ||
-                !frontier.executionIr.ops[target.opIndex]!.dependencies.includes(op)
+                !ir.ops[target.opIndex]!.dependencies.includes(op) ||
+                (body !== undefined && loopBodyOf(ir, target.opIndex) !== body)
               )
                 continue;
               const remainingDependencies = target.remainingDependencies - 1;
@@ -609,7 +805,7 @@ export class RuntimeRunDispatcher {
       {
         runId,
         opIndex: op,
-        iteration: 0,
+        iteration,
         attempt,
         outputRefsJson: result.json,
         usageJson: result.usage,
@@ -626,8 +822,15 @@ export class RuntimeRunDispatcher {
 
   private inputs(
     runId: string,
-    execution: { readonly operation: ExecutionIrOpV1 },
+    ir: ExecutionIrV1,
+    execution: {
+      readonly operation: ExecutionIrOpV1;
+      readonly op?: number;
+      readonly iteration?: number;
+    },
   ): RuntimeNodeExecution["inputs"] {
+    const connection = this.#database.connection();
+    const body = execution.op === undefined ? undefined : loopBodyOf(ir, execution.op);
     const bindings = execution.operation.inputs.map((binding) => {
       const source = binding.source;
       let value: unknown;
@@ -636,12 +839,22 @@ export class RuntimeRunDispatcher {
           value = source.value;
           break;
         case "op-output": {
-          const row = this.#database
-            .connection()
-            .prepare(
-              "SELECT output_refs_json AS refs FROM node_attempts WHERE run_id = ? AND op_index = ? AND iteration = 0 AND status = 'completed' ORDER BY attempt DESC LIMIT 1",
-            )
-            .get(runId, source.op) as { readonly refs: string } | undefined;
+          // Inside one loop body a value comes from the same iteration. Anywhere else it
+          // is the source's latest completed value, such as a body's final iteration.
+          const sameIteration = body !== undefined && loopBodyOf(ir, source.op) === body;
+          const row = (
+            sameIteration
+              ? connection
+                  .prepare(
+                    "SELECT output_refs_json AS refs FROM node_attempts WHERE run_id = ? AND op_index = ? AND iteration = ? AND status = 'completed' ORDER BY attempt DESC LIMIT 1",
+                  )
+                  .get(runId, source.op, execution.iteration ?? 0)
+              : connection
+                  .prepare(
+                    "SELECT output_refs_json AS refs FROM node_attempts WHERE run_id = ? AND op_index = ? AND status = 'completed' ORDER BY iteration DESC, attempt DESC LIMIT 1",
+                  )
+                  .get(runId, source.op)
+          ) as { readonly refs: string } | undefined;
           const refs =
             row === undefined
               ? undefined
@@ -653,10 +866,7 @@ export class RuntimeRunDispatcher {
           break;
         }
         case "graph-input": {
-          const frontier = reconstructExecutionFrontier(this.#database.connection(), runId);
-          const input = (frontier.executionIr as unknown as ExecutionIrV1).graphInputs[
-            source.input
-          ];
+          const input = ir.graphInputs[source.input];
           if (input?.default === undefined)
             throw new TypeError(
               "A graph input value is required; this dispatcher supports compiled defaults only.",

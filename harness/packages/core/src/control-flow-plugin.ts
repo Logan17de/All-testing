@@ -10,6 +10,7 @@ export const CONDITION_NODE_TYPE = "harness.condition" as const;
 export const ROUTE_NODE_TYPE = "harness.route" as const;
 export const JOIN_ALL_NODE_TYPE = "harness.join-all" as const;
 export const JOIN_ANY_NODE_TYPE = "harness.join-any" as const;
+export const LOOP_NODE_TYPE = "harness.loop" as const;
 
 export type ConditionOperator = "equals" | "not-equals" | "contains" | "truthy" | "falsy";
 
@@ -101,7 +102,7 @@ function isConditionOperator(value: JsonValue | undefined): value is ConditionOp
 }
 
 /**
- * First-party control flow: a condition, a yes/no router and two joins.
+ * First-party control flow: a condition, a yes/no router, two joins and a bounded loop.
  *
  * Registered through the same public plugin path as any third-party node. The
  * router and joins are resolved by the scheduler and never executed; only the
@@ -196,6 +197,26 @@ export function createControlFlowPlugin(): HarnessPlugin {
           configSchema: { type: "object", additionalProperties: false },
           behavior: CONTROL,
           control: { kind: "join", inputs: ["a", "b"], output: "out", mode: "any" },
+        },
+      });
+
+      context.nodes.register({
+        manifest: {
+          type: LOOP_NODE_TYPE,
+          version: "1",
+          title: "Loop",
+          description:
+            "Runs the steps wired from its body port again, at most maxIterations times. The body returns through the repeat port; a false 'again' input ends the loop early.",
+          inputs: { again: { schema: { type: "boolean" } } },
+          outputs: {},
+          configSchema: {
+            type: "object",
+            properties: { maxIterations: { type: "integer", minimum: 1, maximum: 1000 } },
+            required: ["maxIterations"],
+            additionalProperties: false,
+          },
+          behavior: CONTROL,
+          control: { kind: "loop", entry: "in", continue: "repeat", body: "body", exit: "done" },
         },
       });
     },

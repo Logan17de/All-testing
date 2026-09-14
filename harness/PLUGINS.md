@@ -113,6 +113,10 @@ plus the built-in **Human approval** node, which any graph can use to pause for 
   then draw control edges from the Route's `yes` and `no` handles to the steps on each path. The
   path not taken is skipped, and so is anything that depends on it. **Wait for all** and **Wait for
   any** bring paths back together through their `a` and `b` lanes.
+- To repeat steps, add a **Loop** node. Connect its `body` handle to the first step, the last step
+  back to its `repeat` handle, and its `done` handle to what follows. Set `maxIterations`, and feed
+  a boolean into its `again` input to stop early. Work after the loop can read the last
+  iteration's values.
 - **Run graph** stores a new revision, starts a run and opens the run inspector.
 
 The run inspector (`/runs/<id>`) shows each node's durable state on the graph, the event timeline,
@@ -220,7 +224,9 @@ resolves these nodes itself, so they never run plugin code.
 
 A router follows the branch named by the string on its `branch` input; an undeclared name fails
 the run. A join declares `{ kind: "join", inputs: [...lanes], output: "out", mode }` where `mode`
-is `all-active`, `any`, or `quorum` with a `quorum` count. Both survive a runtime restart.
+is `all-active`, `any`, or `quorum` with a `quorum` count. A loop declares
+`{ kind: "loop", entry, continue, body, exit }`, needs a `maxIterations` config, and continues
+while its `again` input is true. All of them survive a runtime restart.
 
 ### TypeScript
 

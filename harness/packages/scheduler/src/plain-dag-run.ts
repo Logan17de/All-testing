@@ -2,7 +2,7 @@ import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 
 import type { ConcurrencyPermit, RunConcurrency, RunConcurrencySnapshot } from "./concurrency.js";
 import type { ControlEdgeRuntimeStatus, RunControlEdgesSnapshot } from "./control-edge-state.js";
-import { isLoopOp, loopPlansOf, RunLoopControl } from "./loop-control.js";
+import { applyLoopReleaseRules, isLoopOp, loopPlansOf, RunLoopControl } from "./loop-control.js";
 import { RunReadiness, type RunReadinessSnapshot } from "./run-readiness.js";
 import type { RouterBranchSelection } from "./router-activation.js";
 import {
@@ -214,6 +214,8 @@ export interface PlainDagRestoreState {
   readonly controlEdges?: readonly ControlEdgeRuntimeStatus[];
   /** Committed router branch choices; required when the plan has routers or joins. */
   readonly routerSelections?: readonly RouterBranchSelection[];
+  /** Current iteration of every op; required when the plan has loops. */
+  readonly iterations?: readonly number[];
 }
 
 export interface PlainDagAttemptFailureContext extends PlainDagCompletionBarrierContext {
@@ -239,6 +241,11 @@ export interface PlainDagDurabilityHooks {
     readonly op: number;
     readonly operation: ExecutionIrOpV1;
     readonly branch?: string;
+  }) => void | Promise<void>;
+  /** Persist that a loop op started running and released its body, before the body runs. */
+  readonly loopEntered?: (context: {
+    readonly op: number;
+    readonly operation: ExecutionIrOpV1;
   }) => void | Promise<void>;
   /**
    * Persist a loop's decision after an iteration finishes, before the run acts on
@@ -598,6 +605,7 @@ export class PlainDagRun {
       ...(hooks?.controlResolved === undefined
         ? {}
         : { controlResolved: hooks.controlResolved.bind(hooks) }),
+      ...(hooks?.loopEntered === undefined ? {} : { loopEntered: hooks.loopEntered.bind(hooks) }),
       ...(hooks?.loopAdvanced === undefined
         ? {}
         : { loopAdvanced: hooks.loopAdvanced.bind(hooks) }),
@@ -628,29 +636,48 @@ export class PlainDagRun {
         "Restoring a run with routers or joins requires its control-edge state and router selections.",
       );
     }
-    this.readiness = new RunReadiness(
-      ir,
-      restored?.readiness,
-      structured && restored !== undefined && restoredControl !== undefined
-        ? {
-            releasedDependencies: deriveReleasedDependencies(ir, {
-              opStatuses: restored.readiness.ops.map(({ status }) => status),
+    const loopPlans = loopPlansOf(ir);
+    if (loopPlans.length > 0 && restored !== undefined && restored.iterations === undefined) {
+      // A resumed loop must know which iteration its body was in.
+      throw new TypeError("Restoring a run with loops requires its iteration numbers.");
+    }
+    let releasedDependencies: readonly (readonly number[])[] | undefined;
+    if (restored !== undefined && (structured || loopPlans.length > 0)) {
+      const opStatuses = restored.readiness.ops.map(({ status }) => status);
+      releasedDependencies =
+        structured && restoredControl !== undefined
+          ? deriveReleasedDependencies(ir, {
+              opStatuses,
               remainingDependencies: restored.readiness.remainingDependencies,
               ...restoredControl,
-            }),
-          }
-        : {},
-    );
+            })
+          : ir.ops.map((operation) =>
+              operation.dependencies.filter((source) => opStatuses[source] === "completed"),
+            );
+      if (loopPlans.length > 0) {
+        releasedDependencies = applyLoopReleaseRules(
+          ir,
+          loopPlans,
+          opStatuses,
+          releasedDependencies,
+        );
+      }
+    }
+    this.readiness = new RunReadiness(ir, restored?.readiness, {
+      ...(releasedDependencies === undefined ? {} : { releasedDependencies }),
+      runningOps: new Set(
+        loopPlans
+          .map(({ op }) => op)
+          .filter((op) => restored?.readiness.ops[op]?.status === "running"),
+      ),
+    });
     this.control = structured
       ? new RunStructuredControl(ir, this.readiness, restoredControl)
       : undefined;
-    const loopPlans = loopPlansOf(ir);
-    if (loopPlans.length > 0 && restored !== undefined) {
-      // Iteration numbers and body progress are not part of the restore snapshot yet.
-      throw new TypeError("Restoring a run that contains loops is not supported yet.");
-    }
     this.loops =
-      loopPlans.length === 0 ? undefined : new RunLoopControl(ir, this.readiness, loopPlans);
+      loopPlans.length === 0
+        ? undefined
+        : new RunLoopControl(ir, this.readiness, loopPlans, restored?.iterations);
     this.attempts = [...(options.restored?.attempts ?? ir.ops.map(() => 0))];
     this.attemptBudgetUsed = [...(options.restored?.attemptBudgetUsed ?? ir.ops.map(() => 0))];
     this.initialRetryDelays = [...(options.restored?.retryDelaysMs ?? ir.ops.map(() => null))];
@@ -732,6 +759,11 @@ export class PlainDagRun {
     this.initialRetryDelays.forEach((delay, op) => {
       if (delay !== null) this.scheduleRetryWait(op, delay, undefined);
     });
+    // A restart can land after a body finished an iteration but before the loop
+    // recorded its decision; take that decision now.
+    for (const loopOp of this.loops?.undecidedLoops() ?? []) {
+      this.trackTask(this.advanceLoop(loopOp));
+    }
 
     while (true) {
       this.dispatchAvailableReadyOps();
@@ -1359,14 +1391,18 @@ export class PlainDagRun {
    * Start a dequeued loop op. It runs no executor and holds no permit, and it stays
    * running while its body iterates, so nothing after the loop can start early.
    */
-  private enterLoop(op: number): Promise<void> {
+  private async enterLoop(op: number): Promise<void> {
+    const operation = this.ir.ops[op]!;
     try {
+      await this.#durability.loopEntered?.(Object.freeze({ op, operation }));
+      if (this.signal.aborted || this.hasFailure || this.workStopController.signal.aborted) {
+        return;
+      }
       const plan = this.loops!.enter(op);
       this.control?.beginLoopIteration(op, plan.region, plan.control.body);
     } catch (error) {
       if (!this.signal.aborted) this.recordFailure(error);
     }
-    return Promise.resolve();
   }
 
   /**

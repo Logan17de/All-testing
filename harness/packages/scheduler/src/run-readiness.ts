@@ -40,6 +40,11 @@ export interface RunReadinessRestoreOptions {
    * release a lane whose source was skipped.
    */
   readonly releasedDependencies?: readonly (readonly number[])[];
+  /**
+   * Ops that may be restored as running without an attempt: loop ops whose
+   * body is mid-iteration. Every other running op is an unclassified attempt.
+   */
+  readonly runningOps?: ReadonlySet<number>;
 }
 
 export class RunReadiness {
@@ -80,7 +85,9 @@ export class RunReadiness {
     for (let op = 0; op < this.ops.length; op += 1) {
       if (this.remainingDependencies[op] === 0) this.markReady(op);
     }
-    if (restored !== undefined) this.restore(ir, restored, options.releasedDependencies);
+    if (restored !== undefined) {
+      this.restore(ir, restored, options.releasedDependencies, options.runningOps);
+    }
   }
 
   /** Restore a quiescent plain-DAG frontier, never an unclassified running attempt. */
@@ -88,6 +95,7 @@ export class RunReadiness {
     ir: ExecutionIrV1,
     restored: RunReadinessSnapshot,
     releasedDependencies: readonly (readonly number[])[] | undefined,
+    runningOps: ReadonlySet<number> = new Set(),
   ): void {
     const count = this.ops.length;
     const allowed = new Set(["pending", "ready", "completed", "skipped", "waiting", "retry-wait"]);
@@ -118,7 +126,8 @@ export class RunReadiness {
     }
     for (const op of queued) assertOpIndex(op, count);
     restored.ops.forEach((state, op) => {
-      if (state.op !== op || !allowed.has(state.status)) {
+      const runningLoop = state.status === "running" && runningOps.has(op);
+      if (state.op !== op || !(allowed.has(state.status) || runningLoop)) {
         throw new TypeError("Restored readiness contains an unsupported op state.");
       }
       const expected = this.dependencies[op]!.length - releasedSets[op]!.size;

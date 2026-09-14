@@ -532,6 +532,15 @@ export function finalizeGraph(
         ),
   );
 
+  // A loop repeats its body, so the execution bound grows with the largest loop bound.
+  const loopBound = Math.max(
+    1,
+    ...document.nodes.map((node) => {
+      const control = findManifest(palette, node.type, node.version)?.manifest.control;
+      const bound = node.config["maxIterations"];
+      return control?.kind === "loop" && typeof bound === "number" ? bound : 1;
+    }),
+  );
   const first = entrypoints[0];
   return {
     ...document,
@@ -542,7 +551,7 @@ export function finalizeGraph(
       ...(document.policies ?? {}),
       maxNodeExecutions: Math.max(
         document.policies?.maxNodeExecutions ?? 0,
-        document.nodes.length,
+        document.nodes.length * loopBound,
         1,
       ),
       maxParallelism: document.policies?.maxParallelism ?? 4,

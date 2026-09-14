@@ -27,6 +27,7 @@ export {
   CONTROL_FLOW_PLUGIN_ID,
   JOIN_ALL_NODE_TYPE,
   JOIN_ANY_NODE_TYPE,
+  LOOP_NODE_TYPE,
   ROUTE_NODE_TYPE,
   createControlFlowPlugin,
   evaluateCondition,
