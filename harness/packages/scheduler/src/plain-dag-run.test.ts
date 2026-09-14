@@ -184,7 +184,7 @@ describe("PlainDagRun", () => {
     await expect(run.execute()).rejects.toThrow("Plain DAG run may be executed only once.");
   });
 
-  it("rejects structured-control ops instead of activating every branch as ordinary DAG fan-out", () => {
+  it("refuses a router without a host branch decision instead of activating every branch", () => {
     const plan = ir([
       op("router", [], {
         control: { kind: "router", entry: "entry", branches: ["left", "right"] },
@@ -193,7 +193,7 @@ describe("PlainDagRun", () => {
     const scheduler = new SchedulerConcurrency(1);
 
     expect(() => new PlainDagRun(plan, scheduler.createRun(plan), () => undefined)).toThrow(
-      "Plain DAG run cannot execute structured-control op 0 ('router')",
+      "Router op 0 requires a host-owned branch selection hook",
     );
   });
 
