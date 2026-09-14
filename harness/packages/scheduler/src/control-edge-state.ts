@@ -125,6 +125,14 @@ export class RunControlEdges {
     });
   }
 
+  /** Return edges inside a loop body to unresolved when the next iteration starts. */
+  resetForIteration(edges: readonly number[]): void {
+    for (const edge of edges) {
+      assertIndex("Control edge", edge, this.states.length);
+      this.states[edge] = createState(edge);
+    }
+  }
+
   isForIr(ir: ExecutionIrV1): boolean {
     return this.ir === ir;
   }

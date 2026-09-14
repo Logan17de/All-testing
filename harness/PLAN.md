@@ -143,8 +143,8 @@ Phase 8  Loops + projects + agent mode     🚧 IN PROGRESS
            ├─ groundwork: built-in control nodes + control edges in editor     ✅
            ├─ 8.1 explicit bounded loop regions                                 ▶ CURRENT
            │    ├─ loop regions + lowering in the compiler                      ✅
-           │    ├─ iterations in the scheduler                                  ▶ next
-           │    └─ iterations in durable dispatch                               ⏳
+           │    ├─ iterations in the scheduler                                  ✅
+           │    └─ iterations in durable dispatch                               ▶ next
            ├─ 8.2 independent hard loop bounds                                  ⏳
            ├─ 8.3 loop iteration/attempt identity in durability records         ⏳
            ├─ 8.4 subgraph lowering/namespacing, no uncontrolled recursion      ⏳

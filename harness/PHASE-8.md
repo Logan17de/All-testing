@@ -116,11 +116,33 @@ Covered by `packages/graph/src/graph-json-v1-loop-regions.test.ts` (regions, eve
 full diagnostics stack, lowering and the IR invariant) and a runtime test that compiles a loop
 graph and confirms no run is stored.
 
-## Remaining slices before 8.1 is complete
+## Slice 5 — iterations in the scheduler (8.1, in-memory; done)
 
-1. **Iterations in the scheduler.** Re-arm region ops with `iteration + 1` until the loop exits or
-   `maxIterations` is reached, keeping attempts and outputs keyed by iteration.
-2. **Iterations in durable dispatch.** Key invocations, attempts, outputs and frontier events by
+`PlainDagRun` now iterates loop bodies.
+
+- **The loop op holds its place.** A dequeued loop op starts running without an executor or a
+  concurrency permit, releases its body, and stays running while the body iterates, so nothing
+  after the loop can start early.
+- **Iterations.** When every body op has finished an iteration, the host's `continueLoop` hook
+  decides whether to run another, unless `maxIterations` is reached, which always exits without
+  asking. A plan with a loop and no hook is refused. A durable host's `loopAdvanced` hook records
+  each `continue` or `exit` decision before the run acts on it.
+- **Re-arming.** A new iteration returns the body ops to pending, waiting only on each other
+  (`RunReadiness.rearmOp`, the one sanctioned way out of a terminal state), with a fresh attempt
+  count and retry budget. Executors, completion barriers and durability hooks now receive the
+  `iteration` an attempt belongs to.
+- **Leaving.** Body ops never release work outside the body per iteration. When the loop exits,
+  it completes and releases the work after it, including readers of the last iteration's values.
+- **With routers and joins.** Control edges inside a body are reset for every iteration, and a
+  loop's exit edges finish when it completes, so a loop can sit on a router's branch.
+- **Not yet:** routers, joins, loops or human gates inside a loop body, and restoring a run that
+  contains a loop. Both are refused explicitly.
+
+Covered by `packages/scheduler/src/loop-run.test.ts`.
+
+## Remaining slice before 8.1 is complete
+
+1. **Iterations in durable dispatch.** Key invocations, attempts, outputs and frontier events by
    iteration, and restore mid-loop.
 
 Items 8.2–8.17 follow in the TODO order once loops run durably.

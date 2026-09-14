@@ -69,7 +69,7 @@ export class RunStructuredControl {
   }
 
   /** Release everything a completed ordinary op was holding back. */
-  releaseCompletedOp(op: number): void {
+  releaseCompletedOp(op: number, withheld: ReadonlySet<number> = new Set()): void {
     // A completed ordinary op is on the live path, so its outgoing control edges
     // finish with it. A join decides for itself when its control lanes are
     // satisfied, so those particular dependencies are left to reconciliation.
@@ -85,7 +85,9 @@ export class RunStructuredControl {
       if (this.ir.ops[target]?.control?.kind === "join") joinLanes.add(target);
     }
     for (const targetOp of this.readiness.getDependents(op)) {
-      if (!joinLanes.has(targetOp)) this.readiness.releaseDependency(op, targetOp);
+      if (!joinLanes.has(targetOp) && !withheld.has(targetOp)) {
+        this.readiness.releaseDependency(op, targetOp);
+      }
     }
     this.settle();
   }
@@ -137,6 +139,37 @@ export class RunStructuredControl {
         changed = true;
       }
     }
+  }
+
+  /**
+   * A loop op starts an iteration: control edges inside its body, and those
+   * returning to it, start over, and its body edges become live.
+   */
+  beginLoopIteration(loopOp: number, region: ReadonlySet<number>, bodyPort: string): void {
+    const reset: number[] = [];
+    const bodyEdges: number[] = [];
+    for (let edge = 0; edge < this.controlEdges.edgeCount; edge += 1) {
+      const { from, to } = this.controlEdges.getEdge(edge);
+      const fromBodyPort = from.op === loopOp && from.port === bodyPort;
+      if (fromBodyPort) bodyEdges.push(edge);
+      if (fromBodyPort || (region.has(from.op) && (region.has(to.op) || to.op === loopOp))) {
+        reset.push(edge);
+      }
+    }
+    this.controlEdges.resetForIteration(reset);
+    for (const edge of bodyEdges) this.controlEdges.activate(edge);
+  }
+
+  /** A loop op completed: its body edges finish, and its other outgoing edges go live and finish. */
+  finishLoop(loopOp: number, bodyPort: string): void {
+    for (const edge of this.controlEdges.getOutgoingEdgeIndexes(loopOp)) {
+      const port = this.controlEdges.getEdge(edge).from.port;
+      if (port !== bodyPort && this.controlEdges.getState(edge).status === "unresolved") {
+        this.controlEdges.activate(edge);
+      }
+      if (this.controlEdges.getState(edge).status === "active") this.controlEdges.complete(edge);
+    }
+    this.settle();
   }
 
   snapshot(): StructuredControlSnapshot {

@@ -143,6 +143,36 @@ export class RunReadiness {
     });
   }
 
+  /**
+   * Begin another loop iteration for one finished body op.
+   *
+   * This is the only way an op leaves a terminal state. It returns to pending, or
+   * straight to ready, with exactly `released` predecessors already satisfied, so
+   * the next iteration waits only on the body ops it depends on.
+   */
+  rearmOp(op: number, released: readonly number[]): RunOpState {
+    assertOpIndex(op, this.ops.length);
+    const current = this.getOpState(op);
+    if (current.status !== "completed" && current.status !== "skipped") {
+      throw new TypeError(
+        `Run op ${String(op)} cannot start another iteration from '${current.status}'.`,
+      );
+    }
+    const dependencies = this.dependencies[op]!;
+    const releasedSet = new Set(released);
+    for (const source of releasedSet) {
+      if (!dependencies.includes(source)) {
+        throw new TypeError(`Run op ${String(op)} does not depend on source op ${String(source)}.`);
+      }
+    }
+    const remaining = dependencies.length - releasedSet.size;
+    this.releasedDependencies[op] = releasedSet;
+    this.remainingDependencies[op] = remaining;
+    this.ops[op] = createRunOpState(op);
+    if (remaining === 0) this.markReady(op);
+    return this.getOpState(op);
+  }
+
   /** Commit-backed human wait. No executor attempt or dependency is consumed here. */
   waitReadyOp(op: number): void {
     if (this.peekReadyOp() !== op) throw new TypeError("Human gate must be FIFO ready.");

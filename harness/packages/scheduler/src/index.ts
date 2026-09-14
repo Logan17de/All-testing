@@ -7,6 +7,7 @@ export * from "./control-edge-state.js";
 export * from "./router-activation.js";
 export * from "./join-activation.js";
 export * from "./structured-control.js";
+export * from "./loop-control.js";
 export * from "./runtime-event-emitter.js";
 export * from "./runtime-event-channels.js";
 export * from "./invocation-permission.js";

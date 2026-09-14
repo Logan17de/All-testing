@@ -171,7 +171,7 @@ describe("routers and joins inside a run", () => {
     ).toThrow("Router op 0 requires a host-owned branch selection hook");
   });
 
-  it("still refuses loops, which are not executable yet", () => {
+  it("refuses a loop without a host continue decision", () => {
     const plan = createMockExecutionIr([
       createMockExecutionOp("loop", [], {
         type: "test.loop",
@@ -192,6 +192,6 @@ describe("routers and joins inside a run", () => {
         new PlainDagRun(plan, new SchedulerConcurrency(1).createRun(plan), () => undefined, {
           control: { selectRouterBranch: () => "left" },
         }),
-    ).toThrow("Plain DAG run cannot execute structured-control op 0 ('loop')");
+    ).toThrow("Loop op 0 requires a host-owned continue decision");
   });
 });

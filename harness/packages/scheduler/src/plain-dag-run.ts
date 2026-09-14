@@ -2,6 +2,7 @@ import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 
 import type { ConcurrencyPermit, RunConcurrency, RunConcurrencySnapshot } from "./concurrency.js";
 import type { ControlEdgeRuntimeStatus, RunControlEdgesSnapshot } from "./control-edge-state.js";
+import { isLoopOp, loopPlansOf, RunLoopControl } from "./loop-control.js";
 import { RunReadiness, type RunReadinessSnapshot } from "./run-readiness.js";
 import type { RouterBranchSelection } from "./router-activation.js";
 import {
@@ -111,6 +112,8 @@ export interface PlainDagOpExecution {
   readonly operation: ExecutionIrOpV1;
   /** One-based scheduler-owned attempt number for this logical op. */
   readonly attempt: number;
+  /** Zero-based loop iteration this attempt belongs to; zero outside loop bodies. */
+  readonly iteration: number;
   /** Shared outer + internal retry budget for this scheduler attempt. */
   readonly retryBudget: PlainDagRetryBudget;
   /** Run cancellation plus the current op's timeout, when configured. */
@@ -130,6 +133,8 @@ export interface PlainDagCompletionBarrierContext {
   readonly op: number;
   readonly operation: ExecutionIrOpV1;
   readonly attempt: number;
+  /** Zero-based loop iteration; zero outside loop bodies. */
+  readonly iteration: number;
 }
 
 export type PlainDagCompletionBarrier = (
@@ -235,6 +240,16 @@ export interface PlainDagDurabilityHooks {
     readonly operation: ExecutionIrOpV1;
     readonly branch?: string;
   }) => void | Promise<void>;
+  /**
+   * Persist a loop's decision after an iteration finishes, before the run acts on
+   * it: `continue` starts the next iteration, `exit` completes the loop.
+   */
+  readonly loopAdvanced?: (context: {
+    readonly op: number;
+    readonly operation: ExecutionIrOpV1;
+    readonly iteration: number;
+    readonly decision: "continue" | "exit";
+  }) => void | Promise<void>;
 }
 
 export interface PlainDagRouterSelectionContext {
@@ -244,14 +259,27 @@ export interface PlainDagRouterSelectionContext {
   readonly signal: AbortSignal;
 }
 
+export interface PlainDagLoopDecisionContext {
+  readonly op: number;
+  readonly operation: ExecutionIrOpV1;
+  /** The iteration that just finished, zero-based. */
+  readonly iteration: number;
+  readonly signal: AbortSignal;
+}
+
 export interface PlainDagControlHooks {
   /**
    * Host-owned branch decision for one scheduler-owned router. The branch must be
    * one the router declares; any other answer fails the run rather than guessing.
    */
-  readonly selectRouterBranch: (
+  readonly selectRouterBranch?: (
     context: PlainDagRouterSelectionContext,
   ) => string | Promise<string>;
+  /**
+   * Host-owned decision after a loop body finishes an iteration: `true` runs another
+   * iteration, `false` leaves the loop. The loop's `maxIterations` ends it regardless.
+   */
+  readonly continueLoop?: (context: PlainDagLoopDecisionContext) => boolean | Promise<boolean>;
 }
 
 export interface PlainDagRunOptions {
@@ -273,7 +301,7 @@ export interface PlainDagRunOptions {
    * commit; rejection is terminal and never re-executes the successful node.
    */
   readonly completionBarrier?: PlainDagCompletionBarrier;
-  /** Required when the plan contains routers; joins need no host decision. */
+  /** Routers need a branch decision and loops a continue decision; joins need none. */
   readonly control?: PlainDagControlHooks;
 }
 
@@ -291,7 +319,11 @@ export interface PlainDagRunSnapshot {
   /** Present only for plans with routers or joins. */
   readonly controlEdges?: RunControlEdgesSnapshot;
   readonly routerSelections?: readonly RouterBranchSelection[];
+  /** Present only for plans with loops: the current iteration of every op. */
+  readonly iterations?: readonly number[];
 }
+
+const NO_OPS: ReadonlySet<number> = new Set();
 
 function frozenCopy<T>(items: readonly T[]): readonly T[] {
   return Object.freeze([...items]);
@@ -330,6 +362,7 @@ function assertPlainExecutableDag(
   ir: ExecutionIrV1,
   humanHandler: boolean,
   routerHandler: boolean,
+  loopHandler: boolean,
 ): void {
   ir.ops.forEach((op, index) => {
     if (op.control?.kind === "router" && !routerHandler) {
@@ -337,12 +370,21 @@ function assertPlainExecutableDag(
         `Router op ${String(index)} requires a host-owned branch selection hook; branches are never all activated as ordinary fan-out.`,
       );
     }
-    if (op.control !== undefined && !isStructuredControlOp(op)) {
+    if (op.control?.kind === "loop" && !loopHandler) {
+      throw new TypeError(
+        `Loop op ${String(index)} requires a host-owned continue decision; a body never repeats by default.`,
+      );
+    }
+    if (op.control !== undefined && !isStructuredControlOp(op) && op.control.kind !== "loop") {
       throw new TypeError(
         `Plain DAG run cannot execute structured-control op ${String(index)} ('${op.control.kind}'); use the later structured-control scheduler.`,
       );
     }
-    if (op.behavior.executionMode === "none" && !isStructuredControlOp(op)) {
+    if (
+      op.behavior.executionMode === "none" &&
+      !isStructuredControlOp(op) &&
+      op.control?.kind !== "loop"
+    ) {
       throw new TypeError(
         `Plain DAG run cannot execute op ${String(index)} with executionMode 'none'.`,
       );
@@ -524,6 +566,8 @@ export class PlainDagRun {
   private readonly pauseController = new AbortController();
   private suspendedForHuman = false;
   private readonly control: RunStructuredControl | undefined;
+  private readonly loops: RunLoopControl | undefined;
+  readonly #continueLoop: PlainDagControlHooks["continueLoop"];
   readonly #selectRouterBranch: PlainDagControlHooks["selectRouterBranch"] | undefined;
   readonly #durability: PlainDagDurabilityHooks;
   private readonly initialRetryDelays: readonly (number | null)[];
@@ -554,6 +598,9 @@ export class PlainDagRun {
       ...(hooks?.controlResolved === undefined
         ? {}
         : { controlResolved: hooks.controlResolved.bind(hooks) }),
+      ...(hooks?.loopAdvanced === undefined
+        ? {}
+        : { loopAdvanced: hooks.loopAdvanced.bind(hooks) }),
     });
     this.suspendedForHuman =
       options.restored?.readiness.ops.some((op) => op.status === "waiting") ?? false;
@@ -561,9 +608,11 @@ export class PlainDagRun {
       ir,
       this.#durability.suspend !== undefined,
       options.control?.selectRouterBranch !== undefined,
+      options.control?.continueLoop !== undefined,
     );
     const control = options.control;
-    this.#selectRouterBranch = control?.selectRouterBranch.bind(control);
+    this.#selectRouterBranch = control?.selectRouterBranch?.bind(control);
+    this.#continueLoop = control?.continueLoop?.bind(control);
     const authority = options.capabilityAuthority;
     this.#evaluateCapability = authority?.evaluate.bind(authority);
     const restored = options.restored;
@@ -595,6 +644,13 @@ export class PlainDagRun {
     this.control = structured
       ? new RunStructuredControl(ir, this.readiness, restoredControl)
       : undefined;
+    const loopPlans = loopPlansOf(ir);
+    if (loopPlans.length > 0 && restored !== undefined) {
+      // Iteration numbers and body progress are not part of the restore snapshot yet.
+      throw new TypeError("Restoring a run that contains loops is not supported yet.");
+    }
+    this.loops =
+      loopPlans.length === 0 ? undefined : new RunLoopControl(ir, this.readiness, loopPlans);
     this.attempts = [...(options.restored?.attempts ?? ir.ops.map(() => 0))];
     this.attemptBudgetUsed = [...(options.restored?.attemptBudgetUsed ?? ir.ops.map(() => 0))];
     this.initialRetryDelays = [...(options.restored?.retryDelaysMs ?? ir.ops.map(() => null))];
@@ -645,6 +701,7 @@ export class PlainDagRun {
       readiness: this.readiness.snapshot(),
       concurrency: this.concurrency.snapshot(),
       ...(this.control === undefined ? {} : this.control.snapshot()),
+      ...(this.loops === undefined ? {} : { iterations: this.loops.snapshot() }),
     });
   }
 
@@ -759,7 +816,9 @@ export class PlainDagRun {
 
       const task = isStructuredControlOp(this.ir.ops[op]!)
         ? this.executeControlOp(op)
-        : this.executeReservedOp(op);
+        : isLoopOp(this.ir, op)
+          ? this.enterLoop(op)
+          : this.executeReservedOp(op);
       this.activeTasks.add(task);
       void task.finally(() => {
         this.activeTasks.delete(task);
@@ -793,10 +852,11 @@ export class PlainDagRun {
       if (this.attempts[op]! > 0 && !repeatAuthorized) {
         throw new TypeError("Restored operation is not authorized for repeated execution.");
       }
+      const iteration = this.loops?.iterationOf(op) ?? 0;
       const attempt = this.startAttempt(op, maxAttempts);
       try {
         if (this.#durability.beforeAttempt !== undefined) {
-          await this.#durability.beforeAttempt({ op, operation, attempt });
+          await this.#durability.beforeAttempt({ op, operation, attempt, iteration });
         }
       } catch (error) {
         startBarrierFailed = true;
@@ -818,6 +878,7 @@ export class PlainDagRun {
               op,
               operation,
               attempt,
+              iteration,
               retryBudget: retryBudgetScope.budget,
               signal: this.signal,
             }),
@@ -845,6 +906,7 @@ export class PlainDagRun {
                 op,
                 operation,
                 attempt,
+                iteration,
                 retryBudget: retryBudgetScope.budget,
                 signal: timeoutController.signal,
               }),
@@ -899,6 +961,7 @@ export class PlainDagRun {
               op,
               operation,
               attempt,
+              iteration,
             }),
           );
         } catch (error) {
@@ -918,12 +981,18 @@ export class PlainDagRun {
       }
 
       this.readiness.completeRunningOp(op);
+      // A body op releases only the rest of its body; work after the loop waits for the exit.
+      const withheld = this.loops?.withheldDependents(op) ?? NO_OPS;
       if (this.control === undefined) {
         for (const targetOp of this.readiness.getDependents(op)) {
-          this.readiness.releaseDependency(op, targetOp);
+          if (!withheld.has(targetOp)) this.readiness.releaseDependency(op, targetOp);
         }
       } else {
-        this.control.releaseCompletedOp(op);
+        this.control.releaseCompletedOp(op, withheld);
+      }
+      const loopOp = this.loops?.loopOf(op);
+      if (loopOp !== undefined && this.loops!.iterationFinished(loopOp)) {
+        this.trackTask(this.advanceLoop(loopOp));
       }
     } catch (error) {
       if (this.signal.aborted) {
@@ -1026,6 +1095,7 @@ export class PlainDagRun {
         error,
         retryDelayMs,
         attempt: this.attempts[op]!,
+        iteration: this.loops?.iterationOf(op) ?? 0,
         attemptBudgetUsed: this.attemptBudgetUsed[op]!,
       });
       return true;
@@ -1272,6 +1342,72 @@ export class PlainDagRun {
         await this.#durability.controlResolved?.(Object.freeze({ op, operation }));
         if (halted()) return;
         control.completeReservedJoin(op);
+      }
+    } catch (error) {
+      if (!this.signal.aborted) this.recordFailure(error);
+    }
+  }
+
+  private trackTask(task: Promise<void>): void {
+    this.activeTasks.add(task);
+    void task.finally(() => {
+      this.activeTasks.delete(task);
+    });
+  }
+
+  /**
+   * Start a dequeued loop op. It runs no executor and holds no permit, and it stays
+   * running while its body iterates, so nothing after the loop can start early.
+   */
+  private enterLoop(op: number): Promise<void> {
+    try {
+      const plan = this.loops!.enter(op);
+      this.control?.beginLoopIteration(op, plan.region, plan.control.body);
+    } catch (error) {
+      if (!this.signal.aborted) this.recordFailure(error);
+    }
+    return Promise.resolve();
+  }
+
+  /**
+   * After a body finishes an iteration, run another or leave the loop.
+   *
+   * The host decides, unless `maxIterations` is reached, which always exits. A
+   * durable host records the decision before the run acts on it. Body ops start
+   * each iteration with a fresh attempt count and retry budget.
+   */
+  private async advanceLoop(op: number): Promise<void> {
+    const loops = this.loops!;
+    const operation = this.ir.ops[op]!;
+    const plan = loops.planFor(op)!;
+    const halted = (): boolean =>
+      this.signal.aborted || this.hasFailure || this.workStopController.signal.aborted;
+    try {
+      const iteration = loops.iterationOf(op);
+      let decision: "continue" | "exit" = "exit";
+      if (iteration + 1 < plan.control.maxIterations) {
+        const again: unknown = await this.#continueLoop!(
+          Object.freeze({ op, operation, iteration, signal: this.signal }),
+        );
+        if (halted()) return;
+        if (typeof again !== "boolean") {
+          throw new TypeError(`Loop op ${String(op)} continue decision must be true or false.`);
+        }
+        decision = again ? "continue" : "exit";
+      }
+      await this.#durability.loopAdvanced?.(Object.freeze({ op, operation, iteration, decision }));
+      if (halted()) return;
+      if (decision === "continue") {
+        loops.rearm(op, this.ir);
+        for (const member of plan.region) {
+          this.attempts[member] = 0;
+          this.attemptBudgetUsed[member] = 0;
+          this.repeatAuthorizations[member] = undefined;
+        }
+        this.control?.beginLoopIteration(op, plan.region, plan.control.body);
+      } else {
+        loops.exit(op);
+        this.control?.finishLoop(op, plan.control.body);
       }
     } catch (error) {
       if (!this.signal.aborted) this.recordFailure(error);
