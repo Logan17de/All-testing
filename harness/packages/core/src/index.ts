@@ -29,6 +29,7 @@ export {
   JOIN_ANY_NODE_TYPE,
   LOOP_NODE_TYPE,
   ROUTE_NODE_TYPE,
+  SUBGRAPH_NODE_TYPE,
   createControlFlowPlugin,
   evaluateCondition,
   type ConditionOperator,

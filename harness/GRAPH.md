@@ -288,6 +288,29 @@ edges from `dependencies`: they remain control edges and data inputs, but a loop
 own body. No loop could compile before 8.1, so filling in the reserved descriptor changes no
 existing plan and keeps `harness.compiler/v1`.
 
+### Subgraphs (8.4)
+
+A node whose manifest declares `control.kind === "subgraph"` runs a saved graph revision named by
+its top-level `config.graphId` and `config.revisionId`. Subgraphs are not an execution concept:
+once a document passes the shape check, `expandGraphJsonV1Subgraphs(graph, resolver, sources)`
+replaces each subgraph node with the saved graph, namespacing every node and edge id as
+`<subgraph node id>/<id>`. Nested subgraphs expand first, so ids nest the same way. Every later
+validation stage, lowering and identity see only the flat graph, which is also what the run stores
+and executes.
+
+Graph inputs of the saved graph are fed by data edges into the subgraph node's port of the same
+name, then by a binding on the subgraph node, then by the input's default. Data edges out of the
+subgraph node read the saved graph's outputs. Control and data edges into the subgraph node order
+the saved graph's start nodes (its entrypoints, or nodes with no incoming edge); control edges out
+of it wait for each of its final nodes. Capability requirements and denials are unioned, and the
+saved graph's `maxNodeExecutions` is added to the parent's.
+
+Expansion refuses recursion by graph id along the expansion chain (`GRAPH_SUBGRAPH_RECURSION`) and
+nesting deeper than 8 (`GRAPH_SUBGRAPH_TOO_DEEP`), and reports `GRAPH_SUBGRAPH_REFERENCE_INVALID`,
+`GRAPH_SUBGRAPH_NOT_FOUND`, `GRAPH_SUBGRAPH_PORT_UNKNOWN` and `GRAPH_SUBGRAPH_INPUT_UNBOUND`. The
+runtime resolves references against `graph_sources`, whose (graph id, revision id) pairs are
+immutable, so a pinned revision always expands to the same content.
+
 ### Graph JSON v1 capability/policy validation
 
 2.13 is a separate compile-time stage with explicit external authority input. Hard capability demand is the union of graph `capabilities.required` and every resolved node manifest's `behavior.requiredCapabilities`. Graph `capabilities.optional` is opportunistic and does not fail compilation merely because a grant is absent. Graph `capabilities.deny` is a self-restriction only: it can remove authority but can never add it. Duplicate entries inside a capability bucket and capabilities declared across multiple graph intent buckets are rejected rather than normalized silently.

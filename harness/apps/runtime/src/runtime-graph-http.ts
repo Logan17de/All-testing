@@ -8,6 +8,7 @@ import { writeRuntimeJson } from "./runtime-approval-http.js";
 import {
   RuntimeGraphError,
   compileEditorGraph,
+  createStoredGraphResolver,
   createRunFromCompiledGraph,
   listPaletteNodes,
   listRecentRuns,
@@ -107,7 +108,7 @@ export async function handleGraphHttp(
       const graph = await readGraphBody(request);
       const result = await compileEditorGraph(
         graph,
-        services.sources(),
+        { ...services.sources(), graphs: createStoredGraphResolver(services.database) },
         services.capabilityAuthority(),
       );
       writeRuntimeJson(response, 200, {
@@ -128,7 +129,7 @@ export async function handleGraphHttp(
       const graph = await readGraphBody(request);
       const result = await compileEditorGraph(
         graph,
-        services.sources(),
+        { ...services.sources(), graphs: createStoredGraphResolver(services.database) },
         services.capabilityAuthority(),
       );
       if (!result.valid) {

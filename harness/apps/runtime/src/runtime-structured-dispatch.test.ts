@@ -10,7 +10,11 @@ import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "@zet-harness/graph";
 import type { HarnessPlugin, NodeBehavior, NodeDefinition } from "@zet-harness/plugin-api";
 
 import { RUNTIME_DATABASE_MIGRATIONS } from "./runtime-daemon.js";
-import { compileEditorGraph, createRunFromCompiledGraph } from "./runtime-graphs.js";
+import {
+  compileEditorGraph,
+  createRunFromCompiledGraph,
+  createStoredGraphResolver,
+} from "./runtime-graphs.js";
 import { RuntimeHumanApprovals } from "./runtime-human-approvals.js";
 import { createPluginNodeExecutor } from "./runtime-plugin-executor.js";
 import { reconstructExecutionFrontier } from "./runtime-recovery.js";
@@ -152,6 +156,25 @@ const slow: NodeDefinition = {
   },
 };
 
+/** Runs a saved graph in place. */
+const call: NodeDefinition = {
+  manifest: {
+    type: "flow.call",
+    version: "1",
+    title: "Call a saved graph",
+    inputs: {},
+    outputs: {},
+    configSchema: {
+      type: "object",
+      properties: { graphId: { type: "string" }, revisionId: { type: "string" } },
+      required: ["graphId", "revisionId"],
+      additionalProperties: false,
+    },
+    behavior: CONTROL,
+    control: { kind: "subgraph", entry: "in", exits: ["done"] },
+  },
+};
+
 const flag: NodeDefinition = {
   manifest: {
     type: "flow.flag",
@@ -201,6 +224,7 @@ const flowPlugin: HarnessPlugin = {
     context.nodes.register(loop);
     context.nodes.register(flag);
     context.nodes.register(slow);
+    context.nodes.register(call);
   },
 };
 
@@ -708,6 +732,119 @@ describe("hard limits (8.2)", () => {
       { iteration: 0, decision: "continue" },
       { iteration: 1, decision: "continue" },
       { iteration: 2, decision: "exit", reason: "max-iterations" },
+    ]);
+  });
+});
+
+const SUBGRAPH_POLICIES = {
+  maxNodeExecutions: 10,
+  maxParallelism: 1,
+  capabilities: { required: [], optional: [], deny: [] },
+};
+
+/** A saved graph: child-start → child-end. */
+const CHILD_GRAPH: GraphJsonV1 = {
+  schemaVersion: GRAPH_JSON_VERSION,
+  graphId: "child-graph",
+  revisionId: "rev-1",
+  inputs: [],
+  outputs: [{ id: "done", schema: true, source: { nodeId: "child-end", port: "done" } }],
+  nodes: [
+    { id: "child-start", type: "flow.step", version: "1", config: { label: "child-start" } },
+    { id: "child-end", type: "flow.step", version: "1", config: { label: "child-end" } },
+  ],
+  edges: [
+    { id: "go", kind: "control", from: { nodeId: "child-start" }, to: { nodeId: "child-end" } },
+  ],
+  entrypoints: [{ id: "main", nodeId: "child-start" }],
+  policies: SUBGRAPH_POLICIES,
+  options: { defaultEntrypoint: "main" },
+};
+
+/** before → call(child-graph@revision) → after */
+function parentGraph(revisionId: string): GraphJsonV1 {
+  return {
+    schemaVersion: GRAPH_JSON_VERSION,
+    graphId: "parent-graph",
+    revisionId: `rev-${revisionId}`,
+    inputs: [],
+    outputs: [{ id: "result", schema: true, source: { nodeId: "after", port: "done" } }],
+    nodes: [
+      { id: "before", type: "flow.step", version: "1", config: { label: "before" } },
+      {
+        id: "call",
+        type: "flow.call",
+        version: "1",
+        config: { graphId: "child-graph", revisionId },
+      },
+      { id: "after", type: "flow.step", version: "1", config: { label: "after" } },
+    ],
+    edges: [
+      {
+        id: "into",
+        kind: "control",
+        from: { nodeId: "before" },
+        to: { nodeId: "call", port: "in" },
+      },
+      {
+        id: "onward",
+        kind: "control",
+        from: { nodeId: "call", port: "done" },
+        to: { nodeId: "after" },
+      },
+    ],
+    entrypoints: [{ id: "main", nodeId: "before" }],
+    policies: SUBGRAPH_POLICIES,
+    options: { defaultEntrypoint: "main" },
+  };
+}
+
+describe("subgraphs (8.4)", () => {
+  it("runs a saved graph revision in place of a subgraph node", async () => {
+    const db = database();
+    const host = await flowHost();
+    const childRun = await createRun(db, host, CHILD_GRAPH);
+    const { dispatcher } = startRuntime(db, host);
+    expect((await dispatcher.dispatch(childRun)).status).toBe("completed");
+    ran.length = 0;
+
+    const compiled = await compileEditorGraph(
+      parentGraph("rev-1"),
+      { host, graphs: createStoredGraphResolver(db) },
+      new CapabilityPermissionPolicy(),
+    );
+    expect(compiled.valid).toBe(true);
+    if (!compiled.valid) return;
+    const { runId } = await createRunFromCompiledGraph(db, compiled.compiled);
+
+    expect((await dispatcher.dispatch(runId)).status).toBe("completed");
+    expect(ran).toEqual(["before", "child-start", "child-end", "after"]);
+    expect(Object.keys(nodeStatuses(db, runId)).sort()).toEqual([
+      "after",
+      "before",
+      "call/child-end",
+      "call/child-start",
+    ]);
+  });
+
+  it("points a missing saved graph at the subgraph node that names it", async () => {
+    const db = database();
+    const host = await flowHost();
+
+    const compiled = await compileEditorGraph(
+      parentGraph("rev-9"),
+      { host, graphs: createStoredGraphResolver(db) },
+      new CapabilityPermissionPolicy(),
+    );
+
+    expect(compiled.valid).toBe(false);
+    if (compiled.valid) return;
+    expect(compiled.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "GRAPH_SUBGRAPH_NOT_FOUND",
+        nodeId: "call",
+        stage: "subgraphs",
+      }),
     ]);
   });
 });

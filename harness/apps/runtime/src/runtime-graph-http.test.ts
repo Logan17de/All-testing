@@ -183,6 +183,7 @@ describe("editor endpoints on a running daemon", () => {
       "harness.join-any",
       "harness.loop",
       "harness.route",
+      "harness.subgraph",
       "text.exclaim",
       "text.upper",
     ]);

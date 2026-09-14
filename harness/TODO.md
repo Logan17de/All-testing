@@ -267,7 +267,7 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 - [x] 8.1 Implement explicit bounded loop regions.
 - [ ] 8.2 Require independent hard bounds such as iterations/model calls/tool calls/tokens/cost/wall time. _(Iterations, run and loop wall time, and node executions are enforced; model-call, tool-call, token and cost bounds wait for model and tool nodes. See `PHASE-8.md`.)_
 - [x] 8.3 Preserve exact loop iteration/attempt identity in durability records.
-- [ ] 8.4 Add subgraph compile-time lowering/namespacing; reject uncontrolled recursion initially.
+- [x] 8.4 Add subgraph compile-time lowering/namespacing; reject uncontrolled recursion initially.
 - [ ] 8.5 Add project schema/CRUD.
 - [ ] 8.6 Add conversations/messages using structured message parts and nullable `parent_message_id` for edit/retry branches.
 - [ ] 8.7 Add goal/todo schema/CRUD and valid status transitions.

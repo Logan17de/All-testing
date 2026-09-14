@@ -195,8 +195,41 @@ Covered by the wall-time cases in `graph-json-v1-loop-bounds.test.ts`, lowering 
 `graph-json-v1-loop-regions.test.ts`, and runtime tests for the node-execution limit, the run
 wall-time limit, a loop leaving on its own wall-time bound, and recorded decision reasons.
 
+## Slice 8 — subgraphs (8.4)
+
+A graph can run another saved graph in place, and the compiler flattens it before anything runs.
+
+- **The node.** `harness.subgraph` is a built-in control node with an `in` entry and a `done` exit.
+  Its config pins a saved graph with `graphId` and `revisionId`. A plugin can declare its own node
+  with a `{ kind: "subgraph", entry, exits }` contract; it behaves the same way.
+- **Compile-time expansion.** `expandGraphJsonV1Subgraphs(graph, resolver, sources)` runs right
+  after the shape check, before every other stage. It replaces each subgraph node with the saved graph's nodes and edges under the
+  subgraph node's id (`call/a`, `call/b`), so every later stage validates, lowers and hashes one flat
+  graph, and the scheduler, durability and run inspector need nothing new.
+- **Wiring.** Data edges and values set on the subgraph node feed the saved graph's inputs by name,
+  falling back to each input's default. Edges reading the subgraph node's ports read the saved
+  graph's outputs. Work before the subgraph node runs before the saved graph's start nodes, and work
+  after it waits for every one of the saved graph's final nodes. An entrypoint on the subgraph node
+  moves to the saved graph's start.
+- **Budgets and capabilities.** The saved graph's `maxNodeExecutions` is added to the parent's, and
+  its capability requirements and denials are merged with the parent's, so nothing inside a subgraph
+  escapes the policy check.
+- **No uncontrolled recursion.** A subgraph that runs a graph already on its own chain fails with
+  `GRAPH_SUBGRAPH_RECURSION`, and nesting stops at 8 levels (`GRAPH_SUBGRAPH_TOO_DEEP`). Missing
+  revisions, malformed references, unknown ports and required inputs left unset each have their own
+  diagnostic.
+- **Pinned and immutable.** The runtime resolves references against `graph_sources`, where a graph
+  id and revision id pair can never change once stored. Any graph that has been run can be used as a
+  subgraph. Diagnostics from inside an expanded subgraph point at the subgraph node the author placed.
+
+Covered by `graph-json-v1-subgraphs.test.ts` (splicing, ports, defaults, final nodes, entrypoints,
+nesting, recursion, missing graphs, budgets) and runtime tests that run a stored graph through a
+subgraph node end to end and report a missing revision on the subgraph node.
+
+Still to come for subgraphs: choosing a saved graph from a library in the editor, and showing the
+saved graph's inputs and outputs as handles on the subgraph node.
+
 ## Next
 
-8.4 (subgraph lowering and namespacing) in TODO order, then projects, conversations and goals
-(8.5–8.9), and the context builder and agent loop (8.10–8.13), which bring the model and tool nodes
-that complete 8.2.
+Projects, conversations and goals (8.5–8.9) in TODO order, then the context builder and agent loop
+(8.10–8.13), which bring the model and tool nodes that complete 8.2.

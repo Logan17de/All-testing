@@ -10,6 +10,8 @@ export * from "./graph-json-v1-liveness.js";
 export * from "./graph-json-v1-acyclicity.js";
 // 8.1 finds structured loop body regions and the back edges that close them.
 export * from "./graph-json-v1-loop-regions.js";
+// 8.4 expands subgraph nodes into the saved graph revisions they name, before validation.
+export * from "./graph-json-v1-subgraphs.js";
 // 2.11 reserves/validates static structured control ports only; execution and IR lowering remain future stages.
 export * from "./graph-json-v1-structured-control.js";
 // 2.12 requires a finite compiler-visible per-instance loop bound, lowered into the 8.1 loop descriptor.

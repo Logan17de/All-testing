@@ -11,6 +11,7 @@ export const ROUTE_NODE_TYPE = "harness.route" as const;
 export const JOIN_ALL_NODE_TYPE = "harness.join-all" as const;
 export const JOIN_ANY_NODE_TYPE = "harness.join-any" as const;
 export const LOOP_NODE_TYPE = "harness.loop" as const;
+export const SUBGRAPH_NODE_TYPE = "harness.subgraph" as const;
 
 export type ConditionOperator = "equals" | "not-equals" | "contains" | "truthy" | "falsy";
 
@@ -102,7 +103,8 @@ function isConditionOperator(value: JsonValue | undefined): value is ConditionOp
 }
 
 /**
- * First-party control flow: a condition, a yes/no router, two joins and a bounded loop.
+ * First-party control flow: a condition, a yes/no router, two joins, a bounded loop
+ * and a subgraph that runs a saved graph in place.
  *
  * Registered through the same public plugin path as any third-party node. The
  * router and joins are resolved by the scheduler and never executed; only the
@@ -220,6 +222,29 @@ export function createControlFlowPlugin(): HarnessPlugin {
           },
           behavior: CONTROL,
           control: { kind: "loop", entry: "in", continue: "repeat", body: "body", exit: "done" },
+        },
+      });
+
+      context.nodes.register({
+        manifest: {
+          type: SUBGRAPH_NODE_TYPE,
+          version: "1",
+          title: "Subgraph",
+          description:
+            "Runs a saved graph revision in place: its inputs and outputs are the saved graph's, and it is expanded when this graph compiles.",
+          inputs: {},
+          outputs: {},
+          configSchema: {
+            type: "object",
+            properties: {
+              graphId: { type: "string", minLength: 1 },
+              revisionId: { type: "string", minLength: 1 },
+            },
+            required: ["graphId", "revisionId"],
+            additionalProperties: false,
+          },
+          behavior: CONTROL,
+          control: { kind: "subgraph", entry: "in", exits: ["done"] },
         },
       });
     },

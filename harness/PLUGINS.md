@@ -120,6 +120,9 @@ plus the built-in **Human approval** node, which any graph can use to pause for 
 - A run fails with `RUNTIME_BUDGET_EXCEEDED` when it would start more node attempts than its
   `maxNodeExecutions`, or starts one after its `maxWallTimeMs`. The editor sets
   `maxNodeExecutions` high enough to cover every node and its largest loop.
+- To reuse a graph, add a **Subgraph** node and set its `graphId` and `revisionId` to a graph
+  revision that has already run. The saved graph runs in its place, its steps show up in the run
+  inspector as `<subgraph node>/<step>`, and a graph that ends up running itself is refused.
 - **Run graph** stores a new revision, starts a run and opens the run inspector.
 
 The run inspector (`/runs/<id>`) shows each node's durable state on the graph, the event timeline,
@@ -229,7 +232,9 @@ A router follows the branch named by the string on its `branch` input; an undecl
 the run. A join declares `{ kind: "join", inputs: [...lanes], output: "out", mode }` where `mode`
 is `all-active`, `any`, or `quorum` with a `quorum` count. A loop declares
 `{ kind: "loop", entry, continue, body, exit }`, needs a `maxIterations` config, and continues
-while its `again` input is true. All of them survive a runtime restart.
+while its `again` input is true. A subgraph declares `{ kind: "subgraph", entry, exits }` and
+needs `graphId` and `revisionId` config naming a saved graph revision, which the compiler expands
+in place. All of them survive a runtime restart.
 
 ### TypeScript
 
