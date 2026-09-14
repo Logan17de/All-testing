@@ -1,11 +1,19 @@
-import type { GraphJsonV1 } from "./graph-json-v1.js";
+import type { GraphEdgeV1, GraphJsonV1 } from "./graph-json-v1.js";
+import {
+  findGraphJsonV1LoopRegions,
+  type GraphLoopRegionDiagnosticCode,
+} from "./graph-json-v1-loop-regions.js";
+import type { NodeManifestResolver } from "./graph-json-v1-semantic-validator.js";
 
 export type GraphAcyclicityDiagnosticCode =
-  "GRAPH_ACYCLICITY_PREREQUISITE_FAILED" | "GRAPH_CYCLE_DETECTED";
+  "GRAPH_ACYCLICITY_PREREQUISITE_FAILED" | "GRAPH_CYCLE_DETECTED" | GraphLoopRegionDiagnosticCode;
 
 export interface GraphAcyclicityDiagnostic {
   readonly code: GraphAcyclicityDiagnosticCode;
   readonly message: string;
+  readonly nodeId?: string;
+  readonly edgeId?: string;
+  readonly entrypointId?: string;
   readonly nodeIds?: readonly string[];
   readonly edgeIds?: readonly string[];
 }
@@ -15,7 +23,10 @@ export interface GraphAcyclicityResult {
   readonly diagnostics: readonly GraphAcyclicityDiagnostic[];
 }
 
-function buildAdjacency(graph: GraphJsonV1): {
+function buildAdjacency(
+  graph: GraphJsonV1,
+  edges: readonly GraphEdgeV1[],
+): {
   readonly forward: ReadonlyMap<string, readonly string[]>;
   readonly reverse: ReadonlyMap<string, readonly string[]>;
 } {
@@ -27,7 +38,7 @@ function buildAdjacency(graph: GraphJsonV1): {
     reverse.set(node.id, []);
   }
 
-  for (const edge of graph.edges) {
+  for (const edge of edges) {
     forward.get(edge.from.nodeId)?.push(edge.to.nodeId);
     reverse.get(edge.to.nodeId)?.push(edge.from.nodeId);
   }
@@ -123,15 +134,19 @@ function collectStronglyConnectedComponents(
  *
  * Every data edge and control edge is a directed executable dependency here.
  * Any strongly connected component containing more than one node is rejected,
- * as is a one-node component containing a self-loop. No control-port name,
- * node family, or future loop marker grants an exception in the initial v1
- * executable graph. Structured control contracts and bounded loop execution
- * belong to later items and must not be inferred here.
+ * as is a one-node component containing a self-loop. Control-port names and
+ * node families grant no exception. The single exception is 8.1: given a
+ * resolver, the validated body back edges of a structured loop node are left
+ * out, because the scheduler re-runs that body per iteration rather than making
+ * the loop wait on it. Malformed loops are reported, never exempted.
  *
  * Callers should run 2.6-2.9 first. Missing node references are reported only
  * as prerequisite failures rather than duplicating earlier semantic checks.
  */
-export function checkGraphJsonV1Acyclicity(graph: GraphJsonV1): GraphAcyclicityResult {
+export function checkGraphJsonV1Acyclicity(
+  graph: GraphJsonV1,
+  resolver?: NodeManifestResolver,
+): GraphAcyclicityResult {
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
   const prerequisiteDiagnostics: GraphAcyclicityDiagnostic[] = [];
 
@@ -149,10 +164,14 @@ export function checkGraphJsonV1Acyclicity(graph: GraphJsonV1): GraphAcyclicityR
     return { valid: false, diagnostics: prerequisiteDiagnostics };
   }
 
-  const { forward, reverse } = buildAdjacency(graph);
+  const loopRegions =
+    resolver === undefined ? undefined : findGraphJsonV1LoopRegions(graph, resolver);
+  const loopBackEdges = new Set(loopRegions?.regions.flatMap((region) => region.backEdgeIds));
+  const edges = graph.edges.filter((edge) => !loopBackEdges.has(edge.id));
+  const { forward, reverse } = buildAdjacency(graph, edges);
   const components = collectStronglyConnectedComponents(graph, forward, reverse);
   const nodeOrder = new Map(graph.nodes.map((node, index) => [node.id, index] as const));
-  const diagnostics: GraphAcyclicityDiagnostic[] = [];
+  const diagnostics: GraphAcyclicityDiagnostic[] = [...(loopRegions?.diagnostics ?? [])];
 
   const cyclicComponents = components
     .filter((component) => {
@@ -161,7 +180,7 @@ export function checkGraphJsonV1Acyclicity(graph: GraphJsonV1): GraphAcyclicityR
       }
 
       const nodeId = component[0]!;
-      return graph.edges.some((edge) => edge.from.nodeId === nodeId && edge.to.nodeId === nodeId);
+      return edges.some((edge) => edge.from.nodeId === nodeId && edge.to.nodeId === nodeId);
     })
     .map((component) =>
       [...component].sort((left, right) => nodeOrder.get(left)! - nodeOrder.get(right)!),
@@ -170,7 +189,7 @@ export function checkGraphJsonV1Acyclicity(graph: GraphJsonV1): GraphAcyclicityR
 
   for (const component of cyclicComponents) {
     const componentSet = new Set(component);
-    const edgeIds = graph.edges
+    const edgeIds = edges
       .filter((edge) => componentSet.has(edge.from.nodeId) && componentSet.has(edge.to.nodeId))
       .map((edge) => edge.id);
 
@@ -186,6 +205,9 @@ export function checkGraphJsonV1Acyclicity(graph: GraphJsonV1): GraphAcyclicityR
 }
 
 /** Boolean convenience wrapper for the separate 2.10 acyclicity stage. */
-export function validateGraphJsonV1Acyclicity(graph: GraphJsonV1): boolean {
-  return checkGraphJsonV1Acyclicity(graph).valid;
+export function validateGraphJsonV1Acyclicity(
+  graph: GraphJsonV1,
+  resolver?: NodeManifestResolver,
+): boolean {
+  return checkGraphJsonV1Acyclicity(graph, resolver).valid;
 }

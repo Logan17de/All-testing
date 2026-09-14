@@ -266,6 +266,28 @@ This stage is reservation/validation only: it does not choose router branches, e
 
 The `maxIterations` key has Harness loop meaning only for nodes resolved to a structured loop contract; ordinary node configuration may use the same text without becoming a loop. The fixed top-level location keeps the future compiler deterministic and avoids JSONPath/dynamic-expression inference. 2.12 does not execute loops, interpret stop conditions, lower loop regions into IR, or compare the local bound with graph resource limits. A valid bound still does not legalize a cycle: 2.10 continues to reject every SCC/self-loop until executable loop lowering lands later.
 
+### Loop body regions (8.1)
+
+2.10-2.12 reserved loop contracts, required a hard `config.maxIterations` bound, and kept every cycle
+illegal. 8.1 makes exactly one kind of cycle legal: the one a structured loop node closes around its
+body.
+
+`findGraphJsonV1LoopRegions(graph, resolver)` defines a loop's body as everything reachable from
+control edges leaving its `body` port, without passing back through the loop node and without
+entering work that follows its `exit` port. Edges from the body into the loop node are its back
+edges, and they may only target the `continue` control port or a data input of the loop node.
+Body work may not order work outside the loop; work after the loop may read a body value (the last
+iteration's) over a data edge. Nested loops and entrypoints inside a body are refused for now. Each
+rule has its own `GRAPH_LOOP_*` diagnostic.
+
+`checkGraphJsonV1Acyclicity(graph, resolver)` leaves out exactly the validated back edges and still
+rejects every other SCC or self-loop. Called without a resolver it keeps its original behavior.
+
+Lowering emits the loop descriptor with its body `region` and `maxIterations`, and excludes back
+edges from `dependencies`: they remain control edges and data inputs, but a loop never waits on its
+own body. No loop could compile before 8.1, so filling in the reserved descriptor changes no
+existing plan and keeps `harness.compiler/v1`.
+
 ### Graph JSON v1 capability/policy validation
 
 2.13 is a separate compile-time stage with explicit external authority input. Hard capability demand is the union of graph `capabilities.required` and every resolved node manifest's `behavior.requiredCapabilities`. Graph `capabilities.optional` is opportunistic and does not fail compilation merely because a grant is absent. Graph `capabilities.deny` is a self-restriction only: it can remove authority but can never add it. Duplicate entries inside a capability bucket and capabilities declared across multiple graph intent buckets are rejected rather than normalized silently.

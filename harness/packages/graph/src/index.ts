@@ -6,11 +6,13 @@ export * from "./graph-json-v1-semantic-validator.js";
 export * from "./graph-json-v1-port-compatibility.js";
 // 2.9 owns potential reachability/liveness; SCC rejection remains 2.10.
 export * from "./graph-json-v1-liveness.js";
-// 2.10 rejects every executable SCC/self-loop; 2.11 does not grant loop exceptions.
+// 2.10 rejects every executable SCC/self-loop except validated 8.1 loop body back edges.
 export * from "./graph-json-v1-acyclicity.js";
+// 8.1 finds structured loop body regions and the back edges that close them.
+export * from "./graph-json-v1-loop-regions.js";
 // 2.11 reserves/validates static structured control ports only; execution and IR lowering remain future stages.
 export * from "./graph-json-v1-structured-control.js";
-// 2.12 requires a finite compiler-visible per-instance loop bound; loop execution/lowering still lands later.
+// 2.12 requires a finite compiler-visible per-instance loop bound, lowered into the 8.1 loop descriptor.
 export * from "./graph-json-v1-loop-bounds.js";
 // 2.13/5.6 evaluates graph/node capability demand against host authority and applies graph self-deny; Graph JSON never grants authority.
 export * from "./graph-json-v1-capability-policy.js";

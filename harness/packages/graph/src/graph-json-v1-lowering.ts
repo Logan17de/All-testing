@@ -9,11 +9,14 @@ import type {
   ExecutionIrBehaviorV1,
   ExecutionIrControlDescriptorV1,
   ExecutionIrInputV1,
+  ExecutionIrLoopControlV1,
   ExecutionIrOpV1,
   ExecutionIrV1,
 } from "./execution-ir-v1.js";
 import { createExecutionIrV1, EXECUTION_IR_FORMAT } from "./execution-ir-v1.js";
 import type { GraphDataEdgeV1, GraphInputBindingV1, GraphNodeV1 } from "./graph-json-v1.js";
+import { GRAPH_LOOP_MAX_ITERATIONS_CONFIG_KEY } from "./graph-json-v1-loop-bounds.js";
+import { findGraphJsonV1LoopRegions, type GraphLoopRegion } from "./graph-json-v1-loop-regions.js";
 import type {
   GraphResolvedNodePinV1,
   NodeResolutionResolver,
@@ -87,6 +90,37 @@ function lowerInitialControlDescriptor(
     case "subgraph":
       return undefined;
   }
+}
+
+/** 8.1: a loop descriptor carries its body region and its compiler-validated bound. */
+function lowerLoopDescriptor(
+  node: GraphNodeV1,
+  region: GraphLoopRegion,
+  opIndexByNodeId: ReadonlyMap<string, number>,
+): ExecutionIrLoopControlV1 {
+  const maxIterations = node.config[GRAPH_LOOP_MAX_ITERATIONS_CONFIG_KEY];
+  if (
+    typeof maxIterations !== "number" ||
+    !Number.isSafeInteger(maxIterations) ||
+    maxIterations < 1
+  ) {
+    return compilerInvariant(`loop node '${node.id}' has no validated maxIterations bound.`);
+  }
+  const members = region.regionNodeIds.map((nodeId) => {
+    const op = opIndexByNodeId.get(nodeId);
+    return op === undefined
+      ? compilerInvariant(`loop body node '${nodeId}' has no canonical op index.`)
+      : op;
+  });
+  return {
+    kind: "loop",
+    entry: region.control.entry,
+    continue: region.control.continue,
+    body: region.control.body,
+    exit: region.control.exit,
+    region: members.sort((left, right) => left - right),
+    maxIterations,
+  };
 }
 
 function assertResolvedManifest(
@@ -182,7 +216,9 @@ function lowerDataEdgeInput(
  * - authored non-edge bindings stay ordered, followed by incoming data edges in
  *   canonical edge-id order, making multi-source aggregation sequence explicit;
  * - router and activation-aware join manifest contracts become IR control descriptors;
- * - loop/human/subgraph descriptors remain reserved but are not lowered here.
+ * - 8.1 loops carry their body region and hard bound, and body back edges add
+ *   no scheduler dependency, so a loop never waits on its own body;
+ * - human/subgraph descriptors remain reserved and are not lowered here.
  *
  * This is not a user-facing validation pass. Any missing/mismatched pin, manifest,
  * or reference is a compiler invariant failure because 2.5-2.19 already proved
@@ -206,6 +242,16 @@ export function lowerCanonicalGraphJsonV1ToExecutionIr(
     semantics.entrypoints.map((entrypoint, index) => [entrypoint.id, index] as const),
   );
   const pinByNodeId = new Map(canonical.nodePins.map((pin) => [pin.nodeId, pin] as const));
+  const loopRegions = findGraphJsonV1LoopRegions(semantics, resolver);
+  if (loopRegions.diagnostics.length > 0) {
+    return compilerInvariant(
+      `loop regions reached lowering unvalidated (${loopRegions.diagnostics[0]!.code}).`,
+    );
+  }
+  const loopBackEdgeIds = new Set(loopRegions.regions.flatMap((region) => region.backEdgeIds));
+  const regionByLoopNodeId = new Map(
+    loopRegions.regions.map((region) => [region.loopNodeId, region] as const),
+  );
 
   const incomingDataEdges = new Map<string, GraphDataEdgeV1[]>();
   const dependencySets = semantics.nodes.map(() => new Set<number>());
@@ -217,7 +263,7 @@ export function lowerCanonicalGraphJsonV1ToExecutionIr(
       return compilerInvariant(`edge '${edge.id}' has an unresolved canonical node reference.`);
     }
 
-    dependencySets[to]?.add(from);
+    if (!loopBackEdgeIds.has(edge.id)) dependencySets[to]?.add(from);
 
     if (edge.kind === "data") {
       const existing = incomingDataEdges.get(edge.to.nodeId);
@@ -238,7 +284,11 @@ export function lowerCanonicalGraphJsonV1ToExecutionIr(
       lowerDataEdgeInput(edge, opIndexByNodeId),
     );
     const dependencies = [...(dependencySets[opIndex] ?? [])].sort((left, right) => left - right);
-    const control = lowerInitialControlDescriptor(manifest.control);
+    const region = regionByLoopNodeId.get(node.id);
+    const control =
+      region === undefined
+        ? lowerInitialControlDescriptor(manifest.control)
+        : lowerLoopDescriptor(node, region, opIndexByNodeId);
 
     return {
       sourceNodeId: node.id,

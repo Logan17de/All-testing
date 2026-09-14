@@ -176,7 +176,15 @@ describe("routers and joins inside a run", () => {
       createMockExecutionOp("loop", [], {
         type: "test.loop",
         behavior: CONTROL_BEHAVIOR,
-        control: { kind: "loop", entry: "entry", continue: "again", body: "body", exit: "exit" },
+        control: {
+          kind: "loop",
+          entry: "entry",
+          continue: "again",
+          body: "body",
+          exit: "exit",
+          region: [],
+          maxIterations: 1,
+        },
       }),
     ]);
     expect(

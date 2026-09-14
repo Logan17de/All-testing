@@ -135,6 +135,10 @@ export interface ExecutionIrLoopControlV1 {
   readonly continue: NodePortName;
   readonly body: NodePortName;
   readonly exit: NodePortName;
+  /** Ops that run once per iteration, strictly increasing; never the loop op itself. */
+  readonly region: readonly ExecutionIrOpIndex[];
+  /** Compiler-validated hard ceiling on iterations for one loop invocation. */
+  readonly maxIterations: number;
 }
 
 export interface ExecutionIrHumanInterruptControlV1 {
@@ -153,8 +157,8 @@ export interface ExecutionIrSubgraphControlV1 {
  * Static structured-control descriptor carried by an op.
  *
  * 2.20 only freezes this representation. Mapping validated graph control edges
- * into DAG/router/join descriptors is owned by 2.22; executable loop semantics
- * remain later work and this union grants no cycle exception.
+ * into DAG/router/join descriptors is owned by 2.22. 8.1 lowers loops with their
+ * body region and hard bound; body back edges carry no scheduler dependency.
  */
 export type ExecutionIrControlDescriptorV1 =
   | ExecutionIrRouterControlV1
@@ -273,6 +277,23 @@ function assertResolvedIndexes(ir: ExecutionIrV1): void {
     assertCanonicalDependencies(opIndex, op.dependencies);
     for (const dependency of op.dependencies) {
       assertIndex(`ops[${String(opIndex)}].dependencies`, dependency, opCount);
+    }
+    if (op.control?.kind === "loop") {
+      let previous = -1;
+      for (const member of op.control.region) {
+        assertIndex(`ops[${String(opIndex)}].control.region`, member, opCount);
+        if (member === opIndex || member <= previous) {
+          throw new TypeError(
+            `ops[${String(opIndex)}].control.region must be strictly increasing and exclude the loop op.`,
+          );
+        }
+        previous = member;
+      }
+      if (!Number.isSafeInteger(op.control.maxIterations) || op.control.maxIterations < 1) {
+        throw new TypeError(
+          `ops[${String(opIndex)}].control.maxIterations must be a positive safe integer.`,
+        );
+      }
     }
 
     op.inputs.forEach((input, inputIndex) => {

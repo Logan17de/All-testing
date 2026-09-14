@@ -85,14 +85,42 @@ Covered by `packages/core/src/control-flow-plugin.test.ts`, the control-port tes
 `apps/web/lib/graph-document.test.ts`, and an HTTP test that routes an editor graph through
 Condition, Route and Wait for all on a running daemon.
 
+## Slice 4 — loop regions in the compiler (8.1, compile side; done)
+
+Graphs with a structured loop now compile. Running them is the next slice, so until then the
+runtime refuses to store a run for a graph containing a loop (`422 GRAPH_INVALID`), instead of
+accepting one that could never progress.
+
+- **A loop's body.** `findGraphJsonV1LoopRegions` defines the body of a loop node as everything
+  reachable from control edges leaving its `body` port, without passing back through the loop and
+  without entering work that follows its `exit` port. Per-iteration side work that does not feed
+  back is part of the body.
+- **Back edges.** Edges from the body into the loop node close the cycle. Only the `continue`
+  control port and the loop's data inputs may be re-entered this way.
+- **Acyclicity keeps its meaning.** Given a resolver, 2.10 leaves out exactly those validated back
+  edges and still rejects every other cycle. Without a resolver it behaves as before, so the
+  boundary stays explicit.
+- **Rules, each with its own diagnostic:** `GRAPH_LOOP_REGION_INCOMPLETE` (no body or no way back),
+  `GRAPH_LOOP_BACK_EDGE_INVALID` (re-entering through another port, or reaching `continue` from
+  outside the body), `GRAPH_LOOP_REGION_ESCAPE` (body work ordering work after the loop; a data
+  edge that reads the last iteration's value after the loop exits is allowed),
+  `GRAPH_LOOP_REGION_NESTED` (nested loops are refused for now) and
+  `GRAPH_LOOP_REGION_ENTRYPOINT` (no entrypoint inside a body).
+- **Lowering.** The Execution IR loop descriptor, reserved since 2.20 and never produced before, now
+  carries the body `region` (op indexes) and `maxIterations`. Back edges stay control edges and
+  data inputs but add no scheduler dependency, so the loop never waits on its own body.
+  `createExecutionIrV1` checks the region is strictly increasing and excludes the loop op. Because
+  no loop could compile before, no existing plan or compiler identity changes.
+
+Covered by `packages/graph/src/graph-json-v1-loop-regions.test.ts` (regions, every diagnostic, the
+full diagnostics stack, lowering and the IR invariant) and a runtime test that compiles a loop
+graph and confirms no run is stored.
+
 ## Remaining slices before 8.1 is complete
 
-1. **Loop regions in the compiler.** Identify the region between a loop's `body` output and its
-   `continue` input, allow exactly that back edge through cycle rejection, and lower the loop
-   descriptor with its region membership.
-2. **Iterations in the scheduler.** Re-arm region ops with `iteration + 1` until the loop exits or
+1. **Iterations in the scheduler.** Re-arm region ops with `iteration + 1` until the loop exits or
    `maxIterations` is reached, keeping attempts and outputs keyed by iteration.
-3. **Iterations in durable dispatch.** Key invocations, attempts, outputs and frontier events by
+2. **Iterations in durable dispatch.** Key invocations, attempts, outputs and frontier events by
    iteration, and restore mid-loop.
 
 Items 8.2–8.17 follow in the TODO order once loops run durably.

@@ -397,18 +397,8 @@ describe("Graph JSON v1 -> Execution IR v1 lowering", () => {
     );
   });
 
-  it("does not lower later loop/human/subgraph execution semantics in 2.22", () => {
+  it("does not lower later human/subgraph execution semantics (loops lower since 8.1)", () => {
     const laterManifests: readonly NodeManifest[] = [
-      manifest("loop-node", {
-        behavior: controlBehavior,
-        control: {
-          kind: "loop",
-          entry: "entry",
-          continue: "continue",
-          body: "body",
-          exit: "exit",
-        },
-      }),
       {
         ...manifest("human-node", {
           behavior: { ...controlBehavior, primitiveFamily: "interrupt" },
@@ -442,7 +432,7 @@ describe("Graph JSON v1 -> Execution IR v1 lowering", () => {
           id: item.type,
           type: item.type,
           version: "1",
-          config: item.type === "loop-node" ? { maxIterations: 3 } : {},
+          config: {},
           bindings: [],
         })),
         edges: [],
@@ -464,6 +454,6 @@ describe("Graph JSON v1 -> Execution IR v1 lowering", () => {
       canonicalizeGraphJsonV1Semantics(source),
       laterResolver,
     );
-    expect(ir.ops.map((op) => op.control)).toEqual([undefined, undefined, undefined]);
+    expect(ir.ops.map((op) => op.control)).toEqual([undefined, undefined]);
   });
 });

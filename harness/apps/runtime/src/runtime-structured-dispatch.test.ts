@@ -10,7 +10,11 @@ import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "@zet-harness/graph";
 import type { HarnessPlugin, NodeBehavior, NodeDefinition } from "@zet-harness/plugin-api";
 
 import { RUNTIME_DATABASE_MIGRATIONS } from "./runtime-daemon.js";
-import { compileEditorGraph, createRunFromCompiledGraph } from "./runtime-graphs.js";
+import {
+  RuntimeGraphError,
+  compileEditorGraph,
+  createRunFromCompiledGraph,
+} from "./runtime-graphs.js";
 import { RuntimeHumanApprovals } from "./runtime-human-approvals.js";
 import { createPluginNodeExecutor } from "./runtime-plugin-executor.js";
 import { reconstructExecutionFrontier } from "./runtime-recovery.js";
@@ -123,6 +127,24 @@ const join: NodeDefinition = {
   },
 };
 
+const loop: NodeDefinition = {
+  manifest: {
+    type: "flow.loop",
+    version: "1",
+    title: "Loop",
+    inputs: {},
+    outputs: {},
+    configSchema: {
+      type: "object",
+      properties: { maxIterations: { type: "integer", minimum: 1 } },
+      required: ["maxIterations"],
+      additionalProperties: false,
+    },
+    behavior: CONTROL,
+    control: { kind: "loop", entry: "enter", continue: "again", body: "body", exit: "done" },
+  },
+};
+
 const flowPlugin: HarnessPlugin = {
   manifest: { id: "test.flow", name: "Flow test nodes", version: "1.0.0", apiVersion: 1 },
   activate(context) {
@@ -130,6 +152,7 @@ const flowPlugin: HarnessPlugin = {
     context.nodes.register(step);
     context.nodes.register(route);
     context.nodes.register(join);
+    context.nodes.register(loop);
   },
 };
 
@@ -367,5 +390,70 @@ describe("durable routers and joins", () => {
     });
     const frontier = reconstructExecutionFrontier(db.connection(), runId);
     expect(frontier.routerSelections.map(({ branch }) => branch)).toEqual(["left"]);
+  });
+});
+
+describe("loops before the scheduler can iterate them", () => {
+  it("compiles a loop graph but refuses to store a run that could never progress", async () => {
+    const db = database();
+    const host = await flowHost();
+    const graph: GraphJsonV1 = {
+      schemaVersion: GRAPH_JSON_VERSION,
+      graphId: "loop-graph",
+      revisionId: "rev-1",
+      inputs: [],
+      outputs: [],
+      nodes: [
+        { id: "start", type: "flow.step", version: "1", config: { label: "start" } },
+        { id: "loop", type: "flow.loop", version: "1", config: { maxIterations: 2 } },
+        { id: "work", type: "flow.step", version: "1", config: { label: "work" } },
+        { id: "finish", type: "flow.step", version: "1", config: { label: "finish" } },
+      ],
+      edges: [
+        {
+          id: "enter",
+          kind: "control",
+          from: { nodeId: "start" },
+          to: { nodeId: "loop", port: "enter" },
+        },
+        {
+          id: "body",
+          kind: "control",
+          from: { nodeId: "loop", port: "body" },
+          to: { nodeId: "work" },
+        },
+        {
+          id: "again",
+          kind: "control",
+          from: { nodeId: "work" },
+          to: { nodeId: "loop", port: "again" },
+        },
+        {
+          id: "done",
+          kind: "control",
+          from: { nodeId: "loop", port: "done" },
+          to: { nodeId: "finish" },
+        },
+      ],
+      entrypoints: [{ id: "main", nodeId: "start" }],
+      policies: {
+        maxNodeExecutions: 10,
+        maxParallelism: 2,
+        capabilities: { required: [], optional: [], deny: [] },
+      },
+      options: { defaultEntrypoint: "main" },
+    };
+
+    const result = await compileEditorGraph(graph, { host }, new CapabilityPermissionPolicy());
+    expect(result.valid).toBe(true);
+    if (!result.valid) return;
+
+    const refusal = createRunFromCompiledGraph(db, result.compiled);
+    await expect(refusal).rejects.toBeInstanceOf(RuntimeGraphError);
+    await expect(refusal).rejects.toMatchObject({ code: "GRAPH_INVALID", statusCode: 422 });
+    const runs = db.connection().prepare("SELECT COUNT(*) AS count FROM runs").get() as {
+      readonly count: number;
+    };
+    expect(runs.count).toBe(0);
   });
 });

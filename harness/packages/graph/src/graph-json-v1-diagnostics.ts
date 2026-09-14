@@ -332,7 +332,7 @@ export function checkGraphJsonV1Diagnostics(
     diagnostics,
     graph,
     "acyclicity",
-    checkGraphJsonV1Acyclicity(graph).diagnostics,
+    checkGraphJsonV1Acyclicity(graph, context.resolver).diagnostics,
   );
   appendDiagnostics(
     diagnostics,

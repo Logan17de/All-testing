@@ -145,7 +145,15 @@ describe("Execution IR v1", () => {
     const descriptors: readonly ExecutionIrControlDescriptorV1[] = [
       { kind: "router", entry: "entry", branches: ["left", "right"] },
       { kind: "join", inputs: ["left", "right"], output: "next", mode: "all-active" },
-      { kind: "loop", entry: "entry", continue: "continue", body: "body", exit: "exit" },
+      {
+        kind: "loop",
+        entry: "entry",
+        continue: "continue",
+        body: "body",
+        exit: "exit",
+        region: [],
+        maxIterations: 1,
+      },
       { kind: "human-interrupt", entry: "entry", outcomes: ["approved", "denied"] },
       { kind: "subgraph", entry: "entry", exits: ["done", "failed"] },
     ];
