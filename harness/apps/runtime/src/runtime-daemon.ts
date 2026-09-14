@@ -14,6 +14,7 @@ import {
 } from "@zet-harness/db";
 import { DURABLE_APPROVALS_MIGRATION } from "@zet-harness/db/durable-approval-records";
 import { DURABLE_FILE_CHANGES_MIGRATION } from "@zet-harness/db/durable-file-change-records";
+import { DURABLE_CONVERSATIONS_MIGRATION } from "@zet-harness/db/durable-conversation-records";
 import { DURABLE_PROJECTS_MIGRATION } from "@zet-harness/db/durable-project-records";
 
 import {
@@ -64,6 +65,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_APPROVALS_MIGRATION,
   DURABLE_FILE_CHANGES_MIGRATION,
   DURABLE_PROJECTS_MIGRATION,
+  DURABLE_CONVERSATIONS_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
@@ -170,6 +172,7 @@ export class RuntimeDaemon {
         redaction: this.redaction,
         plugins: () => this.pluginReport,
         projects: { database: this.database },
+        conversations: { database: this.database },
         graphs: {
           database: this.database,
           sources: () => ({

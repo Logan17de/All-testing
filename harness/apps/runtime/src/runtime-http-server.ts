@@ -16,6 +16,11 @@ import {
   type RuntimeProjectHttpServices,
 } from "./runtime-project-http.js";
 import {
+  handleConversationHttp,
+  isConversationHttpPath,
+  type RuntimeConversationHttpServices,
+} from "./runtime-conversation-http.js";
+import {
   RuntimeEventCursorError,
   RuntimeEventStream,
   type RuntimeEventStreamUnsubscribe,
@@ -89,6 +94,7 @@ export class RuntimeHttpServer {
   private readonly pluginsProvider: (() => unknown) | undefined;
   private readonly graphServices: RuntimeGraphHttpServices | undefined;
   private readonly projectServices: RuntimeProjectHttpServices | undefined;
+  private readonly conversationServices: RuntimeConversationHttpServices | undefined;
   private readonly eventClients = new Map<ServerResponse, () => void>();
   private readonly security: RuntimeApiSecurity;
   private readonly redaction: RuntimeRedactionRegistry;
@@ -111,6 +117,8 @@ export class RuntimeHttpServer {
       readonly graphs?: RuntimeGraphHttpServices;
       /** Project endpoints: list, create, change, archive and restore. */
       readonly projects?: RuntimeProjectHttpServices;
+      /** Conversation endpoints: conversations and their append-only messages. */
+      readonly conversations?: RuntimeConversationHttpServices;
     } = {},
   ) {
     this.host = options.host ?? DEFAULT_RUNTIME_HOST;
@@ -120,6 +128,7 @@ export class RuntimeHttpServer {
     this.pluginsProvider = services.plugins;
     this.graphServices = services.graphs;
     this.projectServices = services.projects;
+    this.conversationServices = services.conversations;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
     this.approvals = services.approvals;
     this.security = new RuntimeApiSecurity(options.allowedOrigins);
@@ -246,6 +255,20 @@ export class RuntimeHttpServer {
           return;
         }
         void handleGraphHttp(request, response, url, this.security, graphs).catch(
+          (error: unknown) => {
+            writeRuntimeApiError(response, error);
+          },
+        );
+        return;
+      }
+      // Before project paths: /api/projects/:id/conversations belongs to conversations.
+      if (isConversationHttpPath(url.pathname)) {
+        const conversations = this.conversationServices;
+        if (conversations === undefined) {
+          writeJson(response, 503, { error: { code: "CONVERSATION_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void handleConversationHttp(request, response, url, this.security, conversations).catch(
           (error: unknown) => {
             writeRuntimeApiError(response, error);
           },

@@ -260,8 +260,42 @@ and restore transitions, clock steps, and the table's own triggers and checks) a
 `runtime-project-http.test.ts`, which drives a real daemon through the full lifecycle, the CSRF and
 validation refusals, and a restart that keeps the project.
 
+## Slice 10 — conversations and messages (8.6)
+
+A project now holds conversations, and a conversation holds an append-only tree of messages.
+
+- **Conversations.** Migration 9 adds `conversations`: a sortable id, the project it belongs to, an
+  optional title (up to 200 characters), `active` or `archived`, and epoch-millisecond times. Like
+  projects they are archived and restored, never deleted, and keep their id, project and creation
+  time. Conversations and messages only change while their project is active.
+- **Structured message parts.** A message's `content_json` is an array of parts that mirror the
+  model adapter contract (`text`, `image`, `tool-call`, `tool-result`) plus `reasoning`, which is
+  stored as its own part and never folded into text. Parts must fit the role: only assistant
+  messages carry reasoning or call tools, only tool messages carry tool results and nothing else,
+  and system and developer messages carry text. Unknown kinds and fields are refused, tool
+  arguments must be JSON objects, and one message's parts are capped at 1 MiB.
+- **Branches, not edits.** Messages are append-only. `parent_message_id` is nullable and must name a
+  message in the same conversation (a composite foreign key enforces it). Omitting the parent
+  continues from the latest message; naming an earlier message branches from it, which is how an
+  edit or a retry is stored; `null` starts a new root. `readMessagePath` returns one branch from
+  its root, oldest first.
+- **Usage captured at write time.** Messages carry the model name, the run that produced them, and
+  input, output, cached-input and reasoning token counts plus a cost as a decimal string with an ISO
+  4217 currency, because these exist only in the provider response.
+- **HTTP.** `GET`/`POST /api/projects/:id/conversations`, `GET /api/conversations/:id` (the
+  conversation and every message), `POST /api/conversations/:id` (retitle), `.../archive`,
+  `.../restore`, `POST /api/conversations/:id/messages` (`role`, `parts`, optional
+  `parentMessageId`) and `GET /api/conversations/:id/messages/:messageId/path`. Every POST passes the
+  shared CSRF check and is one serialized commit. Clients cannot set a message's run, model or usage;
+  the agent loop (8.12) records those.
+
+Covered by `durable-conversation-records.test.ts` (project rules, archive and restore, default and
+explicit parents, branch paths, part and role validation, usage, append-only triggers, and the run
+foreign key) and `runtime-conversation-http.test.ts`, which drives a daemon through a conversation
+with a retry branch and every refusal.
+
 ## Next
 
-Conversations and messages with structured parts and edit/retry branches (8.6), then goals and todos
-(8.7), consistent ids and timestamps (8.8) and next-runnable-todo selection (8.9). After that, the
-context builder and agent loop (8.10–8.13) bring the model and tool nodes that complete 8.2.
+Goals and todos with valid status transitions (8.7), consistent sortable ids and timestamps across
+the new records (8.8) and deterministic next-runnable-todo selection (8.9). After that, the context
+builder and agent loop (8.10–8.13) bring the model and tool nodes that complete 8.2.

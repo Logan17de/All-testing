@@ -43,6 +43,7 @@ describe("RuntimeDaemon", () => {
       { version: 6, name: "durable_human_approvals" },
       { version: 7, name: "durable_file_change_records" },
       { version: 8, name: "durable_projects" },
+      { version: 9, name: "durable_conversations_and_messages" },
     ]);
   });
 
@@ -94,10 +95,10 @@ describe("RuntimeDaemon", () => {
           query: "ok",
           migrations: {
             status: "ok",
-            appliedCount: 8,
-            expectedCount: 8,
-            appliedVersion: 8,
-            expectedVersion: 8,
+            appliedCount: 9,
+            expectedCount: 9,
+            appliedVersion: 9,
+            expectedVersion: 9,
           },
         },
       },

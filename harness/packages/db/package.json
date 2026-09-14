@@ -27,6 +27,10 @@
     "./sortable-id": {
       "types": "./src/sortable-id.ts",
       "default": "./dist/sortable-id.js"
+    },
+    "./durable-conversation-records": {
+      "types": "./src/durable-conversation-records.ts",
+      "default": "./dist/durable-conversation-records.js"
     }
   },
   "scripts": {
