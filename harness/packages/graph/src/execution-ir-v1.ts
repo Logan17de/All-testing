@@ -139,6 +139,8 @@ export interface ExecutionIrLoopControlV1 {
   readonly region: readonly ExecutionIrOpIndex[];
   /** Compiler-validated hard ceiling on iterations for one loop invocation. */
   readonly maxIterations: number;
+  /** Optional wall-time ceiling for one loop invocation, in milliseconds. */
+  readonly maxWallTimeMs?: number;
 }
 
 export interface ExecutionIrHumanInterruptControlV1 {
@@ -292,6 +294,12 @@ function assertResolvedIndexes(ir: ExecutionIrV1): void {
       if (!Number.isSafeInteger(op.control.maxIterations) || op.control.maxIterations < 1) {
         throw new TypeError(
           `ops[${String(opIndex)}].control.maxIterations must be a positive safe integer.`,
+        );
+      }
+      const wallTime = op.control.maxWallTimeMs;
+      if (wallTime !== undefined && (!Number.isSafeInteger(wallTime) || wallTime < 1)) {
+        throw new TypeError(
+          `ops[${String(opIndex)}].control.maxWallTimeMs must be a positive safe integer.`,
         );
       }
     }

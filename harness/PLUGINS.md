@@ -115,8 +115,11 @@ plus the built-in **Human approval** node, which any graph can use to pause for 
   any** bring paths back together through their `a` and `b` lanes.
 - To repeat steps, add a **Loop** node. Connect its `body` handle to the first step, the last step
   back to its `repeat` handle, and its `done` handle to what follows. Set `maxIterations`, and feed
-  a boolean into its `again` input to stop early. Work after the loop can read the last
-  iteration's values.
+  a boolean into its `again` input to stop early, or set `maxWallTimeMs` to cap how long it keeps
+  repeating. Work after the loop can read the last iteration's values.
+- A run fails with `RUNTIME_BUDGET_EXCEEDED` when it would start more node attempts than its
+  `maxNodeExecutions`, or starts one after its `maxWallTimeMs`. The editor sets
+  `maxNodeExecutions` high enough to cover every node and its largest loop.
 - **Run graph** stores a new revision, starts a run and opens the run inspector.
 
 The run inspector (`/runs/<id>`) shows each node's durable state on the graph, the event timeline,

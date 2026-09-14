@@ -206,12 +206,15 @@ export function createControlFlowPlugin(): HarnessPlugin {
           version: "1",
           title: "Loop",
           description:
-            "Runs the steps wired from its body port again, at most maxIterations times. The body returns through the repeat port; a false 'again' input ends the loop early.",
+            "Runs the steps wired from its body port again, at most maxIterations times. The body returns through the repeat port; a false 'again' input, or passing maxWallTimeMs, ends the loop early.",
           inputs: { again: { schema: { type: "boolean" } } },
           outputs: {},
           configSchema: {
             type: "object",
-            properties: { maxIterations: { type: "integer", minimum: 1, maximum: 1000 } },
+            properties: {
+              maxIterations: { type: "integer", minimum: 1, maximum: 1000 },
+              maxWallTimeMs: { type: "integer", minimum: 1 },
+            },
             required: ["maxIterations"],
             additionalProperties: false,
           },

@@ -170,7 +170,33 @@ Covered by `packages/scheduler/src/loop-restore.test.ts` and the durable loop te
 `apps/runtime/src/runtime-structured-dispatch.test.ts`: running to the bound, leaving on
 `again: false`, and resuming in a fresh runtime after pausing between iterations.
 
+## Slice 7 — hard limits for runs and loops (8.2, partly done)
+
+The limits a graph already declares are now enforced, and loops gain a time bound of their own.
+
+- **Node executions.** A graph's `maxNodeExecutions` counts every attempt across all ops, retries and
+  loop iterations. The attempt that would pass the limit is refused before it starts, and the run
+  fails with `RUNTIME_BUDGET_EXCEEDED`. A `harness.run.budget-exceeded` event records which limit.
+- **Run wall time.** A graph's `maxWallTimeMs` is checked the same way before each attempt, counted
+  from the moment the run started, including time spent waiting for a person. Node code that is
+  already running is not interrupted; node timeouts cover that.
+- **Loop wall time.** A loop node may set `maxWallTimeMs`. 2.12 validates it, lowering carries it on
+  the loop descriptor, and once it has passed since the loop was entered the loop exits at its next
+  decision instead of starting another iteration. Routers, joins and loop decisions start no
+  attempt, so they are never charged.
+- **Why a loop ended.** Every loop decision event now records its reason: `max-iterations`,
+  `max-wall-time` or `again-false`.
+- **Not yet: model calls, tool calls, tokens and cost.** No graph node calls a model or a tool yet;
+  adapters are registered in their catalogs but nothing in a graph invokes them, so there is
+  nothing to count. Those bounds arrive with the model and tool nodes the agent loop (8.12) needs,
+  and TODO 8.2 stays open until then.
+
+Covered by the wall-time cases in `graph-json-v1-loop-bounds.test.ts`, lowering in
+`graph-json-v1-loop-regions.test.ts`, and runtime tests for the node-execution limit, the run
+wall-time limit, a loop leaving on its own wall-time bound, and recorded decision reasons.
+
 ## Next
 
-8.2 (independent hard bounds on model calls, tool calls, tokens, cost and wall time), then 8.4
-(subgraphs) and the project, goal and agent-loop items in TODO order.
+8.4 (subgraph lowering and namespacing) in TODO order, then projects, conversations and goals
+(8.5–8.9), and the context builder and agent loop (8.10–8.13), which bring the model and tool nodes
+that complete 8.2.

@@ -15,7 +15,10 @@ import type {
 } from "./execution-ir-v1.js";
 import { createExecutionIrV1, EXECUTION_IR_FORMAT } from "./execution-ir-v1.js";
 import type { GraphDataEdgeV1, GraphInputBindingV1, GraphNodeV1 } from "./graph-json-v1.js";
-import { GRAPH_LOOP_MAX_ITERATIONS_CONFIG_KEY } from "./graph-json-v1-loop-bounds.js";
+import {
+  GRAPH_LOOP_MAX_ITERATIONS_CONFIG_KEY,
+  GRAPH_LOOP_MAX_WALL_TIME_CONFIG_KEY,
+} from "./graph-json-v1-loop-bounds.js";
 import { findGraphJsonV1LoopRegions, type GraphLoopRegion } from "./graph-json-v1-loop-regions.js";
 import type {
   GraphResolvedNodePinV1,
@@ -106,6 +109,7 @@ function lowerLoopDescriptor(
   ) {
     return compilerInvariant(`loop node '${node.id}' has no validated maxIterations bound.`);
   }
+  const wallTime = node.config[GRAPH_LOOP_MAX_WALL_TIME_CONFIG_KEY];
   const members = region.regionNodeIds.map((nodeId) => {
     const op = opIndexByNodeId.get(nodeId);
     return op === undefined
@@ -120,6 +124,7 @@ function lowerLoopDescriptor(
     exit: region.control.exit,
     region: members.sort((left, right) => left - right),
     maxIterations,
+    ...(typeof wallTime === "number" ? { maxWallTimeMs: wallTime } : {}),
   };
 }
 

@@ -127,6 +127,31 @@ const join: NodeDefinition = {
   },
 };
 
+/** A step that takes a little while, so a time budget can run out. */
+const slow: NodeDefinition = {
+  manifest: {
+    type: "flow.slow",
+    version: "1",
+    title: "Slow step",
+    inputs: {},
+    outputs: { done: { schema: { type: "string" } } },
+    configSchema: {
+      type: "object",
+      properties: { label: { type: "string" } },
+      required: ["label"],
+      additionalProperties: false,
+    },
+    behavior: PURE,
+  },
+  execute: async (request) => {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const label = request.config["label"];
+    const name = typeof label === "string" ? label : "";
+    ran.push(name);
+    return { outputs: { done: name } };
+  },
+};
+
 const flag: NodeDefinition = {
   manifest: {
     type: "flow.flag",
@@ -154,7 +179,10 @@ const loop: NodeDefinition = {
     outputs: {},
     configSchema: {
       type: "object",
-      properties: { maxIterations: { type: "integer", minimum: 1 } },
+      properties: {
+        maxIterations: { type: "integer", minimum: 1 },
+        maxWallTimeMs: { type: "integer", minimum: 1 },
+      },
       required: ["maxIterations"],
       additionalProperties: false,
     },
@@ -172,6 +200,7 @@ const flowPlugin: HarnessPlugin = {
     context.nodes.register(join);
     context.nodes.register(loop);
     context.nodes.register(flag);
+    context.nodes.register(slow);
   },
 };
 
@@ -567,6 +596,118 @@ describe("durable loops", () => {
       "0.1:completed",
       "1.1:completed",
       "2.1:completed",
+    ]);
+  });
+});
+
+/** A straight chain of steps, `start → middle → end`, with graph-level limits. */
+function chainGraph(
+  policies: { readonly maxNodeExecutions?: number; readonly maxWallTimeMs?: number },
+  middleType = "flow.step",
+): GraphJsonV1 {
+  return {
+    schemaVersion: GRAPH_JSON_VERSION,
+    graphId: "chain-graph",
+    revisionId: `rev-${JSON.stringify(policies)}-${middleType}`,
+    inputs: [],
+    outputs: [{ id: "result", schema: true, source: { nodeId: "end", port: "done" } }],
+    nodes: [
+      { id: "start", type: "flow.step", version: "1", config: { label: "start" } },
+      { id: "middle", type: middleType, version: "1", config: { label: "middle" } },
+      { id: "end", type: "flow.step", version: "1", config: { label: "end" } },
+    ],
+    edges: [
+      { id: "a", kind: "control", from: { nodeId: "start" }, to: { nodeId: "middle" } },
+      { id: "b", kind: "control", from: { nodeId: "middle" }, to: { nodeId: "end" } },
+    ],
+    entrypoints: [{ id: "main", nodeId: "start" }],
+    policies: {
+      ...policies,
+      maxParallelism: 1,
+      capabilities: { required: [], optional: [], deny: [] },
+    },
+    options: { defaultEntrypoint: "main" },
+  };
+}
+
+function eventPayloads(db: SqliteDatabase, runId: string, eventType: string): readonly unknown[] {
+  const rows = db
+    .connection()
+    .prepare(
+      "SELECT payload_json AS payload FROM durable_events WHERE run_id = ? AND event_type = ? ORDER BY event_id",
+    )
+    .all(runId, eventType) as { readonly payload: string }[];
+  return rows.map((row) => JSON.parse(row.payload) as unknown);
+}
+
+describe("hard limits (8.2)", () => {
+  it("fails a run that uses up its node execution limit, before the next node starts", async () => {
+    const db = database();
+    const host = await flowHost();
+    const runId = await createRun(db, host, chainGraph({ maxNodeExecutions: 2 }));
+    const { dispatcher } = startRuntime(db, host);
+
+    const report = await dispatcher.dispatch(runId);
+
+    expect(report).toMatchObject({ status: "failed", code: "RUNTIME_BUDGET_EXCEEDED" });
+    expect(ran).toEqual(["start", "middle"]);
+    expect(eventPayloads(db, runId, "harness.run.budget-exceeded")).toEqual([
+      { budget: "node-executions", limit: 2 },
+    ]);
+  });
+
+  it("fails a run that passes its wall-time limit, before the next node starts", async () => {
+    const db = database();
+    const host = await flowHost();
+    const runId = await createRun(db, host, chainGraph({ maxWallTimeMs: 10 }, "flow.slow"));
+    const { dispatcher } = startRuntime(db, host);
+
+    const report = await dispatcher.dispatch(runId);
+
+    expect(report).toMatchObject({ status: "failed", code: "RUNTIME_BUDGET_EXCEEDED" });
+    expect(ran).toEqual(["start", "middle"]);
+    expect(eventPayloads(db, runId, "harness.run.budget-exceeded")).toEqual([
+      { budget: "run-wall-time", limit: 10 },
+    ]);
+  });
+
+  it("leaves a loop once its own wall-time bound has passed, and records why", async () => {
+    const db = database();
+    const host = await flowHost();
+    const graph = loopGraph();
+    const timed: GraphJsonV1 = {
+      ...graph,
+      graphId: "loop-timed",
+      nodes: graph.nodes.map((item) =>
+        item.id === "loop"
+          ? { ...item, config: { maxIterations: 5, maxWallTimeMs: 10 } }
+          : item.id === "work"
+            ? { ...item, type: "flow.slow" }
+            : item,
+      ),
+    };
+    const runId = await createRun(db, host, timed);
+    const { dispatcher } = startRuntime(db, host);
+
+    expect((await dispatcher.dispatch(runId)).status).toBe("completed");
+    expect(ran).toEqual(["start", "work", "finish"]);
+    expect(eventPayloads(db, runId, "harness.loop.advanced")).toEqual([
+      { iteration: 0, decision: "exit", reason: "max-wall-time" },
+    ]);
+  });
+
+  it("records why a loop ended at its iteration bound", async () => {
+    const db = database();
+    const host = await flowHost();
+    const runId = await createRun(db, host, loopGraph());
+    const { dispatcher } = startRuntime(db, host);
+
+    await dispatcher.dispatch(runId);
+
+    expect(eventPayloads(db, runId, "harness.loop.advanced")).toEqual([
+      { iteration: 0, decision: "continue" },
+      { iteration: 1, decision: "continue" },
+      { iteration: 2, decision: "exit", reason: "max-iterations" },
     ]);
   });
 });

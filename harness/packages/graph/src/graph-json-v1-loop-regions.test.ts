@@ -343,3 +343,32 @@ describe("lowering a loop", () => {
     );
   });
 });
+
+describe("lowering a loop's wall-time bound", () => {
+  it("carries an optional wall-time bound on the loop descriptor", () => {
+    const document = loopGraph({
+      nodes: LOOP_NODES.map((item) =>
+        item.id === "loop" ? node("loop", "loop", { maxIterations: 3, maxWallTimeMs: 500 }) : item,
+      ),
+    });
+    const ir = lowerCanonicalGraphJsonV1ToExecutionIr(
+      canonicalizeGraphJsonV1Semantics({
+        document,
+        nodePins: document.nodes.map((item) => ({
+          nodeId: item.id,
+          type: item.type,
+          version: item.version,
+          pluginId: "test.plugin",
+          pluginVersion: "1",
+        })),
+        pluginPins: [{ id: "test.plugin", version: "1" }],
+      }),
+      resolver,
+    );
+    expect(ir.ops[2]?.control).toMatchObject({
+      kind: "loop",
+      maxIterations: 3,
+      maxWallTimeMs: 500,
+    });
+  });
+});

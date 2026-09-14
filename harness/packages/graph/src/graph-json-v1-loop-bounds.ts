@@ -12,6 +12,9 @@ import type { NodeManifestResolver } from "./graph-json-v1-semantic-validator.js
  */
 export const GRAPH_LOOP_MAX_ITERATIONS_CONFIG_KEY = "maxIterations" as const;
 
+/** Optional per-invocation wall-time bound for one loop, in milliseconds (8.2). */
+export const GRAPH_LOOP_MAX_WALL_TIME_CONFIG_KEY = "maxWallTimeMs" as const;
+
 export type GraphLoopBoundDiagnosticCode =
   "GRAPH_LOOP_BOUND_PREREQUISITE_FAILED" | "GRAPH_LOOP_BOUND_REQUIRED" | "GRAPH_LOOP_BOUND_INVALID";
 
@@ -45,9 +48,9 @@ function isValidMaxIterations(value: JsonValue | undefined): value is number {
  * may have different hard bounds while the compiler still reads one fixed,
  * deterministic source location.
  *
- * This stage reserves the bound for future loop lowering/execution only. It does
- * not execute loops, interpret stop conditions, compare resource policies, or
- * legalize graph cycles. 2.10 continues to reject every SCC/self-loop.
+ * An optional `config.maxWallTimeMs` must be a positive safe integer too (8.2).
+ * This stage only validates the bounds; 8.1 lowers them into the loop
+ * descriptor, and the runtime enforces them.
  */
 export function checkGraphJsonV1LoopBounds(
   graph: GraphJsonV1,
@@ -92,6 +95,18 @@ export function checkGraphJsonV1LoopBounds(
         nodeId: node.id,
         configKey: key,
         ...(value === undefined ? {} : { value }),
+      });
+    }
+
+    const wallTimeKey = GRAPH_LOOP_MAX_WALL_TIME_CONFIG_KEY;
+    const wallTime = node.config[wallTimeKey];
+    if (hasOwnConfigKey(node.config, wallTimeKey) && !isValidMaxIterations(wallTime)) {
+      diagnostics.push({
+        code: "GRAPH_LOOP_BOUND_INVALID",
+        message: `Loop node '${node.id}' config.${wallTimeKey} must be a positive safe integer of milliseconds.`,
+        nodeId: node.id,
+        configKey: wallTimeKey,
+        ...(wallTime === undefined ? {} : { value: wallTime }),
       });
     }
   }

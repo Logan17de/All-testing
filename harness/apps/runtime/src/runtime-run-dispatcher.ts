@@ -18,6 +18,7 @@ import {
 } from "@zet-harness/scheduler";
 
 import type { RuntimeHumanApprovals, RuntimeApprovalAuthority } from "./runtime-human-approvals.js";
+import { assertRunBudget, loopEnteredAtMs, RuntimeBudgetExceededError } from "./runtime-budget.js";
 import { applyControlDelta, controlFrontierOf } from "./runtime-control-frontier.js";
 import {
   currentIterations,
@@ -68,6 +69,7 @@ export interface RuntimeDispatchReport {
     | "RUNTIME_RECOVERY_REQUIRED"
     | "RUNTIME_DURABILITY_FAILED"
     | "RUNTIME_EXECUTION_FAILED"
+    | "RUNTIME_BUDGET_EXCEEDED"
     | "PERMISSION_DENIED";
 }
 
@@ -180,13 +182,15 @@ function restore(frontier: RecoveredExecutionFrontier): PlainDagRestoreState {
 }
 
 function safeFailure(error: unknown): {
-  readonly code: "PERMISSION_DENIED" | "RUNTIME_EXECUTION_FAILED";
+  readonly code: "PERMISSION_DENIED" | "RUNTIME_BUDGET_EXCEEDED" | "RUNTIME_EXECUTION_FAILED";
 } {
   return {
     code:
       error instanceof InvocationPermissionDeniedError
         ? "PERMISSION_DENIED"
-        : "RUNTIME_EXECUTION_FAILED",
+        : error instanceof RuntimeBudgetExceededError
+          ? "RUNTIME_BUDGET_EXCEEDED"
+          : "RUNTIME_EXECUTION_FAILED",
   };
 }
 
@@ -342,7 +346,8 @@ export class RuntimeRunDispatcher {
       try {
         return await work;
       } catch (error) {
-        durabilityFailed = true;
+        // A spent budget is a refusal, not a lost write.
+        if (!(error instanceof RuntimeBudgetExceededError)) durabilityFailed = true;
         throw error;
       }
     };
@@ -383,7 +388,7 @@ export class RuntimeRunDispatcher {
         control: {
           selectRouterBranch: ({ operation, branches }) =>
             this.routerBranch(runId, ir, operation, branches),
-          continueLoop: ({ operation }) => this.loopContinues(runId, ir, operation),
+          continueLoop: ({ op, operation }) => this.loopContinues(runId, ir, op, operation),
         },
         ...(this.#authority === undefined ? {} : { capabilityAuthority: this.#authority }),
         ...(this.#options.retry === undefined ? {} : { retry: this.#options.retry }),
@@ -447,7 +452,13 @@ export class RuntimeRunDispatcher {
       if (recovered.preCrashRunningAttempts.length > 0) {
         return { runId, status: "recovery-required", code: "RUNTIME_RECOVERY_REQUIRED" };
       }
-      await this.terminalize(runId, "failed");
+      await this.terminalize(
+        runId,
+        "failed",
+        error instanceof RuntimeBudgetExceededError
+          ? { budget: error.budget, limit: error.limit }
+          : undefined,
+      );
       return { runId, status: "failed", ...safeFailure(error) };
     } finally {
       this.#runs.delete(runId);
@@ -495,8 +506,23 @@ export class RuntimeRunDispatcher {
     });
   }
 
-  /** A loop continues while its `again` input is true; without one it runs to its bound. */
-  private loopContinues(runId: string, ir: ExecutionIrV1, operation: ExecutionIrOpV1): boolean {
+  /**
+   * A loop continues while its `again` input is true; without one it runs to its bound.
+   * Once its own `maxWallTimeMs` has passed since it was entered, it stops regardless.
+   */
+  private loopContinues(
+    runId: string,
+    ir: ExecutionIrV1,
+    op: number,
+    operation: ExecutionIrOpV1,
+  ): boolean {
+    const control = operation.control;
+    if (control?.kind === "loop" && control.maxWallTimeMs !== undefined) {
+      const enteredAtMs = loopEnteredAtMs(this.#database.connection(), runId, op);
+      if (enteredAtMs !== undefined && Date.now() - enteredAtMs >= control.maxWallTimeMs) {
+        return false;
+      }
+    }
     const again = this.inputs(runId, ir, { operation }).find((input) => input.port === "again");
     if (again === undefined) return true;
     if (typeof again.value !== "boolean") {
@@ -516,6 +542,7 @@ export class RuntimeRunDispatcher {
       if (frontier.runStatus !== "running" || state?.status !== "ready" || plan === undefined) {
         throw new TypeError("Loop entry conflicts with the current frontier.");
       }
+      event(connection, runId, "harness.loop.entered", {}, op);
       publishOp(connection, runId, {
         ...state,
         status: "running",
@@ -571,11 +598,24 @@ export class RuntimeRunDispatcher {
       ) {
         throw new TypeError("Loop decision conflicts with the current frontier.");
       }
+      const loopControl = ir.ops[op]!.control;
+      const bound = loopControl?.kind === "loop" ? loopControl : undefined;
+      const enteredAtMs = loopEnteredAtMs(connection, runId, op);
+      const reason =
+        decision === "continue"
+          ? undefined
+          : bound !== undefined && iteration + 1 >= bound.maxIterations
+            ? "max-iterations"
+            : bound?.maxWallTimeMs !== undefined &&
+                enteredAtMs !== undefined &&
+                Date.now() - enteredAtMs >= bound.maxWallTimeMs
+              ? "max-wall-time"
+              : "again-false";
       event(
         connection,
         runId,
         "harness.loop.advanced",
-        { iteration, decision },
+        reason === undefined ? { iteration, decision } : { iteration, decision, reason },
         op,
         null,
         iteration,
@@ -647,6 +687,12 @@ export class RuntimeRunDispatcher {
       ) {
         throw new TypeError("Durable attempt admission conflicts with the current frontier.");
       }
+      assertRunBudget(
+        connection,
+        runId,
+        frontier.executionIr as unknown as ExecutionIrV1,
+        Date.now(),
+      );
       const previous = connection
         .prepare(
           "SELECT logical_effect_id AS id FROM node_invocations WHERE run_id = ? AND op_index = ? AND iteration = ?",
@@ -887,14 +933,20 @@ export class RuntimeRunDispatcher {
     return Object.freeze(bindings);
   }
 
-  private terminalize(runId: string, status: "completed" | "failed"): Promise<void> {
+  private terminalize(
+    runId: string,
+    status: "completed" | "failed",
+    budget?: { readonly budget: string; readonly limit: number },
+  ): Promise<void> {
     return this.#database.commit((connection) => {
       const changed = connection
         .prepare(
           "UPDATE runs SET status = ?, finished_at_ms = ? WHERE run_id = ? AND status IN ('running', 'waiting')",
         )
         .run(status, Date.now(), runId);
-      if (changed.changes === 1) event(connection, runId, `harness.run.${status}`, {});
+      if (changed.changes !== 1) return;
+      if (budget !== undefined) event(connection, runId, "harness.run.budget-exceeded", budget);
+      event(connection, runId, `harness.run.${status}`, {});
     });
   }
 }

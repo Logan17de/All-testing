@@ -173,3 +173,17 @@ describe("Graph JSON v1 compiler-visible loop bounds", () => {
     expect(validateGraphJsonV1LoopBounds(value, resolver)).toBe(true);
   });
 });
+
+describe("optional loop wall-time bound (8.2)", () => {
+  it("accepts a positive millisecond bound", () => {
+    const value = graph([node("loop", "loop", { maxIterations: 5, maxWallTimeMs: 1000 })], []);
+    expect(checkGraphJsonV1LoopBounds(value, resolver)).toEqual({ valid: true, diagnostics: [] });
+  });
+
+  it.each([0, -5, 1.5, "soon"])("rejects a wall-time bound of %j", (maxWallTimeMs) => {
+    const value = graph([node("loop", "loop", { maxIterations: 5, maxWallTimeMs })], []);
+    expect(checkGraphJsonV1LoopBounds(value, resolver).diagnostics).toEqual([
+      expect.objectContaining({ code: "GRAPH_LOOP_BOUND_INVALID", configKey: "maxWallTimeMs" }),
+    ]);
+  });
+});
