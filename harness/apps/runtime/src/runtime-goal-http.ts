@@ -6,9 +6,11 @@ import {
   createGoal,
   createTodo,
   listGoals,
+  listRunnableTodos,
   listTodos,
   readGoal,
   readTodo,
+  selectNextRunnableTodo,
   setGoalStatus,
   setTodoStatus,
   updateGoal,
@@ -38,6 +40,7 @@ export interface RuntimeGoalHttpServices {
 const MAX_GOAL_BODY_BYTES = 65_536;
 
 const PROJECT_GOALS_PATH = /^\/api\/projects\/([^/]+)\/goals$/u;
+const PROJECT_TODOS_PATH = /^\/api\/projects\/([^/]+)\/todos\/(next|runnable)$/u;
 const GOAL_PATH = /^\/api\/goals\/([^/]+)(?:\/(status|todos))?$/u;
 const TODO_PATH = /^\/api\/todos\/([^/]+)(?:\/(status))?$/u;
 
@@ -88,6 +91,7 @@ const STATUS_FOR: Readonly<Record<DurableGoalErrorCode, number>> = {
 export function isGoalHttpPath(pathname: string): boolean {
   return (
     PROJECT_GOALS_PATH.test(pathname) ||
+    PROJECT_TODOS_PATH.test(pathname) ||
     pathname === "/api/goals" ||
     pathname.startsWith("/api/goals/") ||
     pathname === "/api/todos" ||
@@ -182,6 +186,16 @@ function goalListStatus(url: URL): GoalListStatus {
   throw invalidRequest("status must be open, blocked, completed, cancelled or all.", "status");
 }
 
+function limitFrom(url: URL): number | undefined {
+  const raw = url.searchParams.get("limit");
+  if (raw === null) return undefined;
+  const limit = Number(raw);
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw invalidRequest("limit must be a positive integer.", "limit");
+  }
+  return limit;
+}
+
 function idFrom(segment: string, missing: () => RuntimeGoalRequestError): string {
   let id: string;
   try {
@@ -231,6 +245,8 @@ function statusChange<Status extends string>(
  *   GET  /api/todos/:id
  *   POST /api/todos/:id                    { title?, description?, priority?, position?, dependsOn? }
  *   POST /api/todos/:id/status             { status, reason? }
+ *   GET  /api/projects/:projectId/todos/next?goalId=            the todo to take next, or null
+ *   GET  /api/projects/:projectId/todos/runnable?goalId=&limit=  every runnable todo, in order
  *
  * Status changes follow the transition tables in `durable-goal-records`. Every POST
  * passes the shared CSRF check, and every write is one serialized SQLite commit.
@@ -246,6 +262,28 @@ export async function handleGoalHttp(
   const createId = services.createId ?? createSortableId;
   const database = services.database;
   try {
+    const runnableMatch = PROJECT_TODOS_PATH.exec(url.pathname);
+    if (runnableMatch !== null) {
+      if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+      const projectId = idFrom(runnableMatch[1] ?? "", projectNotFound);
+      if (readProject(database.connection(), projectId) === undefined) throw projectNotFound();
+      const goalParameter = url.searchParams.get("goalId");
+      const scope = goalParameter === null ? {} : { goalId: idFrom(goalParameter, goalNotFound) };
+      if (runnableMatch[2] === "next") {
+        const next = selectNextRunnableTodo(database.connection(), projectId, scope);
+        writeRuntimeJson(response, 200, { todo: next?.todo ?? null, goal: next?.goal ?? null });
+        return;
+      }
+      const limit = limitFrom(url);
+      writeRuntimeJson(response, 200, {
+        todos: listRunnableTodos(database.connection(), projectId, {
+          ...scope,
+          ...(limit === undefined ? {} : { limit }),
+        }),
+      });
+      return;
+    }
+
     const projectMatch = PROJECT_GOALS_PATH.exec(url.pathname);
     if (projectMatch !== null) {
       const projectId = idFrom(projectMatch[1] ?? "", projectNotFound);

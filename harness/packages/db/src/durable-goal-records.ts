@@ -917,3 +917,81 @@ export function setTodoStatus(
     updatedAtMs,
   });
 }
+
+export interface RunnableTodo {
+  readonly todo: DurableTodoRecord;
+  readonly goal: DurableGoalRecord;
+}
+
+export interface RunnableTodoOptions {
+  /** Only consider this goal's todos. */
+  readonly goalId?: string;
+  /** Defaults to 50, at most 1000. */
+  readonly limit?: number;
+}
+
+/**
+ * Todos that can start now, in the order they should be taken.
+ *
+ * A todo is runnable when it is pending, every todo it depends on is done, its goal
+ * is open (neither blocked nor closed) and its project is active. Todos already in
+ * progress are claimed and never offered again. The order is total and uses stored
+ * values only, so the same data always gives the same answer: goal priority, then
+ * the older goal, then todo priority, then position, then the older todo.
+ */
+export function listRunnableTodos(
+  connection: GoalStatementRunner,
+  projectId: string,
+  options: RunnableTodoOptions = {},
+): readonly RunnableTodo[] {
+  const requested = options.limit ?? 50;
+  const limit = Number.isSafeInteger(requested) ? Math.max(1, Math.min(requested, LIST_LIMIT)) : 50;
+  const goalFilter = options.goalId === undefined ? "" : "AND t.goal_id = ?";
+  const parameters: unknown[] = [
+    projectId,
+    ...(options.goalId === undefined ? [] : [options.goalId]),
+    limit,
+  ];
+  const rows = connection
+    .prepare(
+      `SELECT t.todo_id AS todo_id FROM ${TODOS_TABLE} AS t
+       JOIN ${GOALS_TABLE} AS g ON g.goal_id = t.goal_id
+       JOIN ${PROJECTS_TABLE} AS p ON p.project_id = t.project_id
+       WHERE t.project_id = ? ${goalFilter}
+         AND p.status = 'active'
+         AND g.status = 'open'
+         AND t.status = 'pending'
+         AND NOT EXISTS (
+           SELECT 1 FROM ${TODO_DEPENDENCIES_TABLE} AS d
+           JOIN ${TODOS_TABLE} AS dependency ON dependency.todo_id = d.depends_on_todo_id
+           WHERE d.todo_id = t.todo_id AND dependency.status <> 'done'
+         )
+       ORDER BY g.priority ASC, g.goal_id ASC, t.priority ASC, t.position ASC, t.todo_id ASC
+       LIMIT ?`,
+    )
+    .all(...parameters);
+
+  const goals = new Map<string, DurableGoalRecord>();
+  const runnable: RunnableTodo[] = [];
+  for (const row of rows) {
+    const todo = readTodo(connection, text(row["todo_id"]));
+    if (todo === undefined) continue;
+    let goal = goals.get(todo.goalId);
+    if (goal === undefined) {
+      goal = readGoal(connection, todo.goalId);
+      if (goal === undefined) continue;
+      goals.set(todo.goalId, goal);
+    }
+    runnable.push(Object.freeze({ todo, goal }));
+  }
+  return Object.freeze(runnable);
+}
+
+/** The one todo to take next, or undefined when nothing can start. */
+export function selectNextRunnableTodo(
+  connection: GoalStatementRunner,
+  projectId: string,
+  options: { readonly goalId?: string } = {},
+): RunnableTodo | undefined {
+  return listRunnableTodos(connection, projectId, { ...options, limit: 1 })[0];
+}

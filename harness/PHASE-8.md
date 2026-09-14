@@ -350,7 +350,33 @@ Covered by the UUIDv7 and ordering assertions for logical effect ids in
 `durable-node-invocation.test.ts`, for run ids in `runtime-structured-dispatch.test.ts`, and for
 approval ids in `runtime-human-approvals.test.ts`, alongside the generator's own tests.
 
+## Slice 13 — the next runnable todo (8.9)
+
+Given a project, the runtime can now say exactly which todo should be taken next, and the answer
+never depends on timing or insertion luck.
+
+- **What is runnable.** A todo is runnable when it is `pending`, every todo it depends on is `done`,
+  its goal is `open` (not blocked, completed or cancelled) and its project is active. A todo already
+  `in_progress` is claimed and is not offered again.
+- **One total order.** Runnable todos are ordered by goal priority, then the older goal, then todo
+  priority, then position, then the older todo. Every key is a stored value and the last two are
+  unique sortable ids, so the order has no ties and the same data always gives the same answer. Goal
+  priority comes first: work on the most urgent goal is finished before a less urgent goal's urgent
+  todo starts.
+- **Records API.** `listRunnableTodos(connection, projectId, { goalId?, limit? })` returns
+  `{ todo, goal }` pairs in that order, and `selectNextRunnableTodo` returns the first or
+  `undefined`. Selection is a read: an agent claims a todo by moving it to `in_progress`, which
+  already refuses a todo whose dependencies are unfinished.
+- **HTTP.** `GET /api/projects/:id/todos/next` returns `{ todo, goal }` or both as `null`, and
+  `GET /api/projects/:id/todos/runnable` returns the ordered list. Both accept `goalId`, and the list
+  accepts `limit`.
+
+Covered by `durable-next-todo.test.ts` (the full ordering, dependency release, claimed todos,
+priority changes, goal scope, limits, blocked and closed goals, blocked todos and archived projects)
+and `runtime-next-todo-http.test.ts`, which walks a project's todos to completion over HTTP.
+
 ## Next
 
-Deterministic next-runnable-todo selection (8.9). After that, the context builder and agent loop
-(8.10–8.13) bring the model and tool nodes that complete 8.2.
+The context builder with hard byte and token budget hooks (8.10), then model-visible goal and todo
+actions (8.11) and the bounded model→tool→model agent loop (8.12), which brings the model and tool
+nodes that complete 8.2, and blocked-state and goal-completion logic (8.13).
