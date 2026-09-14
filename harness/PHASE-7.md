@@ -92,7 +92,8 @@ adding several in a row never stacks one on top of another.
 - The inspector shows what the runtime records per node today. Model routes, tool calls, logs,
   checkpoints and artifacts are not recorded per node yet, and the inspector says so rather than
   showing empty sections. Event payloads are not shown; values come from redacted attempt records.
-- Control edges are preserved in the document but not drawn.
+- Control edges were preserved but not drawn at the end of Phase 7. They are drawn and editable
+  since the Phase 8 control-flow groundwork (see `PHASE-8.md`).
 - The editor does not yet author graph inputs, secret bindings or policies beyond the derived
   execution bound; imported documents that carry them are kept and compiled as they are.
 - React Flow keeps a node hidden until its size has been measured, so a canvas in a window the

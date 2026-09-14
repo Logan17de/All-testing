@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addControlEdge,
   addDataEdge,
   addNode,
+  controlHandleId,
+  controlPortOf,
+  controlPortsOf,
   emptyGraph,
   finalizeGraph,
   freePosition,
@@ -177,5 +181,74 @@ describe("reading an untrusted document", () => {
   it("round-trips a document the editor produced", () => {
     const graph = finalizeGraph(pipeline(), PALETTE);
     expect(parseGraphDocument(JSON.parse(JSON.stringify(graph)) as unknown)).toEqual(graph);
+  });
+});
+
+describe("control ports and control edges", () => {
+  function controlEntry(
+    type: string,
+    control: NonNullable<PaletteEntry["manifest"]["control"]>,
+  ): PaletteEntry {
+    const base = entry(type);
+    return { ...base, manifest: { ...base.manifest, control } };
+  }
+
+  it("exposes a router's entry and branches, and a join's lanes and output", () => {
+    expect(
+      controlPortsOf(
+        controlEntry("harness.route", { kind: "router", entry: "in", branches: ["yes", "no"] })
+          .manifest,
+      ),
+    ).toEqual({ inputs: ["in"], outputs: ["yes", "no"] });
+    expect(
+      controlPortsOf(
+        controlEntry("harness.join-all", {
+          kind: "join",
+          inputs: ["a", "b"],
+          output: "out",
+          mode: "all-active",
+        }).manifest,
+      ),
+    ).toEqual({ inputs: ["a", "b"], outputs: ["out"] });
+  });
+
+  it("gives an ordinary node one unnamed ordering port on each side", () => {
+    expect(controlPortsOf(entry("text.upper").manifest)).toEqual({
+      inputs: [undefined],
+      outputs: [undefined],
+    });
+  });
+
+  it("round-trips control handle ids without colliding with data ports", () => {
+    expect(controlPortOf(controlHandleId("yes"))).toBe("yes");
+    expect(controlPortOf(controlHandleId(undefined))).toBeUndefined();
+    expect(controlPortOf("output")).toBeNull();
+  });
+
+  it("adds a control edge once, and never from a node to itself", () => {
+    let graph = addNode(emptyGraph("g"), "route", "harness.route", "1", { x: 0, y: 0 });
+    graph = addNode(graph, "yes-path", "text.upper", "1", { x: 0, y: 200 });
+    graph = addControlEdge(graph, { nodeId: "route", port: "yes" }, { nodeId: "yes-path" });
+    const again = addControlEdge(graph, { nodeId: "route", port: "yes" }, { nodeId: "yes-path" });
+
+    expect(again).toBe(graph);
+    expect(graph.edges).toEqual([
+      expect.objectContaining({
+        kind: "control",
+        from: { nodeId: "route", port: "yes" },
+        to: { nodeId: "yes-path" },
+      }),
+    ]);
+    expect(addControlEdge(graph, { nodeId: "route" }, { nodeId: "route" })).toBe(graph);
+  });
+
+  it("does not treat a node reached only by a control edge as an entrypoint", () => {
+    let graph = addNode(emptyGraph("g"), "first", "text.upper", "1", { x: 0, y: 0 });
+    graph = addNode(graph, "after", "text.exclaim", "1", { x: 0, y: 200 });
+    graph = addControlEdge(graph, { nodeId: "first" }, { nodeId: "after" });
+
+    expect(finalizeGraph(graph, PALETTE).entrypoints).toEqual([
+      { id: "entry_first", nodeId: "first" },
+    ]);
   });
 });

@@ -343,6 +343,54 @@
   font-size: 0.72rem;
 }
 
+/* Control flow: handles above and below a node, drawn as dashed violet edges. */
+.hnode__ctl {
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hnode__ctl--in {
+  margin-bottom: 8px;
+}
+
+.hnode__ctl--out {
+  margin-top: 12px;
+}
+
+.hnode__ctlport {
+  position: relative;
+  min-width: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.62rem;
+  color: #c4b5fd;
+  text-align: center;
+}
+
+.hnode .react-flow__handle.hnode__handle--control {
+  width: 10px;
+  height: 10px;
+  border-color: #a78bfa;
+  border-radius: 2px;
+}
+
+.hnode__ctl--in .react-flow__handle.hnode__handle--control {
+  top: -16px;
+}
+
+.hnode__ctl--out .react-flow__handle.hnode__handle--control {
+  top: auto;
+  bottom: -18px;
+}
+
+.react-flow__edge.hedge--control .react-flow__edge-path {
+  stroke: #a78bfa;
+  stroke-dasharray: 6 4;
+}
+
 .react-flow__edge.hedge--invalid .react-flow__edge-path {
   stroke: #dc2626;
   stroke-width: 2;

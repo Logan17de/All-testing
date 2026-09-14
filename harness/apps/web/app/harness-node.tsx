@@ -2,11 +2,17 @@
 
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 
+import { controlHandleId } from "../lib/graph-document";
+
 export type HarnessNodeData = {
   readonly title: string;
   readonly type: string;
   readonly inputs: readonly string[];
   readonly outputs: readonly string[];
+  /** Control ports above the node; `undefined` is an unnamed ordering port. */
+  readonly controlInputs?: readonly (string | undefined)[];
+  /** Control ports below the node. */
+  readonly controlOutputs?: readonly (string | undefined)[];
   readonly diagnostics: readonly string[];
   readonly status?: string;
   readonly isolated?: boolean;
@@ -49,6 +55,7 @@ export function HarnessNode({ data, selected }: NodeProps<HarnessFlowNode>) {
 
   return (
     <div className={className}>
+      <ControlPorts ports={data.controlInputs ?? []} direction="in" connectable={connectable} />
       <header className="hnode__head">
         <span className="hnode__title">{data.title}</span>
         {data.isolated === true ? (
@@ -96,6 +103,7 @@ export function HarnessNode({ data, selected }: NodeProps<HarnessFlowNode>) {
           ))}
         </ul>
       </div>
+      <ControlPorts ports={data.controlOutputs ?? []} direction="out" connectable={connectable} />
       {data.diagnostics.length > 0 ? (
         <p className="hnode__diag" title={data.diagnostics.join("\n")}>
           {data.diagnostics.length === 1
@@ -104,6 +112,51 @@ export function HarnessNode({ data, selected }: NodeProps<HarnessFlowNode>) {
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Control handles sit above (into the node) and below (out of it), apart from the
+ * data ports on the sides, so a control edge can never be drawn into a data port.
+ */
+function ControlPorts({
+  ports,
+  direction,
+  connectable,
+}: {
+  readonly ports: readonly (string | undefined)[];
+  readonly direction: "in" | "out";
+  readonly connectable: boolean;
+}) {
+  if (ports.length === 0) return null;
+  return (
+    <ul
+      className={`hnode__ctl hnode__ctl--${direction}`}
+      aria-label={direction === "in" ? "Control inputs" : "Control outputs"}
+    >
+      {ports.map((port) => (
+        <li
+          key={controlHandleId(port)}
+          className="hnode__ctlport"
+          title={
+            port === undefined
+              ? direction === "in"
+                ? "Runs after the connected node"
+                : "Connected nodes run after this one"
+              : `Control ${direction === "in" ? "input" : "output"} '${port}'`
+          }
+        >
+          <Handle
+            type={direction === "in" ? "target" : "source"}
+            position={direction === "in" ? Position.Top : Position.Bottom}
+            id={controlHandleId(port)}
+            isConnectable={connectable}
+            className="hnode__handle hnode__handle--control"
+          />
+          {port ?? ""}
+        </li>
+      ))}
+    </ul>
   );
 }
 

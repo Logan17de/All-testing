@@ -15,9 +15,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  controlHandleId,
+  controlPortsOf,
   findManifest,
   parseGraphDocument,
-  type GraphDataEdge,
   type GraphNode,
   type PaletteEntry,
 } from "../../../lib/graph-document";
@@ -231,6 +232,8 @@ function Inspector({ runId }: { readonly runId: string }) {
             type: `${node.type}@${node.version}`,
             inputs: Object.keys(entry?.manifest.inputs ?? {}),
             outputs: Object.keys(entry?.manifest.outputs ?? {}),
+            controlInputs: controlPortsOf(entry?.manifest).inputs,
+            controlOutputs: controlPortsOf(entry?.manifest).outputs,
             diagnostics: [],
             isolated: entry?.isolated ?? false,
             readOnly: true,
@@ -253,16 +256,18 @@ function Inspector({ runId }: { readonly runId: string }) {
 
   const flowEdges = useMemo<Edge[]>(
     () =>
-      (graph?.edges ?? [])
-        .filter((edge): edge is GraphDataEdge => edge.kind === "data")
-        .map((edge) => ({
+      (graph?.edges ?? []).map((edge): Edge => {
+        const control = edge.kind === "control";
+        return {
           id: edge.id,
           source: edge.from.nodeId,
-          sourceHandle: edge.from.port,
+          sourceHandle: control ? controlHandleId(edge.from.port) : edge.from.port,
           target: edge.to.nodeId,
-          targetHandle: edge.to.port,
+          targetHandle: control ? controlHandleId(edge.to.port) : edge.to.port,
           animated: stateByNode.get(edge.to.nodeId)?.status === "running",
-        })),
+          ...(control ? { className: "hedge--control" } : {}),
+        };
+      }),
     [graph, stateByNode],
   );
 

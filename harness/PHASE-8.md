@@ -64,16 +64,35 @@ Covered by `structured-control-restore.test.ts` (every committed point of a rout
 the same outcome as an uninterrupted run) and `apps/runtime/src/runtime-structured-dispatch.test.ts`
 (both branches, an undeclared branch, and a restart while the chosen branch waits for approval).
 
+## Slice 3 — built-in control nodes and control edges in the editor (done)
+
+Routing is now usable without writing a plugin.
+
+- **First-party control flow.** `createControlFlowPlugin()` in `@zet-harness/core` registers, through
+  the public plugin path, a **Condition** node (`equals`, `not-equals`, `contains`, `truthy`,
+  `falsy`; outputs `branch` as `yes` or `no`, plus `matched`), a **Route** router with `yes` and
+  `no` branches, and **Wait for all** / **Wait for any** joins with lanes `a` and `b`. The daemon
+  always registers it. Route and the joins declare no executor.
+- **Control edges on the canvas.** Nodes show control handles above (in) and below (out) and data
+  handles on the sides. Structured control nodes expose exactly their contract's named ports, which
+  the compiler requires; other nodes get one unnamed ordering port on each side. Control edges are
+  drawn dashed. A control handle can only connect to a control handle, and a data handle only to a
+  data handle.
+- **The run inspector draws them too**, alongside skipped nodes.
+- **Placement** leaves room for the taller control-flow nodes.
+
+Covered by `packages/core/src/control-flow-plugin.test.ts`, the control-port tests in
+`apps/web/lib/graph-document.test.ts`, and an HTTP test that routes an editor graph through
+Condition, Route and Wait for all on a running daemon.
+
 ## Remaining slices before 8.1 is complete
 
-1. **Built-in control nodes and control edges in the editor.** First-party router and join nodes in
-   the palette, plus drawing control edges and control ports on the canvas.
-2. **Loop regions in the compiler.** Identify the region between a loop's `body` output and its
+1. **Loop regions in the compiler.** Identify the region between a loop's `body` output and its
    `continue` input, allow exactly that back edge through cycle rejection, and lower the loop
    descriptor with its region membership.
-3. **Iterations in the scheduler.** Re-arm region ops with `iteration + 1` until the loop exits or
+2. **Iterations in the scheduler.** Re-arm region ops with `iteration + 1` until the loop exits or
    `maxIterations` is reached, keeping attempts and outputs keyed by iteration.
-4. **Iterations in durable dispatch.** Key invocations, attempts, outputs and frontier events by
+3. **Iterations in durable dispatch.** Key invocations, attempts, outputs and frontier events by
    iteration, and restore mid-loop.
 
 Items 8.2–8.17 follow in the TODO order once loops run durably.

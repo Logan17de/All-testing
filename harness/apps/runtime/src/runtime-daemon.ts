@@ -17,6 +17,7 @@ import { DURABLE_FILE_CHANGES_MIGRATION } from "@zet-harness/db/durable-file-cha
 
 import {
   PluginHost,
+  createControlFlowPlugin,
   createHumanApprovalPlugin,
   type CapabilityPermissionPolicy,
 } from "@zet-harness/core";
@@ -261,6 +262,9 @@ export class RuntimeDaemon {
         // dispatcher handles it itself instead of sending it to an executor.
         const host = new PluginHost();
         await host.activate(createHumanApprovalPlugin());
+        // Condition, Route and the joins are first-party control flow, registered
+        // through the same public path; routers and joins never run plugin code.
+        await host.activate(createControlFlowPlugin());
         const loaded = await loadRuntimePlugins(this.pluginOptions, host);
         this.pluginHost = loaded.host;
         this.pluginReport = loaded.report;

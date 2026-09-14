@@ -22,6 +22,17 @@ export { PluginHost } from "./plugin-host.js";
 export { TypedRegistry, type RegistryDisposer, type RegistryEntry } from "./typed-registry.js";
 export { HUMAN_APPROVAL_NODE_TYPE, createHumanApprovalPlugin } from "./human-approval-plugin.js";
 export {
+  CONDITION_NODE_TYPE,
+  CONDITION_OPERATORS,
+  CONTROL_FLOW_PLUGIN_ID,
+  JOIN_ALL_NODE_TYPE,
+  JOIN_ANY_NODE_TYPE,
+  ROUTE_NODE_TYPE,
+  createControlFlowPlugin,
+  evaluateCondition,
+  type ConditionOperator,
+} from "./control-flow-plugin.js";
+export {
   ModelCatalog,
   ToolCatalog,
   type AdapterPluginPin,

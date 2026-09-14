@@ -176,7 +176,15 @@ describe("editor endpoints on a running daemon", () => {
     const types = (reply.body["nodes"] as { manifest: { type: string } }[]).map(
       (node) => node.manifest.type,
     );
-    expect(types).toEqual(["harness.human-approval", "text.exclaim", "text.upper"]);
+    expect(types).toEqual([
+      "harness.condition",
+      "harness.human-approval",
+      "harness.join-all",
+      "harness.join-any",
+      "harness.route",
+      "text.exclaim",
+      "text.upper",
+    ]);
   });
 
   it("refuses a graph POST that lacks the session CSRF token", async () => {
@@ -361,5 +369,97 @@ describe("human approval from an editor graph", () => {
 
     const run = await waitForRun(base, runId);
     expect(run["status"]).toBe("completed");
+  });
+});
+
+describe("built-in control-flow nodes on a running daemon", () => {
+  it("routes an editor graph through Condition, Route and Wait for all", async () => {
+    const base = await startDaemon();
+    const token = await sessionToken(base);
+    const routed = graph({
+      graphId: "control-flow-graph",
+      nodes: [
+        {
+          id: "check",
+          type: "harness.condition",
+          version: "1",
+          config: { operator: "equals", compare: "go" },
+          bindings: [{ kind: "literal", port: "value", value: "go" }],
+        },
+        { id: "route", type: "harness.route", version: "1", config: {} },
+        {
+          id: "chosen",
+          type: "text.upper",
+          version: "1",
+          config: {},
+          bindings: [{ kind: "literal", port: "input", value: "chosen" }],
+        },
+        {
+          id: "other",
+          type: "text.upper",
+          version: "1",
+          config: {},
+          bindings: [{ kind: "literal", port: "input", value: "other" }],
+        },
+        { id: "join", type: "harness.join-all", version: "1", config: {} },
+        {
+          id: "done",
+          type: "text.exclaim",
+          version: "1",
+          config: {},
+          bindings: [{ kind: "literal", port: "input", value: "done" }],
+        },
+      ],
+      edges: [
+        {
+          id: "c1",
+          kind: "data",
+          from: { nodeId: "check", port: "branch" },
+          to: { nodeId: "route", port: "branch" },
+        },
+        {
+          id: "c2",
+          kind: "control",
+          from: { nodeId: "route", port: "yes" },
+          to: { nodeId: "chosen" },
+        },
+        {
+          id: "c3",
+          kind: "control",
+          from: { nodeId: "route", port: "no" },
+          to: { nodeId: "other" },
+        },
+        {
+          id: "c4",
+          kind: "control",
+          from: { nodeId: "chosen" },
+          to: { nodeId: "join", port: "a" },
+        },
+        { id: "c5", kind: "control", from: { nodeId: "other" }, to: { nodeId: "join", port: "b" } },
+        {
+          id: "c6",
+          kind: "control",
+          from: { nodeId: "join", port: "out" },
+          to: { nodeId: "done" },
+        },
+      ],
+      outputs: [{ id: "result", schema: true, source: { nodeId: "done", port: "output" } }],
+      entrypoints: [{ id: "main", nodeId: "check" }],
+    });
+
+    const created = await post(base, "/api/runs", { graph: routed }, token);
+    expect(created.status).toBe(201);
+    const run = await waitForRun(base, String(created.body["runId"]));
+
+    expect(run["status"]).toBe("completed");
+    const nodes = run["nodes"] as { nodeId: string; status: string }[];
+    expect(Object.fromEntries(nodes.map((node) => [node.nodeId, node.status]))).toEqual({
+      check: "completed",
+      route: "completed",
+      chosen: "completed",
+      other: "skipped",
+      join: "completed",
+      done: "completed",
+    });
   });
 });

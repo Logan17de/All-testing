@@ -107,6 +107,12 @@ plus the built-in **Human approval** node, which any graph can use to pause for 
   An input nothing feeds can take a typed value in the inspector.
 - The compiler checks the graph as you edit. Problems appear on the node or connection they
   concern, and **Run graph** stays disabled until there are none.
+- Handles on a node's sides carry data. Handles above and below a node are control flow: a
+  control edge makes its target run only after its source finishes on that path.
+- To branch, connect a **Condition** node's `branch` output to a **Route** node's `branch` input,
+  then draw control edges from the Route's `yes` and `no` handles to the steps on each path. The
+  path not taken is skipped, and so is anything that depends on it. **Wait for all** and **Wait for
+  any** bring paths back together through their `a` and `b` lanes.
 - **Run graph** stores a new revision, starts a run and opens the run inspector.
 
 The run inspector (`/runs/<id>`) shows each node's durable state on the graph, the event timeline,
@@ -184,6 +190,37 @@ attempt may be repeated, so state it honestly:
 
 A pure node can be rerun freely after a crash. Anything else cannot, and the harness will not
 guess on your behalf.
+
+### Control-flow nodes
+
+A plugin can declare its own routers and joins. Give the manifest a `control` contract and the
+behavior `primitiveFamily: "control"` with `executionMode: "none"`, and omit `execute`: the scheduler
+resolves these nodes itself, so they never run plugin code.
+
+```js
+{
+  type: "support.triage",
+  version: "1",
+  title: "Triage",
+  inputs: { branch: { schema: { type: "string" }, required: true } },
+  outputs: {},
+  configSchema: { type: "object", additionalProperties: false },
+  behavior: {
+    primitiveFamily: "control",
+    determinism: "deterministic",
+    effect: "none",
+    idempotency: "not-applicable",
+    recovery: "not-applicable",
+    executionMode: "none",
+    requiredCapabilities: [],
+  },
+  control: { kind: "router", entry: "in", branches: ["billing", "technical", "other"] },
+}
+```
+
+A router follows the branch named by the string on its `branch` input; an undeclared name fails
+the run. A join declares `{ kind: "join", inputs: [...lanes], output: "out", mode }` where `mode`
+is `all-active`, `any`, or `quorum` with a `quorum` count. Both survive a runtime restart.
 
 ### TypeScript
 

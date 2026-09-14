@@ -30,6 +30,21 @@ export interface PortManifest {
   readonly secret?: boolean;
 }
 
+/** A node's structured control contract: control ports with fixed meaning. */
+export interface ControlContractView {
+  readonly kind: string;
+  readonly entry?: string;
+  readonly branches?: readonly string[];
+  readonly inputs?: readonly string[];
+  readonly output?: string;
+  readonly mode?: string;
+  readonly continue?: string;
+  readonly body?: string;
+  readonly exit?: string;
+  readonly outcomes?: readonly string[];
+  readonly exits?: readonly string[];
+}
+
 export interface NodeManifestView {
   readonly type: string;
   readonly version: string;
@@ -38,6 +53,7 @@ export interface NodeManifestView {
   readonly inputs: { readonly [port: string]: PortManifest };
   readonly outputs: { readonly [port: string]: PortManifest };
   readonly configSchema: JsonSchema;
+  readonly control?: ControlContractView;
   readonly behavior: {
     readonly primitiveFamily: string;
     readonly effect: string;
@@ -203,6 +219,92 @@ export function newEdgeId(): string {
   return `edge-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+/** Control handles use this prefix, so they can never collide with a data port name. */
+export const CONTROL_HANDLE_PREFIX = "ctl:";
+
+export function controlHandleId(port: string | undefined): string {
+  return `${CONTROL_HANDLE_PREFIX}${port ?? ""}`;
+}
+
+/**
+ * The control port a canvas handle names: the port name, `undefined` for an
+ * unnamed ordering port, or `null` when the handle is a data port.
+ */
+export function controlPortOf(handle: string): string | undefined | null {
+  if (!handle.startsWith(CONTROL_HANDLE_PREFIX)) return null;
+  const port = handle.slice(CONTROL_HANDLE_PREFIX.length);
+  return port.length === 0 ? undefined : port;
+}
+
+export interface ControlPorts {
+  /** Named control ports, or a single `undefined` for an unnamed ordering port. */
+  readonly inputs: readonly (string | undefined)[];
+  readonly outputs: readonly (string | undefined)[];
+}
+
+function names(...values: readonly (string | readonly string[] | undefined)[]): string[] {
+  return values.flatMap((value) =>
+    value === undefined ? [] : typeof value === "string" ? [value] : [...value],
+  );
+}
+
+/**
+ * The control ports a node offers on the canvas.
+ *
+ * Routers, joins and other structured control nodes expose exactly the ports
+ * their contract declares, which the compiler requires control edges to use.
+ * Every other node gets one unnamed port above and below for plain ordering.
+ */
+export function controlPortsOf(manifest: NodeManifestView | undefined): ControlPorts {
+  const control = manifest?.control;
+  switch (control?.kind) {
+    case "router":
+      return { inputs: names(control.entry), outputs: names(control.branches) };
+    case "join":
+      return { inputs: names(control.inputs), outputs: names(control.output) };
+    case "loop":
+      return {
+        inputs: names(control.entry, control.continue),
+        outputs: names(control.body, control.exit),
+      };
+    case "human-interrupt":
+      return { inputs: names(control.entry), outputs: names(control.outcomes) };
+    case "subgraph":
+      return { inputs: names(control.entry), outputs: names(control.exits) };
+    default:
+      return { inputs: [undefined], outputs: [undefined] };
+  }
+}
+
+/** Order two nodes: the target runs only after the source finishes on this path. */
+export function addControlEdge(
+  document: GraphDocument,
+  from: { readonly nodeId: string; readonly port?: string },
+  to: { readonly nodeId: string; readonly port?: string },
+): GraphDocument {
+  if (from.nodeId === to.nodeId) return document;
+  const duplicate = document.edges.some(
+    (edge) =>
+      edge.kind === "control" &&
+      edge.from.nodeId === from.nodeId &&
+      edge.from.port === from.port &&
+      edge.to.nodeId === to.nodeId &&
+      edge.to.port === to.port,
+  );
+  if (duplicate) return document;
+  const endpoint = (value: { readonly nodeId: string; readonly port?: string }) =>
+    value.port === undefined
+      ? { nodeId: value.nodeId }
+      : { nodeId: value.nodeId, port: value.port };
+  return {
+    ...document,
+    edges: [
+      ...document.edges,
+      { id: newEdgeId(), kind: "control", from: endpoint(from), to: endpoint(to) },
+    ],
+  };
+}
+
 /** Input ports of one node that an edge already feeds. */
 export function fedPorts(document: GraphDocument, nodeId: string): ReadonlySet<string> {
   return new Set(
@@ -236,7 +338,7 @@ export function setPosition(
 }
 
 /** Rough footprint of a node on the canvas, used only to keep new nodes from stacking. */
-export const NODE_FOOTPRINT = { width: 220, height: 96 } as const;
+export const NODE_FOOTPRINT = { width: 220, height: 160 } as const;
 
 /**
  * The nearest spot at or below `point` that no existing node covers.

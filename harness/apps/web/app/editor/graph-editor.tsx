@@ -20,8 +20,12 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 
 import {
+  addControlEdge,
   addDataEdge,
   addNode,
+  controlHandleId,
+  controlPortOf,
+  controlPortsOf,
   emptyGraph,
   fedPorts,
   finalizeGraph,
@@ -274,6 +278,8 @@ function EditorWorkspace() {
             type: `${node.type}@${node.version}`,
             inputs: Object.keys(entry?.manifest.inputs ?? {}),
             outputs: Object.keys(entry?.manifest.outputs ?? {}),
+            controlInputs: controlPortsOf(entry?.manifest).inputs,
+            controlOutputs: controlPortsOf(entry?.manifest).outputs,
             diagnostics: (nodeProblems.get(node.id) ?? []).map((problem) => problem.message),
             isolated: entry?.isolated ?? false,
             unresolved: palette !== null && entry === undefined,
@@ -285,20 +291,25 @@ function EditorWorkspace() {
 
   const flowEdges = useMemo<Edge[]>(
     () =>
-      graph.edges.flatMap((edge): Edge[] => {
-        if (edge.kind !== "data") return [];
+      graph.edges.map((edge): Edge => {
         const problem = edgeProblems.get(edge.id);
-        return [
-          {
-            id: edge.id,
-            source: edge.from.nodeId,
-            sourceHandle: edge.from.port,
-            target: edge.to.nodeId,
-            targetHandle: edge.to.port,
-            selected: edge.id === selectedEdgeId,
-            ...(problem === undefined ? {} : { className: "hedge--invalid", label: problem }),
-          },
-        ];
+        const control = edge.kind === "control";
+        const className = [
+          control ? "hedge--control" : "",
+          problem === undefined ? "" : "hedge--invalid",
+        ]
+          .filter((part) => part.length > 0)
+          .join(" ");
+        return {
+          id: edge.id,
+          source: edge.from.nodeId,
+          sourceHandle: control ? controlHandleId(edge.from.port) : edge.from.port,
+          target: edge.to.nodeId,
+          targetHandle: control ? controlHandleId(edge.to.port) : edge.to.port,
+          selected: edge.id === selectedEdgeId,
+          ...(className.length === 0 ? {} : { className }),
+          ...(problem === undefined ? {} : { label: problem }),
+        };
       }),
     [graph.edges, edgeProblems, selectedEdgeId],
   );
@@ -378,13 +389,25 @@ function EditorWorkspace() {
   const onConnect = useCallback((connection: Connection) => {
     const { source, target, sourceHandle, targetHandle } = connection;
     if (sourceHandle === null || targetHandle === null) return;
-    setGraph((current) =>
-      addDataEdge(
-        current,
-        { nodeId: source, port: sourceHandle },
-        { nodeId: target, port: targetHandle },
-      ),
-    );
+    const fromControl = controlPortOf(sourceHandle);
+    const toControl = controlPortOf(targetHandle);
+    if (fromControl === null && toControl === null) {
+      setGraph((current) =>
+        addDataEdge(
+          current,
+          { nodeId: source, port: sourceHandle },
+          { nodeId: target, port: targetHandle },
+        ),
+      );
+    } else if (fromControl !== null && toControl !== null) {
+      setGraph((current) =>
+        addControlEdge(
+          current,
+          { nodeId: source, ...(fromControl === undefined ? {} : { port: fromControl }) },
+          { nodeId: target, ...(toControl === undefined ? {} : { port: toControl }) },
+        ),
+      );
+    }
   }, []);
 
   // A quick guard against obviously wrong wiring while dragging. The compiler
@@ -395,6 +418,11 @@ function EditorWorkspace() {
       const targetHandle = connection.targetHandle;
       if (connection.sourceHandle === null || connection.sourceHandle === undefined) return false;
       if (targetHandle === null || targetHandle === undefined) return false;
+      // Control ports connect only to control ports, and data ports only to data ports.
+      const fromControl = controlPortOf(connection.sourceHandle);
+      const toControl = controlPortOf(targetHandle);
+      if ((fromControl === null) !== (toControl === null)) return false;
+      if (fromControl !== null) return true;
       const target = graph.nodes.find((node) => node.id === connection.target);
       const entry =
         target === undefined ? undefined : findManifest(palette, target.type, target.version);
@@ -556,6 +584,10 @@ function EditorWorkspace() {
           ))}
         </ul>
         <p className="muted small">Drag a node onto the canvas, or click it to add it.</p>
+        <p className="muted small">
+          Side handles carry data. Handles above and below a node are control flow: use them to
+          order steps, or to wire Route branches and Wait lanes.
+        </p>
       </aside>
 
       <section
@@ -639,7 +671,7 @@ function EditorWorkspace() {
             <p className="muted small">
               {countLabel(graph.nodes.length, "node")} ·{" "}
               {countLabel(graph.edges.length - controlEdges, "connection")}
-              {controlEdges > 0 ? ` · ${countLabel(controlEdges, "control edge")} (not drawn)` : ""}
+              {controlEdges > 0 ? ` · ${countLabel(controlEdges, "control edge")}` : ""}
             </p>
             <div className="btnRow">
               <button
@@ -921,7 +953,13 @@ function EdgeInspector({
 }) {
   return (
     <>
-      <h2 className="panelTitle">Connection</h2>
+      <h2 className="panelTitle">{edge.kind === "control" ? "Control edge" : "Connection"}</h2>
+      {edge.kind === "control" ? (
+        <p className="muted small">
+          The target runs only once the source finishes on this path. If the source is skipped, the
+          target is skipped too.
+        </p>
+      ) : null}
       <p className="small">
         <code>
           {edge.from.nodeId}.{edge.from.port ?? "control"}
