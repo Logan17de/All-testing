@@ -265,6 +265,10 @@ describe("durable human approval transactions", () => {
         decision: "approved",
       }),
     ).rejects.toMatchObject({ code: "APPROVAL_EXPIRED" });
+    // 8.8: approval ids are time-ordered UUIDv7 behind their prefix.
+    expect(initial.approval.approvalId).toMatch(
+      /^approval-v1:[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
     expect(service.get(initial.approval.approvalId).status).toBe("pending");
     expect(count(database, "node_attempts")).toBe(0);
   });

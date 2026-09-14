@@ -105,15 +105,16 @@ function createRun(connection: DatabaseSync, suffix: string): string {
 }
 
 describe("durable logical effect identity", () => {
-  it("generates opaque versioned Harness-owned IDs", () => {
+  it("generates opaque, versioned, time-ordered Harness-owned IDs", () => {
     const first = generateLogicalEffectId();
     const second = generateLogicalEffectId();
 
     expect(first).toMatch(
-      /^zet-effect-v1:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      /^zet-effect-v1:[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
     expect(first.startsWith(LOGICAL_EFFECT_ID_PREFIX)).toBe(true);
     expect(second).not.toBe(first);
+    expect(second > first).toBe(true);
   });
 
   it("creates one identity and reuses it for retry-time calls", async () => {

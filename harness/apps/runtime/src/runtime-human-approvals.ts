@@ -1,9 +1,10 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import type { SqliteDatabase } from "@zet-harness/db";
 import type { DurableApprovalRecord } from "@zet-harness/db/durable-approval-records";
 import { generateLogicalEffectId } from "@zet-harness/db/durable-node-invocation";
+import { createSortableId } from "@zet-harness/db/sortable-id";
 import type { ExecutionIrV1 } from "@zet-harness/graph";
 import { hasStructuredControl, reduceStructuredControlFrontier } from "@zet-harness/scheduler";
 
@@ -280,7 +281,7 @@ export class RuntimeHumanApprovals {
       if (state?.status !== "ready" || state.attemptsStarted !== 0) {
         throw new RuntimeApprovalError("APPROVAL_CONFLICT");
       }
-      const approvalId = `approval-v1:${randomUUID()}`;
+      const approvalId = `approval-v1:${createSortableId()}`;
       const resumeToken = this.freshToken();
       const invocation = connection
         .prepare(

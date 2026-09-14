@@ -816,6 +816,10 @@ describe("subgraphs (8.4)", () => {
     expect(compiled.valid).toBe(true);
     if (!compiled.valid) return;
     const { runId } = await createRunFromCompiledGraph(db, compiled.compiled);
+    // 8.8: run ids are time-ordered UUIDv7 behind their prefix.
+    expect(runId).toMatch(
+      /^run-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
 
     expect((await dispatcher.dispatch(runId)).status).toBe("completed");
     expect(ran).toEqual(["before", "child-start", "child-end", "after"]);

@@ -1,10 +1,9 @@
-import { randomUUID } from "node:crypto";
-
 import type { SerializedSqliteCommitPath } from "./durable-node-completion.js";
 import {
   NODE_INVOCATIONS_TABLE,
   type DurableNodeInvocationRecord,
 } from "./durable-node-attempt-records.js";
+import { createSortableId } from "./sortable-id.js";
 
 // Versioned and opaque so external adapters never need to parse execution coordinates.
 export const LOGICAL_EFFECT_ID_PREFIX = "zet-effect-v1:" as const;
@@ -34,7 +33,8 @@ interface DurableNodeInvocationRow {
  * the logical invocation row, not from regenerating it for each attempt.
  */
 export function generateLogicalEffectId(): string {
-  return `${LOGICAL_EFFECT_ID_PREFIX}${randomUUID()}`;
+  // UUIDv7 keeps the value opaque while letting effects sort by when they were first planned.
+  return `${LOGICAL_EFFECT_ID_PREFIX}${createSortableId()}`;
 }
 
 /**

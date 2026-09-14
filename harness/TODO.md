@@ -271,7 +271,7 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 - [x] 8.5 Add project schema/CRUD.
 - [x] 8.6 Add conversations/messages using structured message parts and nullable `parent_message_id` for edit/retry branches.
 - [x] 8.7 Add goal/todo schema/CRUD and valid status transitions.
-- [ ] 8.8 Add sortable IDs and UTC epoch-millisecond timestamps consistently. _(UUIDv7 ids and epoch-millisecond times are in place for projects, conversations, messages, goals and todos; the older run records are next. See `PHASE-8.md`.)_
+- [x] 8.8 Add sortable IDs and UTC epoch-millisecond timestamps consistently.
 - [ ] 8.9 Add deterministic next-runnable-todo selection.
 - [ ] 8.10 Add context builder with hard byte/token-budget hooks.
 - [ ] 8.11 Add model-visible goal/todo actions.

@@ -329,8 +329,28 @@ open todos, closed goals, ordering, dependency scope, cycles, dependency-gated s
 and the tables' own checks and triggers) and `runtime-goal-http.test.ts`, which plans and completes
 a goal with dependent todos over HTTP and checks every refusal.
 
+## Slice 12 — one id and time format (8.8)
+
+Every id a person, an agent or an external adapter can hold is now a time-ordered UUIDv7, and every
+stored time is UTC epoch milliseconds.
+
+- **Sortable ids everywhere they are exposed.** Projects, conversations, messages, goals and todos
+  already used `@zet-harness/db/sortable-id`. Run ids (`run-…`), approval ids (`approval-v1:…`) and
+  logical effect ids (`zet-effect-v1:…`) now use it too, behind their existing prefixes, so nothing
+  that stores or parses them changes shape. Within one process the generator is strictly increasing,
+  so ids of the same kind sort in creation order as plain text.
+- **Integer sequences stay where they are cursors.** Event ids, checkpoint ids, file-change ids and
+  compiled-plan ids remain SQLite integer sequences. They never leave one database, they are the
+  cheap ordered cursor that event replay and checkpoints rely on, and renumbering them would be a
+  data migration with no benefit to anyone outside the runtime.
+- **Epoch milliseconds only.** Every stored time column is an `_ms` integer with a non-negative
+  check; there are no local times and no date strings in the schema or the runtime code.
+
+Covered by the UUIDv7 and ordering assertions for logical effect ids in
+`durable-node-invocation.test.ts`, for run ids in `runtime-structured-dispatch.test.ts`, and for
+approval ids in `runtime-human-approvals.test.ts`, alongside the generator's own tests.
+
 ## Next
 
-Consistent sortable ids and timestamps across the remaining runtime records (8.8), then
-deterministic next-runnable-todo selection (8.9). After that, the context builder and agent loop
+Deterministic next-runnable-todo selection (8.9). After that, the context builder and agent loop
 (8.10–8.13) bring the model and tool nodes that complete 8.2.
