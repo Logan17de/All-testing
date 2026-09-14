@@ -375,8 +375,43 @@ Covered by `durable-next-todo.test.ts` (the full ordering, dependency release, c
 priority changes, goal scope, limits, blocked and closed goals, blocked todos and archived projects)
 and `runtime-next-todo-http.test.ts`, which walks a project's todos to completion over HTTP.
 
+## Slice 14 — the context builder (8.10)
+
+Before the agent loop can call a model, it needs to decide what the model sees without ever silently
+exceeding what the model can take. `@zet-harness/core` now has a pure, deterministic context builder
+for that.
+
+- **Sections.** Context is a list of sections emitted in order, each a list of `ModelMessage`s.
+  Required sections, such as the system policy and the active goal, are never cut. Optional sections,
+  such as the conversation branch, lose their oldest messages first.
+- **Hard token budget.** `buildModelContext` keeps the context within `budget.maxTokens`. Each
+  provider can pass a `countTokens` hook. When there is none, or it returns nothing, a non-integer, a
+  negative number or throws, that text is counted with a conservative estimate of one token per three
+  UTF-8 bytes, and the report says fallback counting was used. Every message adds a fixed framing cost
+  and images a fixed, deliberately high cost.
+- **Hard byte caps.** A section may carry its own `maxBytes`, and the budget may carry a total
+  `maxBytes`. Byte caps hold even when token counting is wrong or unavailable, so a tokenizer
+  failure can never let an oversized request through.
+- **Safe truncation.** Section caps apply first, then the total budget. While the context is over
+  either limit, the earliest optional section that still has messages loses its oldest message, and a
+  tool result left without the call that asked for it goes too. If required sections alone do not
+  fit, the build fails with `CONTEXT_REQUIRED_OVER_BUDGET` (or `CONTEXT_SECTION_OVER_CAP` for one
+  section) instead of sending a model a policy or goal it cannot see in full.
+- **Budgets from models.** `contextBudgetForModel` derives `maxTokens` from a model's declared
+  `contextWindowTokens` minus the tokens reserved for its reply. An undeclared window fails with
+  `CONTEXT_WINDOW_UNKNOWN`, the same rule model routing already applies.
+- **A report, not just messages.** The result carries total tokens and bytes, the budget, and for
+  every section what was kept and dropped. It is JSON-safe, so the agent loop can record it in the
+  run trace.
+
+Covered by `context-builder.test.ts`: fitting context, oldest-first truncation that never touches
+required sections, identical results on repeated builds, every fallback-counting case, section and
+total byte caps under a counter that underestimates, tool-result pairing, every refusal, and budgets
+derived from model manifests. Turning stored projects, goals, todos and conversation branches into
+these sections is part of the agent loop (8.12).
+
 ## Next
 
-The context builder with hard byte and token budget hooks (8.10), then model-visible goal and todo
-actions (8.11) and the bounded model→tool→model agent loop (8.12), which brings the model and tool
-nodes that complete 8.2, and blocked-state and goal-completion logic (8.13).
+Model-visible goal and todo actions (8.11), the bounded model→tool→model agent loop (8.12), which
+brings the model and tool nodes that complete 8.2, and blocked-state and goal-completion logic
+(8.13).

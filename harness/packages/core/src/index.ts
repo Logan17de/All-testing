@@ -84,3 +84,20 @@ export {
   type PluginConfigValidation,
   type ResolvedPluginConfig,
 } from "./plugin-config.js";
+export {
+  ContextBudgetError,
+  FALLBACK_BYTES_PER_TOKEN,
+  IMAGE_TOKEN_ESTIMATE,
+  MESSAGE_TOKEN_OVERHEAD,
+  buildModelContext,
+  contextBudgetForModel,
+  estimateTokens,
+  type BuildContextInput,
+  type BuiltContext,
+  type ContextBudget,
+  type ContextBudgetErrorCode,
+  type ContextSectionInput,
+  type ContextSectionReport,
+  type ModelContextBudgetOptions,
+  type TokenCounter,
+} from "./context-builder.js";
