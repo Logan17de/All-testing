@@ -11,6 +11,11 @@ import {
   type RuntimeGraphHttpServices,
 } from "./runtime-graph-http.js";
 import {
+  handleProjectHttp,
+  isProjectHttpPath,
+  type RuntimeProjectHttpServices,
+} from "./runtime-project-http.js";
+import {
   RuntimeEventCursorError,
   RuntimeEventStream,
   type RuntimeEventStreamUnsubscribe,
@@ -83,6 +88,7 @@ export class RuntimeHttpServer {
   private readonly healthProvider: RuntimeHealthProvider;
   private readonly pluginsProvider: (() => unknown) | undefined;
   private readonly graphServices: RuntimeGraphHttpServices | undefined;
+  private readonly projectServices: RuntimeProjectHttpServices | undefined;
   private readonly eventClients = new Map<ServerResponse, () => void>();
   private readonly security: RuntimeApiSecurity;
   private readonly redaction: RuntimeRedactionRegistry;
@@ -103,6 +109,8 @@ export class RuntimeHttpServer {
       readonly plugins?: () => unknown;
       /** Editor endpoints: node palette, graph validation, runs. */
       readonly graphs?: RuntimeGraphHttpServices;
+      /** Project endpoints: list, create, change, archive and restore. */
+      readonly projects?: RuntimeProjectHttpServices;
     } = {},
   ) {
     this.host = options.host ?? DEFAULT_RUNTIME_HOST;
@@ -111,6 +119,7 @@ export class RuntimeHttpServer {
     this.healthProvider = healthProvider;
     this.pluginsProvider = services.plugins;
     this.graphServices = services.graphs;
+    this.projectServices = services.projects;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
     this.approvals = services.approvals;
     this.security = new RuntimeApiSecurity(options.allowedOrigins);
@@ -237,6 +246,19 @@ export class RuntimeHttpServer {
           return;
         }
         void handleGraphHttp(request, response, url, this.security, graphs).catch(
+          (error: unknown) => {
+            writeRuntimeApiError(response, error);
+          },
+        );
+        return;
+      }
+      if (isProjectHttpPath(url.pathname)) {
+        const projects = this.projectServices;
+        if (projects === undefined) {
+          writeJson(response, 503, { error: { code: "PROJECT_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void handleProjectHttp(request, response, url, this.security, projects).catch(
           (error: unknown) => {
             writeRuntimeApiError(response, error);
           },

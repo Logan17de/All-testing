@@ -19,6 +19,14 @@
     "./durable-file-change-records": {
       "types": "./src/durable-file-change-records.ts",
       "default": "./dist/durable-file-change-records.js"
+    },
+    "./durable-project-records": {
+      "types": "./src/durable-project-records.ts",
+      "default": "./dist/durable-project-records.js"
+    },
+    "./sortable-id": {
+      "types": "./src/sortable-id.ts",
+      "default": "./dist/sortable-id.js"
     }
   },
   "scripts": {

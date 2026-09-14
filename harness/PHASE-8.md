@@ -229,7 +229,39 @@ subgraph node end to end and report a missing revision on the subgraph node.
 Still to come for subgraphs: choosing a saved graph from a library in the editor, and showing the
 saved graph's inputs and outputs as handles on the subgraph node.
 
+## Slice 9 — projects (8.5)
+
+Projects are the durable home that conversations, goals, todos and agent runs attach to next.
+
+- **Storage.** Migration 8 adds a `projects` table: a sortable id, a name (1–200 characters), a
+  description (up to 4000), an optional absolute workspace folder, a status of `active` or
+  `archived`, and UTC epoch-millisecond creation, update and archive times. SQLite checks every
+  bound itself, requires the status and archive time to agree, and refuses deletes and changes to a
+  project's id or creation time through triggers.
+- **Archive, never delete.** A project is archived and restored instead of deleted, so later
+  conversations and runs never lose the project they belong to. An archived project refuses changes
+  until it is restored, and archiving or restoring twice changes nothing.
+- **Records API.** `@zet-harness/db/durable-project-records` provides `createProject`,
+  `readProject`, `listProjects` (most recently changed first, by status), `updateProject`,
+  `archiveProject` and `restoreProject`. Input is validated before SQL with field-level
+  `PROJECT_INVALID` errors. A clock that steps backwards never moves a project back in the list.
+- **HTTP.** The runtime serves `GET /api/projects?status=active|archived|all`,
+  `POST /api/projects`, `GET /api/projects/:id`, `POST /api/projects/:id`, and
+  `POST /api/projects/:id/archive` and `/restore`. Every POST passes the same CSRF check as the
+  editor and approval endpoints, unknown fields are refused, and each write is one serialized SQLite
+  commit. Errors are `PROJECT_INVALID` (400), `PROJECT_NOT_FOUND` (404) and `PROJECT_ARCHIVED` (409).
+- **Sortable ids (start of 8.8).** `@zet-harness/db/sortable-id` generates RFC 9562 UUIDv7 ids: the
+  first 48 bits are the creation time, so ids sort by creation time as text, and a per-generator
+  counter keeps ids in order within one millisecond and across a clock that steps backwards.
+  Projects use them now; conversations, messages, goals and todos will too.
+
+Covered by `sortable-id.test.ts`, `durable-project-records.test.ts` (validation, ordering, archive
+and restore transitions, clock steps, and the table's own triggers and checks) and
+`runtime-project-http.test.ts`, which drives a real daemon through the full lifecycle, the CSRF and
+validation refusals, and a restart that keeps the project.
+
 ## Next
 
-Projects, conversations and goals (8.5–8.9) in TODO order, then the context builder and agent loop
-(8.10–8.13), which bring the model and tool nodes that complete 8.2.
+Conversations and messages with structured parts and edit/retry branches (8.6), then goals and todos
+(8.7), consistent ids and timestamps (8.8) and next-runnable-todo selection (8.9). After that, the
+context builder and agent loop (8.10–8.13) bring the model and tool nodes that complete 8.2.

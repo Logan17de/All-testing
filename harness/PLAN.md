@@ -148,7 +148,8 @@ Phase 8  Loops + projects + agent mode     🚧 IN PROGRESS
            ├─ 8.2 independent hard loop bounds                                  🚧 runs/loops done; model/tool/token/cost with 8.12
            ├─ 8.3 loop iteration/attempt identity in durability records         ✅
            ├─ 8.4 subgraph lowering/namespacing, no uncontrolled recursion      ✅
-           ├─ 8.5–8.9 projects, conversations, goals/todos, IDs, next todo      ▶ CURRENT
+           ├─ 8.5 project schema/CRUD                                          ✅
+           ├─ 8.6–8.9 conversations, goals/todos, IDs, next todo               ▶ CURRENT (sortable ids started)
            ├─ 8.10–8.13 context builder, goal/todo actions, agent loop, blocked ⏳
            └─ 8.14–8.17 chat/goals UI, coding integration, golden trace, lock   ⏳
 Phase 9  Replay + memory + triggers        ⏳
@@ -168,7 +169,7 @@ Phase 11 Packaging + optional scale-out    🚧 1/9
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ✅ Complete |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ✅ Complete except 6.12 (needs a real local model endpoint) |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ✅ Complete — **v0.1 boundary reached** |
-| **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | 🚧 In progress — control flow, 8.1 loops, 8.3 iteration identity, 8.2 run/loop limits and 8.4 subgraphs done; 8.5 next (see `PHASE-8.md`) |
+| **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | 🚧 In progress — control flow, 8.1 loops, 8.3 iteration identity, 8.2 run/loop limits and 8.4 subgraphs and 8.5 projects done; 8.6 next (see `PHASE-8.md`) |
 | **9 — Replay/Fork + Memory + Triggers + External clients** | recorded replay, checkpoint forks, lightweight memory, cron/webhook/API triggers, Copycat/client bridge | ⏳ Later |
 | **10 — MCP + Custom-node SDK + Trust tiers** | MCP through normal tool registry, local plugin loading, SDK/package manifests, process/WASI isolation options | ✅ Complete except 10.10 (WASI) and 10.11 (npm/Git install) |
 | **11 — Packaging + Optional scale-out** | Windows setup, config wizard, backup/import/export, optional desktop shell, optional Postgres/remote workers | 🚧 11.1 done; 11.2–11.9 pending |

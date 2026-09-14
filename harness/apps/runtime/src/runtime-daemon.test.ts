@@ -42,6 +42,7 @@ describe("RuntimeDaemon", () => {
       { version: 5, name: "sparse_checkpoint_frontier_state" },
       { version: 6, name: "durable_human_approvals" },
       { version: 7, name: "durable_file_change_records" },
+      { version: 8, name: "durable_projects" },
     ]);
   });
 
@@ -93,10 +94,10 @@ describe("RuntimeDaemon", () => {
           query: "ok",
           migrations: {
             status: "ok",
-            appliedCount: 7,
-            expectedCount: 7,
-            appliedVersion: 7,
-            expectedVersion: 7,
+            appliedCount: 8,
+            expectedCount: 8,
+            appliedVersion: 8,
+            expectedVersion: 8,
           },
         },
       },
