@@ -123,6 +123,13 @@ plus the built-in **Human approval** node, which any graph can use to pause for 
 - To reuse a graph, add a **Subgraph** node and set its `graphId` and `revisionId` to a graph
   revision that has already run. The saved graph runs in its place, its steps show up in the run
   inspector as `<subgraph node>/<step>`, and a graph that ends up running itself is refused.
+- To let a model work on a project, put an **Agent model step** and an **Agent tools step** inside
+  a **Loop**: connect the loop's `body` to the model step, the model step to the tools step, the
+  tools step back to `repeat`, and the model step's `again` output to the loop's `again` input.
+  Both steps take the conversation id, and the model step takes a system prompt. The loop's
+  `maxIterations` bounds how many turns the model gets. Models and tools your plugins register
+  are offered to the agent when the capabilities they need are granted, beside the built-in goal
+  and todo actions.
 - **Run graph** stores a new revision, starts a run and opens the run inspector.
 
 The run inspector (`/runs/<id>`) shows each node's durable state on the graph, the event timeline,

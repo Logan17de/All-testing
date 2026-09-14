@@ -12,6 +12,7 @@ import {
   type SqliteDatabaseSnapshot,
   type SqliteMigration,
 } from "@zet-harness/db";
+import { DURABLE_AGENT_STEPS_MIGRATION } from "@zet-harness/db/durable-agent-step-records";
 import { DURABLE_APPROVALS_MIGRATION } from "@zet-harness/db/durable-approval-records";
 import { DURABLE_FILE_CHANGES_MIGRATION } from "@zet-harness/db/durable-file-change-records";
 import { DURABLE_CONVERSATIONS_MIGRATION } from "@zet-harness/db/durable-conversation-records";
@@ -23,6 +24,7 @@ import { DURABLE_PROJECTS_MIGRATION } from "@zet-harness/db/durable-project-reco
 
 import {
   PluginHost,
+  createAgentPlugin,
   createControlFlowPlugin,
   createHumanApprovalPlugin,
   type CapabilityPermissionPolicy,
@@ -41,6 +43,7 @@ import {
   type RuntimeApprovalAuthority,
   type SuspendForApprovalInput,
 } from "./runtime-human-approvals.js";
+import { createAgentNodeExecutor } from "./runtime-agent-nodes.js";
 import { createPluginNodeExecutor } from "./runtime-plugin-executor.js";
 import {
   RuntimeRunDispatcher,
@@ -72,6 +75,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_CONVERSATIONS_MIGRATION,
   DURABLE_GOALS_MIGRATION,
   DURABLE_GOAL_ACTION_EFFECTS_MIGRATION,
+  DURABLE_AGENT_STEPS_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
@@ -278,6 +282,9 @@ export class RuntimeDaemon {
         // Condition, Route and the joins are first-party control flow, registered
         // through the same public path; routers and joins never run plugin code.
         await host.activate(createControlFlowPlugin());
+        // The agent model and tools steps compile like any node; the agent
+        // executor runs them with the run's own identity and records each step.
+        await host.activate(createAgentPlugin());
         const loaded = await loadRuntimePlugins(this.pluginOptions, host);
         this.pluginHost = loaded.host;
         this.pluginReport = loaded.report;
@@ -329,10 +336,23 @@ export class RuntimeDaemon {
   }
 
   private executePluginNode(request: RuntimeNodeExecution): Promise<RuntimeNodeExecutionResult> {
-    return createPluginNodeExecutor({
+    const plugins = createPluginNodeExecutor({
       ...(this.pluginHost === undefined ? {} : { host: this.pluginHost }),
       sandboxes: this.pluginSandboxes,
       policies: this.pluginPolicies,
+    });
+    const host = this.pluginHost;
+    if (host === undefined) return plugins(request);
+    // Agent steps get the plugins' models and tools, limited to granted capabilities.
+    return createAgentNodeExecutor({
+      database: this.database,
+      models: host.models,
+      tools: host.tools.listManifests().flatMap((manifest) => {
+        const adapter = host.tools.getAdapter(manifest.id, manifest.version);
+        return adapter === undefined ? [] : [adapter];
+      }),
+      allows: (capability) => this.pluginAuthority(capability).decision === "allow",
+      fallback: plugins,
     })(request);
   }
 

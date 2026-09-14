@@ -442,8 +442,48 @@ goal planned and completed through the actions in dependency order, refusals for
 mistake with nothing changed, project confinement, and retried writes, including a retried
 refusal, returning the recorded result.
 
+## Slice 16 — the bounded agent loop (8.12)
+
+A model can now work on a project autonomously, one bounded step at a time, through the same
+structured loop, scheduler, durability and budgets as every other graph.
+
+- **Two steps, one loop.** `createAgentPlugin` registers `harness.agent-model` and
+  `harness.agent-tools`. An agent graph is an ordinary Loop: its `body` runs the model step, then
+  the tools step, which returns to `repeat`, and the model step's `again` output (true when the model
+  asked for tools) feeds the loop's `again` input. The loop's `maxIterations` is the hard bound on
+  model turns, the run's `maxNodeExecutions` and wall time still apply, and a `stop` reply ends the
+  loop early. The daemon activates the plugin next to control flow, so the steps appear in the
+  editor palette.
+- **Model step.** It reads the conversation's latest branch, drops stored reasoning, and builds
+  context with the 8.10 builder inside the chosen model's declared window: the system prompt and a
+  bounded summary of open goals and the next runnable todo are required, and the oldest
+  conversation goes first. It routes a model that supports tools (or the pinned `modelId`), offers
+  the 8.11 goal and todo actions plus any plugin tools whose capabilities are granted, and appends
+  the reply with its model, run and provider usage. The node's usage records the chosen model, the
+  routing rule and the context report.
+- **Tools step.** It runs the tool calls in the latest assistant message and appends one tool
+  message with every result. An unknown tool or a tool that throws becomes an error result the model
+  sees on its next turn, not a failed run. `allowedTools` can narrow what is offered.
+- **Durable and applied once.** Each step commits its message together with a record in
+  `agent_steps` (migration 12, append-only), keyed by the op invocation's logical effect id. A
+  retried attempt of a step that already completed answers from the record without calling the
+  model or appending again, and every tool call runs under its own effect id derived from the
+  step's, so goal actions apply once even when the tools step is retried.
+- **Host-only execution.** The steps' manifests compile like any node, but their `execute` refuses
+  to run; only the runtime's agent executor, which has the run's identity, conversation and retry
+  budget, can take a step. Every other node still goes to the plugin executor.
+- **What 8.2 still needs.** Model turns are now bounded by the loop and each request by the token
+  budget and `maxOutputTokens`, but run-wide model-call, tool-call, token and cost budgets are not yet
+  enforced, so TODO 8.2 stays open.
+
+Covered by `agent-plugin.test.ts` and `runtime-agent-loop.test.ts`: a full model→tool→model run that
+creates a goal through a tool call and ends on a text reply, with messages linked to the run and the
+second model request seeing the tool result and the new goal; a model that never stops, halted at the
+loop's hard bound; and a retried model step answered from its record without a second model call or
+message.
+
 ## Next
 
-The bounded model→tool→model agent loop (8.12), expressed through the structured loop and scheduler,
-which brings the model and tool nodes that complete 8.2, then blocked-state and goal-completion
-logic (8.13).
+Blocked-state and goal-completion logic (8.13), then the chat, project, goal and todo UI (8.14), the
+multi-step coding integration test (8.15), a golden trace (8.16) and the per-project run lock
+(8.17).

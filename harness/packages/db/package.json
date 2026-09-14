@@ -35,6 +35,10 @@
     "./durable-goal-records": {
       "types": "./src/durable-goal-records.ts",
       "default": "./dist/durable-goal-records.js"
+    },
+    "./durable-agent-step-records": {
+      "types": "./src/durable-agent-step-records.ts",
+      "default": "./dist/durable-agent-step-records.js"
     }
   },
   "scripts": {

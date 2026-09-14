@@ -1,0 +1,495 @@
+import {
+  AGENT_MODEL_NODE_TYPE,
+  AGENT_TOOLS_NODE_TYPE,
+  buildModelContext,
+  contextBudgetForModel,
+  routeModel,
+  type ModelCatalog,
+} from "@zet-harness/core";
+import type { SqliteDatabase } from "@zet-harness/db";
+import { readAgentStep, recordAgentStep } from "@zet-harness/db/durable-agent-step-records";
+import {
+  appendMessage,
+  readConversation,
+  readConversationMessages,
+  readMessagePath,
+  type DurableMessagePart,
+  type DurableMessageRecord,
+  type DurableMessageUsage,
+  type DurableToolCallPart,
+} from "@zet-harness/db/durable-conversation-records";
+import { listGoals, selectNextRunnableTodo } from "@zet-harness/db/durable-goal-records";
+import { createSortableId } from "@zet-harness/db/sortable-id";
+import type {
+  AdapterInvocationContext,
+  AdapterUsage,
+  JsonObject,
+  JsonValue,
+  ModelMessage,
+  ModelMessagePart,
+  ToolAdapter,
+} from "@zet-harness/plugin-api";
+
+import {
+  createGoalActionTools,
+  goalActionToolSpecifications,
+  modelToolName,
+} from "./runtime-goal-actions.js";
+import type { RuntimeNodeExecution, RuntimeNodeExecutionResult } from "./runtime-run-dispatcher.js";
+
+/** Tokens kept free for a reply when a model step does not say. */
+export const DEFAULT_RESERVE_OUTPUT_TOKENS = 1_024;
+/** The goal summary lists at most this many goals, so it stays a bounded required section. */
+const GOAL_SUMMARY_LIMIT = 50;
+
+export type AgentStepErrorCode =
+  "AGENT_CONFIG_INVALID" | "AGENT_CONVERSATION_NOT_FOUND" | "AGENT_NO_MODEL";
+
+export class AgentStepError extends Error {
+  readonly code: AgentStepErrorCode;
+
+  constructor(code: AgentStepErrorCode, message: string) {
+    super(message);
+    this.name = "AgentStepError";
+    this.code = code;
+  }
+}
+
+export interface AgentNodeExecutorOptions {
+  readonly database: SqliteDatabase;
+  readonly models: ModelCatalog;
+  /** Tools the agent may call beside the project's goal and todo actions. */
+  readonly tools?: readonly ToolAdapter[];
+  /**
+   * Host authority for adapter capabilities. A model or tool demanding a capability
+   * this does not allow is never offered; without it, only adapters demanding none are.
+   */
+  readonly allows?: (capability: string) => boolean;
+  /** UTC epoch milliseconds. Defaults to the system clock. */
+  readonly now?: () => number;
+  /** Message ids. Defaults to a sortable UUIDv7. */
+  readonly createId?: () => string;
+  /** Runs every node that is not an agent step. */
+  readonly fallback: (execution: RuntimeNodeExecution) => Promise<RuntimeNodeExecutionResult>;
+}
+
+function stringConfig(config: JsonObject, field: string): string | undefined {
+  const value = config[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length === 0) {
+    throw new AgentStepError("AGENT_CONFIG_INVALID", `${field} must be a non-empty string.`);
+  }
+  return value;
+}
+
+function requiredStringConfig(config: JsonObject, field: string): string {
+  const value = stringConfig(config, field);
+  if (value === undefined)
+    throw new AgentStepError("AGENT_CONFIG_INVALID", `${field} is required.`);
+  return value;
+}
+
+function integerConfig(config: JsonObject, field: string): number | undefined {
+  const value = config[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new AgentStepError("AGENT_CONFIG_INVALID", `${field} must be a positive integer.`);
+  }
+  return value;
+}
+
+function stringListConfig(config: JsonObject, field: string): readonly string[] | undefined {
+  const value = config[field];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new AgentStepError("AGENT_CONFIG_INVALID", `${field} must be a list of tool names.`);
+  }
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+/** What a model is sent. Reasoning stays in the record and is never fed back as input. */
+function toModelMessage(message: DurableMessageRecord): ModelMessage | undefined {
+  const parts: ModelMessagePart[] = [];
+  for (const part of message.parts) {
+    switch (part.kind) {
+      case "text":
+        parts.push({ kind: "text", text: part.text });
+        break;
+      case "image":
+        parts.push({ kind: "image", artifactRef: part.artifactRef, mediaType: part.mediaType });
+        break;
+      case "tool-call":
+        parts.push({
+          kind: "tool-call",
+          callId: part.callId,
+          name: part.name,
+          arguments: part.arguments as JsonObject,
+        });
+        break;
+      case "tool-result":
+        parts.push({
+          kind: "tool-result",
+          callId: part.callId,
+          value: part.value as JsonValue,
+          ...(part.isError === undefined ? {} : { isError: part.isError }),
+        });
+        break;
+      case "reasoning":
+        break;
+    }
+  }
+  return parts.length === 0 ? undefined : { role: message.role, parts };
+}
+
+/** What a model said, as an assistant message the conversation accepts. */
+function toStoredParts(message: ModelMessage): DurableMessagePart[] {
+  const parts = message.parts.flatMap((part): DurableMessagePart[] => {
+    switch (part.kind) {
+      case "text":
+        return [{ kind: "text", text: part.text }];
+      case "image":
+        return [{ kind: "image", artifactRef: part.artifactRef, mediaType: part.mediaType }];
+      case "tool-call":
+        return [
+          { kind: "tool-call", callId: part.callId, name: part.name, arguments: part.arguments },
+        ];
+      case "tool-result":
+        // An assistant message cannot carry tool results.
+        return [];
+    }
+  });
+  return parts.length === 0 ? [{ kind: "text", text: "" }] : parts;
+}
+
+function toStoredUsage(usage: AdapterUsage | undefined): DurableMessageUsage | undefined {
+  if (usage === undefined) return undefined;
+  const count = (value: number | undefined): number | undefined =>
+    value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  const inputTokens = count(usage.inputTokens);
+  const outputTokens = count(usage.outputTokens);
+  const cachedInputTokens = count(usage.cachedInputTokens);
+  const cost =
+    usage.cost !== undefined &&
+    /^(?:0|[1-9][0-9]{0,30})(?:\.[0-9]{1,18})?$/u.test(usage.cost.amountDecimal) &&
+    /^[A-Z]{3}$/u.test(usage.cost.currency)
+      ? { amountDecimal: usage.cost.amountDecimal, currency: usage.cost.currency }
+      : undefined;
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
+    ...(cost === undefined ? {} : { cost }),
+  };
+}
+
+function invocationContext(
+  execution: RuntimeNodeExecution,
+  logicalEffectId: string = execution.logicalEffectId,
+): AdapterInvocationContext {
+  return {
+    runId: execution.runId,
+    opIndex: execution.op,
+    iteration: execution.iteration,
+    attempt: execution.attempt,
+    logicalEffectId,
+    signal: execution.signal,
+    retryBudget: execution.retryBudget,
+  };
+}
+
+/**
+ * Run the agent steps of a graph, and hand every other node to `fallback`.
+ *
+ * A model step reads the conversation's latest branch, builds context inside the
+ * chosen model's budget (system prompt and goal summary are required; the oldest
+ * conversation goes first), offers the project's goal and todo actions plus any
+ * granted tools, and appends the model's reply. A tools step runs the tool calls in
+ * the latest assistant message and appends their results as one tool message.
+ *
+ * Each step's message and outputs are committed together and recorded against the
+ * op invocation's logical effect id. A retried attempt of a step that already
+ * completed answers from that record, so no message is appended twice. Tool calls
+ * run with a per-call effect id derived from the step's, so goal actions apply once.
+ */
+export function createAgentNodeExecutor(
+  options: AgentNodeExecutorOptions,
+): (execution: RuntimeNodeExecution) => Promise<RuntimeNodeExecutionResult> {
+  const { database } = options;
+  const now = options.now ?? (() => Date.now());
+  const createId = options.createId ?? createSortableId;
+  const granted = (capabilities: readonly string[]): boolean =>
+    capabilities.every((capability) => options.allows?.(capability) === true);
+
+  const recorded = (execution: RuntimeNodeExecution): RuntimeNodeExecutionResult | undefined => {
+    const step = readAgentStep(database.connection(), execution.logicalEffectId);
+    if (step === undefined) return undefined;
+    return {
+      outputs: step.outputs as Record<string, unknown>,
+      ...(step.usage === null ? {} : { usage: step.usage }),
+    };
+  };
+
+  const offeredTools = (projectId: string): readonly ToolAdapter[] => [
+    ...createGoalActionTools({ database, projectId, now, createId }),
+    ...(options.tools ?? []).filter((tool) => granted(tool.manifest.behavior.requiredCapabilities)),
+  ];
+
+  const latestMessage = (conversationId: string): DurableMessageRecord | undefined => {
+    const messages = readConversationMessages(database.connection(), conversationId);
+    return messages[messages.length - 1];
+  };
+
+  const goalSummary = (projectId: string): ModelMessage => {
+    const connection = database.connection();
+    const goals = listGoals(connection, projectId)
+      .filter((goal) => goal.status === "open" || goal.status === "blocked")
+      .slice(0, GOAL_SUMMARY_LIMIT);
+    const next = selectNextRunnableTodo(connection, projectId);
+    const lines =
+      goals.length === 0
+        ? ["This project has no open goals yet."]
+        : [
+            "Open goals, most urgent first:",
+            ...goals.map(
+              (goal) =>
+                `- ${goal.goalId} [${goal.status}] ${goal.title} (priority ${String(goal.priority)})${
+                  goal.blockedReason === null ? "" : `, blocked: ${goal.blockedReason}`
+                }`,
+            ),
+          ];
+    lines.push(
+      next === undefined
+        ? "No todo can start right now."
+        : `Next todo: ${next.todo.todoId} "${next.todo.title}" in goal ${next.goal.goalId}.`,
+    );
+    return { role: "developer", parts: [{ kind: "text", text: lines.join("\n") }] };
+  };
+
+  const runModelStep = async (
+    execution: RuntimeNodeExecution,
+  ): Promise<RuntimeNodeExecutionResult> => {
+    const replay = recorded(execution);
+    if (replay !== undefined) return replay;
+
+    const config = execution.operation.config;
+    const conversationId = requiredStringConfig(config, "conversationId");
+    const systemPrompt = requiredStringConfig(config, "systemPrompt");
+    const reserveOutputTokens =
+      integerConfig(config, "reserveOutputTokens") ?? DEFAULT_RESERVE_OUTPUT_TOKENS;
+    const maxOutputTokens = integerConfig(config, "maxOutputTokens");
+    const maxContextBytes = integerConfig(config, "maxContextBytes");
+    const modelId = stringConfig(config, "modelId");
+    const modelVersion = stringConfig(config, "modelVersion");
+
+    const conversation = readConversation(database.connection(), conversationId);
+    if (conversation === undefined) {
+      throw new AgentStepError(
+        "AGENT_CONVERSATION_NOT_FOUND",
+        `Conversation '${conversationId}' does not exist.`,
+      );
+    }
+    const tools = offeredTools(conversation.projectId);
+    const decision = routeModel({
+      manifests: options.models
+        .listManifests()
+        .filter((manifest) => granted(manifest.requiredCapabilities)),
+      requirements: {
+        ...(tools.length > 0 ? { tools: true } : {}),
+        ...(modelId === undefined ? {} : { modelId }),
+        ...(modelVersion === undefined ? {} : { modelVersion }),
+      },
+    });
+    const manifest =
+      decision.selectedId === null || decision.selectedVersion === null
+        ? undefined
+        : options.models.getManifest(decision.selectedId, decision.selectedVersion);
+    const adapter =
+      manifest === undefined ? undefined : options.models.getAdapter(manifest.id, manifest.version);
+    if (manifest === undefined || adapter === undefined) {
+      throw new AgentStepError("AGENT_NO_MODEL", "No available model can take this agent step.");
+    }
+
+    const latest = latestMessage(conversation.conversationId);
+    const branch =
+      latest === undefined
+        ? []
+        : readMessagePath(database.connection(), latest.messageId)
+            .map((message) => toModelMessage(message))
+            .filter((message): message is ModelMessage => message !== undefined);
+    const context = buildModelContext({
+      sections: [
+        {
+          id: "system",
+          required: true,
+          messages: [{ role: "system", parts: [{ kind: "text", text: systemPrompt }] }],
+        },
+        { id: "goals", required: true, messages: [goalSummary(conversation.projectId)] },
+        { id: "conversation", messages: branch },
+      ],
+      budget: contextBudgetForModel(manifest, {
+        reserveOutputTokens,
+        ...(maxContextBytes === undefined ? {} : { maxBytes: maxContextBytes }),
+      }),
+    });
+
+    const result = await adapter.generate(
+      {
+        messages: context.messages,
+        ...(tools.length > 0 ? { tools: goalActionToolSpecifications(tools) } : {}),
+        ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+      },
+      invocationContext(execution),
+    );
+    execution.signal.throwIfAborted();
+
+    const outputs = {
+      again: result.finishReason === "tool-calls",
+      finishReason: result.finishReason,
+    };
+    const usage = {
+      model: { id: manifest.id, version: manifest.version },
+      selectionRule: decision.selectionRule,
+      context: {
+        totalTokens: context.totalTokens,
+        totalBytes: context.totalBytes,
+        usedFallbackCounting: context.usedFallbackCounting,
+        sections: context.sections,
+      },
+      ...(result.usage === undefined ? {} : { provider: result.usage }),
+    };
+    const storedUsage = toStoredUsage(result.usage);
+
+    await database.commit((writer) => {
+      if (readAgentStep(writer, execution.logicalEffectId) !== undefined) return;
+      const message = appendMessage(writer, {
+        messageId: createId(),
+        conversationId: conversation.conversationId,
+        role: "assistant",
+        parts: toStoredParts(result.message),
+        model: `${manifest.id}@${manifest.version}`.slice(0, 200),
+        runId: execution.runId,
+        ...(storedUsage === undefined ? {} : { usage: storedUsage }),
+        nowMs: now(),
+      });
+      recordAgentStep(writer, {
+        logicalEffectId: execution.logicalEffectId,
+        runId: execution.runId,
+        opIndex: execution.op,
+        iteration: execution.iteration,
+        kind: "model",
+        conversationId: conversation.conversationId,
+        messageId: message.messageId,
+        outputs,
+        usage,
+        nowMs: now(),
+      });
+    });
+    return recorded(execution) ?? { outputs, usage };
+  };
+
+  const runToolsStep = async (
+    execution: RuntimeNodeExecution,
+  ): Promise<RuntimeNodeExecutionResult> => {
+    const replay = recorded(execution);
+    if (replay !== undefined) return replay;
+
+    const config = execution.operation.config;
+    const conversationId = requiredStringConfig(config, "conversationId");
+    const allowedTools = stringListConfig(config, "allowedTools");
+    const conversation = readConversation(database.connection(), conversationId);
+    if (conversation === undefined) {
+      throw new AgentStepError(
+        "AGENT_CONVERSATION_NOT_FOUND",
+        `Conversation '${conversationId}' does not exist.`,
+      );
+    }
+
+    const head = latestMessage(conversation.conversationId);
+    const calls =
+      head?.role === "assistant"
+        ? head.parts.filter((part): part is DurableToolCallPart => part.kind === "tool-call")
+        : [];
+    const tools = offeredTools(conversation.projectId).filter(
+      (tool) =>
+        allowedTools === undefined || allowedTools.includes(modelToolName(tool.manifest.id)),
+    );
+
+    const results: DurableMessagePart[] = [];
+    for (const call of calls) {
+      const tool = tools.find((candidate) => modelToolName(candidate.manifest.id) === call.name);
+      if (tool === undefined) {
+        results.push({
+          kind: "tool-result",
+          callId: call.callId,
+          value: {
+            ok: false,
+            error: {
+              code: "TOOL_NOT_AVAILABLE",
+              reason: `No tool named '${call.name}' is available to this agent.`,
+            },
+          },
+          isError: true,
+        });
+        continue;
+      }
+      try {
+        const outcome = await tool.invoke(
+          call.arguments as JsonObject,
+          invocationContext(execution, `${execution.logicalEffectId}:${call.callId}`),
+        );
+        results.push({ kind: "tool-result", callId: call.callId, value: outcome.value });
+      } catch (error) {
+        execution.signal.throwIfAborted();
+        results.push({
+          kind: "tool-result",
+          callId: call.callId,
+          value: {
+            ok: false,
+            error: {
+              code: "TOOL_FAILED",
+              reason: error instanceof Error ? error.message : "The tool failed.",
+            },
+          },
+          isError: true,
+        });
+      }
+    }
+    execution.signal.throwIfAborted();
+
+    const outputs = { calls: calls.length };
+    await database.commit((writer) => {
+      if (readAgentStep(writer, execution.logicalEffectId) !== undefined) return;
+      const message =
+        head === undefined || results.length === 0
+          ? undefined
+          : appendMessage(writer, {
+              messageId: createId(),
+              conversationId: conversation.conversationId,
+              parentMessageId: head.messageId,
+              role: "tool",
+              parts: results,
+              runId: execution.runId,
+              nowMs: now(),
+            });
+      recordAgentStep(writer, {
+        logicalEffectId: execution.logicalEffectId,
+        runId: execution.runId,
+        opIndex: execution.op,
+        iteration: execution.iteration,
+        kind: "tools",
+        conversationId: conversation.conversationId,
+        messageId: message?.messageId ?? null,
+        outputs,
+        nowMs: now(),
+      });
+    });
+    return recorded(execution) ?? { outputs };
+  };
+
+  return (execution) => {
+    const { type, version } = execution.operation;
+    if (version === "1" && type === AGENT_MODEL_NODE_TYPE) return runModelStep(execution);
+    if (version === "1" && type === AGENT_TOOLS_NODE_TYPE) return runToolsStep(execution);
+    return options.fallback(execution);
+  };
+}

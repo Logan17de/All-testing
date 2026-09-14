@@ -101,3 +101,9 @@ export {
   type ModelContextBudgetOptions,
   type TokenCounter,
 } from "./context-builder.js";
+export {
+  AGENT_MODEL_NODE_TYPE,
+  AGENT_PLUGIN_ID,
+  AGENT_TOOLS_NODE_TYPE,
+  createAgentPlugin,
+} from "./agent-plugin.js";
