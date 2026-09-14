@@ -32,16 +32,42 @@ Loops are therefore delivered in slices, each committed on its own.
   the run settles.
 - **The snapshot shows control truth.** Runs with control ops report `controlEdges` and
   `routerSelections`.
-- **Not yet restorable.** Restoring a run that contains routers or joins is refused, because the
-  restore snapshot does not carry control-edge state or branch choices. Loops and subgraphs are
-  still refused.
+- **Loops and subgraphs are still refused.**
 
 Covered by `packages/scheduler/src/structured-control-run.test.ts`.
 
+## Slice 2 — durable, restart-safe routers and joins (done)
+
+Graphs with routers and joins now run through the durable dispatcher and survive a restart.
+
+- **One implementation of the rules.** `RunStructuredControl` in `@zet-harness/scheduler` holds the
+  router, join and skip logic. The live run uses it, and so does `reduceStructuredControlFrontier`,
+  which applies one completion, branch choice or join completion to a committed frontier. Durable
+  commits therefore record exactly the consequences the live scheduler computes.
+- **Atomic control commits.** A branch choice commits the router-selection event, the router's
+  completion, every edge that finished or was skipped, and every op that became ready or was
+  skipped, in one transaction, before the run acts on it. The same happens for a join's completion,
+  and for the consequences of an ordinary op or an approved human gate completing.
+- **Restores rebuild released dependencies.** In a plain DAG a dependency is released when its
+  source completes. With routers and joins that no longer holds, so `deriveReleasedDependencies`
+  reconstructs the released set from op statuses, edge states and branch choices, and restore
+  refuses a frontier those facts contradict.
+- **Branch choice comes from the graph.** A router follows the branch named by the string on its
+  `branch` input; a missing or undeclared name fails the run.
+- **Checkpoints keep branch choices.** Approval checkpoints now store router selections. Before
+  this, a branch chosen before an approval checkpoint would have been lost on replay.
+- **Human gates inside branches.** Approvals accept graphs with routers and joins, and approving a
+  gate releases and skips downstream work through the shared reducer.
+- **Visible in the run inspector.** Skipped (and cancelled) nodes are drawn dashed and dimmed.
+
+Covered by `structured-control-restore.test.ts` (every committed point of a routed run resumes to
+the same outcome as an uninterrupted run) and `apps/runtime/src/runtime-structured-dispatch.test.ts`
+(both branches, an undeclared branch, and a restart while the chosen branch waits for approval).
+
 ## Remaining slices before 8.1 is complete
 
-1. **Durable routers and joins.** Emit control-edge and router-selection frontier events from the
-   dispatcher, restore them, and let graphs choose branches from a data input.
+1. **Built-in control nodes and control edges in the editor.** First-party router and join nodes in
+   the palette, plus drawing control edges and control ports on the canvas.
 2. **Loop regions in the compiler.** Identify the region between a loop's `body` output and its
    `continue` input, allow exactly that back edge through cycle rejection, and lower the loop
    descriptor with its region membership.

@@ -2,19 +2,25 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { commitDurableNodeCompletion, type SqliteDatabase } from "@zet-harness/db";
 import { generateLogicalEffectId } from "@zet-harness/db/durable-node-invocation";
-import type { ExecutionIrV1 } from "@zet-harness/graph";
+import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 import {
+  hasStructuredControl,
   InvocationPermissionDeniedError,
   PlainDagRun,
+  reduceStructuredControlFrontier,
   SchedulerConcurrency,
   type PlainDagAttemptFailureContext,
   type PlainDagOpExecution,
   type PlainDagRestoreState,
   type PlainDagRunOptions,
+  type StructuredControlDelta,
 } from "@zet-harness/scheduler";
 
 import type { RuntimeHumanApprovals, RuntimeApprovalAuthority } from "./runtime-human-approvals.js";
+import { applyControlDelta, controlFrontierOf } from "./runtime-control-frontier.js";
 import {
+  DURABLE_CONTROL_EDGE_FRONTIER_EVENT_TYPE,
+  DURABLE_ROUTER_SELECTION_EVENT_TYPE,
   reconstructExecutionFrontier,
   type RecoveredExecutionFrontier,
   type RecoveredOpFrontier,
@@ -95,15 +101,45 @@ function publishOp(connection: DatabaseSync, runId: string, state: RecoveredOpFr
   event(connection, runId, "harness.frontier.op", state, state.opIndex);
 }
 
+/**
+ * Publish the consequences of one committed control transition: edges that
+ * finished or were skipped, and ops that became ready or were skipped. The
+ * transition's own op is published by the caller, which knows how it finished.
+ */
+function publishControlDelta(
+  connection: DatabaseSync,
+  runId: string,
+  frontier: RecoveredExecutionFrontier,
+  delta: StructuredControlDelta,
+  subject: number,
+): void {
+  const next = applyControlDelta(frontier, delta);
+  for (const change of delta.controlEdges) {
+    event(connection, runId, DURABLE_CONTROL_EDGE_FRONTIER_EVENT_TYPE, {
+      edgeIndex: change.edge,
+      iteration: 0,
+      status: change.status,
+    });
+  }
+  for (const change of delta.ops) {
+    if (change.op !== subject) publishOp(connection, runId, next.ops[change.op]!);
+  }
+}
+
 function plan(frontier: RecoveredExecutionFrontier): ExecutionIrV1 {
   // This is persisted compiler output, not a new source-validation path. Runtime
   // checks below concern supported execution/recovery states only.
   const ir = freeze(structuredClone(frontier.executionIr)) as unknown as ExecutionIrV1;
   if (
-    ir.ops.some((op) => op.control !== undefined) ||
+    ir.ops.some(
+      (op) =>
+        op.control !== undefined && op.control.kind !== "router" && op.control.kind !== "join",
+    ) ||
     frontier.ops.some((op) => op.iteration !== 0)
   ) {
-    throw new TypeError("Durable dispatch currently requires an iteration-zero plain DAG.");
+    throw new TypeError(
+      "Durable dispatch currently supports iteration-zero graphs whose only control ops are routers and joins.",
+    );
   }
   return ir;
 }
@@ -121,6 +157,11 @@ function restore(frontier: RecoveredExecutionFrontier): PlainDagRestoreState {
     retryDelaysMs: frontier.ops.map((op) =>
       op.retryNotBeforeMs === null ? null : Math.max(0, op.retryNotBeforeMs - now),
     ),
+    controlEdges: frontier.controlEdges.map((edge) => edge.status),
+    routerSelections: frontier.routerSelections.map((selection) => ({
+      routerOp: selection.routerOpIndex,
+      branch: selection.branch,
+    })),
   };
 }
 
@@ -318,6 +359,10 @@ export class RuntimeRunDispatcher {
       },
       {
         restored: restore(frontier),
+        control: {
+          selectRouterBranch: ({ operation, branches }) =>
+            this.routerBranch(runId, operation, branches),
+        },
         ...(this.#authority === undefined ? {} : { capabilityAuthority: this.#authority }),
         ...(this.#options.retry === undefined ? {} : { retry: this.#options.retry }),
         ...(this.#options.effectRetry === undefined
@@ -330,6 +375,9 @@ export class RuntimeRunDispatcher {
           },
           attemptFailed: async (context) => {
             await critical(this.failAttempt(runId, context));
+          },
+          controlResolved: async ({ op, branch }) => {
+            await critical(this.resolveControl(runId, op, branch));
           },
           suspend: async ({ op, operation }) => {
             await critical(
@@ -351,7 +399,7 @@ export class RuntimeRunDispatcher {
     try {
       const snapshot = await run.execute();
       const recovered = reconstructExecutionFrontier(this.#database.connection(), runId);
-      if (recovered.ops.every((op) => op.status === "completed")) {
+      if (recovered.ops.every((op) => op.status === "completed" || op.status === "skipped")) {
         await this.terminalize(runId, "completed");
         return { runId, status: "completed" };
       }
@@ -374,6 +422,44 @@ export class RuntimeRunDispatcher {
     } finally {
       this.#runs.delete(runId);
     }
+  }
+
+  /** A router follows the branch named by the string on its `branch` input. */
+  private routerBranch(
+    runId: string,
+    operation: ExecutionIrOpV1,
+    branches: readonly string[],
+  ): string {
+    const value = this.inputs(runId, { operation }).find((input) => input.port === "branch")?.value;
+    if (typeof value !== "string" || !branches.includes(value)) {
+      throw new TypeError(
+        `Router '${operation.sourceNodeId}' needs a 'branch' input naming one of: ${branches.join(", ")}.`,
+      );
+    }
+    return value;
+  }
+
+  /** Commit a router's branch choice or a join's completion with all of its consequences. */
+  private resolveControl(runId: string, op: number, branch: string | undefined): Promise<void> {
+    return this.#database.commit((connection) => {
+      const frontier = reconstructExecutionFrontier(connection, runId);
+      const state = frontier.ops[op];
+      if (frontier.runStatus !== "running" || state?.status !== "ready") {
+        throw new TypeError("Control resolution conflicts with the current frontier.");
+      }
+      const delta = reduceStructuredControlFrontier(
+        frontier.executionIr as unknown as ExecutionIrV1,
+        controlFrontierOf(frontier),
+        branch === undefined
+          ? { kind: "complete-join", op }
+          : { kind: "select-branch", op, branch },
+      );
+      if (branch !== undefined) {
+        event(connection, runId, DURABLE_ROUTER_SELECTION_EVENT_TYPE, { branch }, op);
+      }
+      publishOp(connection, runId, { ...state, status: "completed", readyOrder: null });
+      publishControlDelta(connection, runId, frontier, delta, op);
+    });
   }
 
   private beginAttempt(runId: string, op: number, attempt: number, used: number): Promise<string> {
@@ -487,6 +573,20 @@ export class RuntimeRunDispatcher {
               status: "completed",
               attemptBudgetUsed: used,
             });
+            const ir = frontier.executionIr as unknown as ExecutionIrV1;
+            if (hasStructuredControl(ir)) {
+              publishControlDelta(
+                connection,
+                runId,
+                frontier,
+                reduceStructuredControlFrontier(ir, controlFrontierOf(frontier), {
+                  kind: "complete",
+                  op,
+                }),
+                op,
+              );
+              return committed;
+            }
             let order =
               frontier.ops.reduce((max, item) => Math.max(max, item.readyOrder ?? -1), -1) + 1;
             for (const target of frontier.ops) {
@@ -524,7 +624,10 @@ export class RuntimeRunDispatcher {
     );
   }
 
-  private inputs(runId: string, execution: PlainDagOpExecution): RuntimeNodeExecution["inputs"] {
+  private inputs(
+    runId: string,
+    execution: { readonly operation: ExecutionIrOpV1 },
+  ): RuntimeNodeExecution["inputs"] {
     const bindings = execution.operation.inputs.map((binding) => {
       const source = binding.source;
       let value: unknown;

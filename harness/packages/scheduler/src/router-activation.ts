@@ -122,6 +122,35 @@ export class RunRouterActivation {
     });
   }
 
+  /**
+   * Restore one committed branch choice. The router must already be completed and
+   * its outgoing edges must already record that choice.
+   */
+  restoreSelection(routerOp: number, branch: string): void {
+    const control = getRouterControl(this.ir, routerOp);
+    if (!control.branches.includes(branch)) {
+      throw new TypeError(
+        `Restored router op ${String(routerOp)} names undeclared branch '${branch}'.`,
+      );
+    }
+    if (this.selections.has(routerOp)) {
+      throw new TypeError(`Router op ${String(routerOp)} already has a restored branch.`);
+    }
+    if (this.readiness.getOpState(routerOp).status !== "completed") {
+      throw new TypeError(`Restored router op ${String(routerOp)} must be completed.`);
+    }
+    const chosen = new Set(this.branchPlans.get(routerOp)?.get(branch)?.edges ?? []);
+    for (const edgeIndex of this.controlEdges.getOutgoingEdgeIndexes(routerOp)) {
+      const expected = chosen.has(edgeIndex) ? "completed" : "skipped";
+      if (this.controlEdges.getState(edgeIndex).status !== expected) {
+        throw new TypeError(
+          `Restored router op ${String(routerOp)} contradicts its committed control edges.`,
+        );
+      }
+    }
+    this.selections.set(routerOp, branch);
+  }
+
   hasSelectedBranch(routerOp: number): boolean {
     getRouterControl(this.ir, routerOp);
     return this.selections.has(routerOp);

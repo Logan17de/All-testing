@@ -32,6 +32,16 @@ function frozenCopy<T>(items: readonly T[]): readonly T[] {
  * attempt through running -> retry-wait -> ready without touching dependency
  * counters or pretending the predecessor completed.
  */
+export interface RunReadinessRestoreOptions {
+  /**
+   * Exact released predecessor sets per op. Plans with routers or joins need
+   * this: a completed source is not always a released dependency (a router may
+   * have taken another branch, a join may still be waiting), and a join can
+   * release a lane whose source was skipped.
+   */
+  readonly releasedDependencies?: readonly (readonly number[])[];
+}
+
 export class RunReadiness {
   private readonly ops: RunOpState[];
   private readonly dependencies: readonly (readonly number[])[];
@@ -42,7 +52,11 @@ export class RunReadiness {
   private readonly readyQueue: number[] = [];
   private readyHead = 0;
 
-  constructor(ir: ExecutionIrV1, restored?: RunReadinessSnapshot) {
+  constructor(
+    ir: ExecutionIrV1,
+    restored?: RunReadinessSnapshot,
+    options: RunReadinessRestoreOptions = {},
+  ) {
     const dependents = Array.from({ length: ir.ops.length }, () => [] as number[]);
 
     this.ops = ir.ops.map((_, op) => createRunOpState(op));
@@ -66,16 +80,38 @@ export class RunReadiness {
     for (let op = 0; op < this.ops.length; op += 1) {
       if (this.remainingDependencies[op] === 0) this.markReady(op);
     }
-    if (restored !== undefined) this.restore(ir, restored);
+    if (restored !== undefined) this.restore(ir, restored, options.releasedDependencies);
   }
 
   /** Restore a quiescent plain-DAG frontier, never an unclassified running attempt. */
-  private restore(ir: ExecutionIrV1, restored: RunReadinessSnapshot): void {
+  private restore(
+    ir: ExecutionIrV1,
+    restored: RunReadinessSnapshot,
+    releasedDependencies: readonly (readonly number[])[] | undefined,
+  ): void {
     const count = this.ops.length;
-    const allowed = new Set(["pending", "ready", "completed", "waiting", "retry-wait"]);
-    if (restored.ops.length !== count || restored.remainingDependencies.length !== count) {
+    const allowed = new Set(["pending", "ready", "completed", "skipped", "waiting", "retry-wait"]);
+    if (
+      restored.ops.length !== count ||
+      restored.remainingDependencies.length !== count ||
+      (releasedDependencies !== undefined && releasedDependencies.length !== count)
+    ) {
       throw new TypeError("Restored readiness must cover the exact Execution IR op domain.");
     }
+    const releasedSets = this.dependencies.map((dependencies, op) => {
+      const released = new Set(
+        releasedDependencies?.[op] ??
+          dependencies.filter((source) => restored.ops[source]?.status === "completed"),
+      );
+      for (const source of released) {
+        if (!dependencies.includes(source)) {
+          throw new TypeError(
+            "Restored readiness releases a dependency the Execution IR does not declare.",
+          );
+        }
+      }
+      return released;
+    });
     const queued = new Set(restored.readyQueue);
     if (queued.size !== restored.readyQueue.length) {
       throw new TypeError("Restored readiness contains duplicate queue entries.");
@@ -85,12 +121,12 @@ export class RunReadiness {
       if (state.op !== op || !allowed.has(state.status)) {
         throw new TypeError("Restored readiness contains an unsupported op state.");
       }
-      const expected = this.dependencies[op]!.filter(
-        (source) => restored.ops[source]?.status !== "completed",
-      ).length;
+      const expected = this.dependencies[op]!.length - releasedSets[op]!.size;
       if (
         restored.remainingDependencies[op] !== expected ||
-        (state.status === "pending" ? expected === 0 : expected !== 0) ||
+        (state.status === "pending"
+          ? expected === 0
+          : state.status !== "skipped" && expected !== 0) ||
         queued.has(op) !== (state.status === "ready") ||
         (state.status === "waiting" && ir.ops[op]?.behavior.primitiveFamily !== "interrupt")
       ) {
@@ -103,9 +139,7 @@ export class RunReadiness {
     restored.ops.forEach((state, op) => {
       this.ops[op] = Object.freeze({ ...state });
       this.remainingDependencies[op] = restored.remainingDependencies[op]!;
-      this.releasedDependencies[op] = new Set(
-        this.dependencies[op]!.filter((source) => restored.ops[source]?.status === "completed"),
-      );
+      this.releasedDependencies[op] = releasedSets[op]!;
     });
   }
 

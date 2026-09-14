@@ -4,7 +4,6 @@ import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 
 import { SchedulerConcurrency } from "./concurrency.js";
 import { PlainDagRun, type PlainDagRouterSelectionContext } from "./plain-dag-run.js";
-import { RunReadiness } from "./run-readiness.js";
 import {
   createMockExecutionIr,
   createMockExecutionOp,
@@ -186,22 +185,5 @@ describe("routers and joins inside a run", () => {
           control: { selectRouterBranch: () => "left" },
         }),
     ).toThrow("Plain DAG run cannot execute structured-control op 0 ('loop')");
-  });
-
-  it("refuses to restore a run with routers, since branch choices are not in the snapshot", () => {
-    const plan = routerJoinPlan();
-    const restored = {
-      readiness: new RunReadiness(plan).snapshot(),
-      attempts: plan.ops.map(() => 0),
-      attemptBudgetUsed: plan.ops.map(() => 0),
-      retryDelaysMs: plan.ops.map(() => null),
-    };
-    expect(
-      () =>
-        new PlainDagRun(plan, new SchedulerConcurrency(1).createRun(plan), () => undefined, {
-          restored,
-          control: { selectRouterBranch: () => "left" },
-        }),
-    ).toThrow("Restoring a run that contains routers or joins is not supported yet.");
   });
 });

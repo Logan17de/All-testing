@@ -233,6 +233,13 @@
   border-color: #d97706;
 }
 
+/* Work a router's branch choice ruled out, or a cancelled run never reached. */
+.hnode--skipped,
+.hnode--cancelled {
+  border-style: dashed;
+  opacity: 0.55;
+}
+
 .hnode__head {
   display: flex;
   gap: 8px;

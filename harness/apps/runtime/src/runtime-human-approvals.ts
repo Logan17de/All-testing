@@ -4,8 +4,11 @@ import type { DatabaseSync } from "node:sqlite";
 import type { SqliteDatabase } from "@zet-harness/db";
 import type { DurableApprovalRecord } from "@zet-harness/db/durable-approval-records";
 import { generateLogicalEffectId } from "@zet-harness/db/durable-node-invocation";
+import type { ExecutionIrV1 } from "@zet-harness/graph";
+import { hasStructuredControl, reduceStructuredControlFrontier } from "@zet-harness/scheduler";
 
 import { RuntimeApprovalError } from "./runtime-approval-error.js";
+import { applyControlDelta, controlFrontierOf } from "./runtime-control-frontier.js";
 import {
   RuntimeRedactionRegistry,
   canonicalRuntimeJson,
@@ -173,11 +176,23 @@ function checkpoint(
       insertEdge.run(checkpointId, edge.edgeIndex, edge.iteration, edge.status);
     }
   }
+  // Branch choices made before this cursor are only recoverable from the checkpoint.
+  const insertSelection = connection.prepare(`INSERT INTO checkpoint_router_selections
+    (checkpoint_id, router_op_index, iteration, branch) VALUES (?, ?, ?, ?)`);
+  for (const selection of frontier.routerSelections) {
+    insertSelection.run(
+      checkpointId,
+      selection.routerOpIndex,
+      selection.iteration,
+      selection.branch,
+    );
+  }
   return checkpointId;
 }
 
 /**
- * Durable approval gates for quiescent, iteration-zero plain DAGs.
+ * Durable approval gates for quiescent, iteration-zero DAGs, including graphs with
+ * routers and joins.
  *
  * The host dispatches interrupt primitives here, never to plugin execute(). A wait
  * is committed state, not a live Promise. Approval completes only the human gate;
@@ -402,6 +417,19 @@ export class RuntimeHumanApprovals {
           resolved_at_ms = ? WHERE approval_id = ? AND status = 'pending'`,
           )
           .run(decision, responseJson, responseHash, now, approvalId);
+        const ir = frontier.executionIr as unknown as ExecutionIrV1;
+        // With routers or joins, completing the gate can skip paths and release a
+        // join, so the shared control reducer decides what the approval unblocks.
+        const controlled =
+          decision === "approved" && hasStructuredControl(ir)
+            ? applyControlDelta(
+                frontier,
+                reduceStructuredControlFrontier(ir, controlFrontierOf(frontier), {
+                  kind: "complete",
+                  op: row.opIndex,
+                }),
+              )
+            : undefined;
         let readyOrder = Math.max(-1, ...frontier.ops.map((op) => op.readyOrder ?? -1)) + 1;
         const ops = frontier.ops.map((op): RecoveredOpFrontier => {
           if (decision === "rejected") {
@@ -411,6 +439,7 @@ export class RuntimeHumanApprovals {
           if (op.opIndex === row.opIndex) {
             return { ...op, status: "completed", attemptsStarted: 1, attemptBudgetUsed: 1 };
           }
+          if (controlled !== undefined) return controlled.ops[op.opIndex]!;
           if (
             op.status === "pending" &&
             frontier.executionIr.ops[op.opIndex]?.dependencies.includes(row.opIndex)
@@ -460,7 +489,7 @@ export class RuntimeHumanApprovals {
           { approvalId, decision },
           row.opIndex,
         );
-        const edges = frontier.controlEdges.map((edge) => {
+        const edges = (controlled?.controlEdges ?? frontier.controlEdges).map((edge) => {
           if (
             decision === "approved" &&
             frontier.executionIr.controlEdges[edge.edgeIndex]?.from.op === row.opIndex
@@ -473,7 +502,7 @@ export class RuntimeHumanApprovals {
         const status =
           decision === "rejected"
             ? "cancelled"
-            : ops.every((op) => op.status === "completed")
+            : ops.every((op) => op.status === "completed" || op.status === "skipped")
               ? "completed"
               : ops.some((op) => op.status === "waiting")
                 ? "waiting"
@@ -535,7 +564,7 @@ export class RuntimeHumanApprovals {
     }
     const ir = frontier.executionIr as unknown as {
       readonly ops: readonly {
-        readonly control?: unknown;
+        readonly control?: { readonly kind?: unknown };
         readonly behavior: {
           readonly primitiveFamily: string;
           readonly effect: string;
@@ -553,7 +582,10 @@ export class RuntimeHumanApprovals {
     if (
       gate?.behavior.primitiveFamily !== "interrupt" ||
       gate.behavior.effect !== "none" ||
-      ir.ops.some((op) => op.control !== undefined) ||
+      ir.ops.some(
+        (op) =>
+          op.control !== undefined && op.control.kind !== "router" && op.control.kind !== "join",
+      ) ||
       frontier.ops.some((op) => op.iteration !== 0)
     ) {
       throw new RuntimeApprovalError("APPROVAL_UNSUPPORTED_GRAPH");

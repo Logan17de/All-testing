@@ -107,6 +107,24 @@ export class RunControlEdges {
     return this.ir.ops.length;
   }
 
+  /** Restore committed edge states before any live transition has happened. */
+  restore(statuses: readonly ControlEdgeRuntimeStatus[]): void {
+    if (statuses.length !== this.states.length) {
+      throw new TypeError(
+        "Restored control-edge state must cover every Execution IR control edge.",
+      );
+    }
+    if (this.states.some((state) => state.status !== "unresolved")) {
+      throw new TypeError("Control-edge state can only be restored before it changes.");
+    }
+    statuses.forEach((status, edge) => {
+      if (!(CONTROL_EDGE_RUNTIME_STATUSES as readonly string[]).includes(status)) {
+        throw new TypeError(`Restored control edge ${String(edge)} has an unknown status.`);
+      }
+      this.states[edge] = Object.freeze({ edge, status });
+    });
+  }
+
   isForIr(ir: ExecutionIrV1): boolean {
     return this.ir === ir;
   }

@@ -1,10 +1,14 @@
 import type { ExecutionIrOpV1, ExecutionIrV1 } from "@zet-harness/graph";
 
 import type { ConcurrencyPermit, RunConcurrency, RunConcurrencySnapshot } from "./concurrency.js";
-import { RunControlEdges, type RunControlEdgesSnapshot } from "./control-edge-state.js";
-import { RunJoinActivation } from "./join-activation.js";
+import type { ControlEdgeRuntimeStatus, RunControlEdgesSnapshot } from "./control-edge-state.js";
 import { RunReadiness, type RunReadinessSnapshot } from "./run-readiness.js";
-import { RunRouterActivation, type RouterBranchSelection } from "./router-activation.js";
+import type { RouterBranchSelection } from "./router-activation.js";
+import {
+  deriveReleasedDependencies,
+  isStructuredControlOp,
+  RunStructuredControl,
+} from "./structured-control.js";
 import {
   assertInvocationPermission,
   InvocationPermissionDeniedError,
@@ -201,6 +205,10 @@ export interface PlainDagRestoreState {
   readonly attemptBudgetUsed: readonly number[];
   /** Remaining wall-clock backoff per op, null except for retry-wait. */
   readonly retryDelaysMs: readonly (number | null)[];
+  /** Committed control-edge states; required when the plan has routers or joins. */
+  readonly controlEdges?: readonly ControlEdgeRuntimeStatus[];
+  /** Committed router branch choices; required when the plan has routers or joins. */
+  readonly routerSelections?: readonly RouterBranchSelection[];
 }
 
 export interface PlainDagAttemptFailureContext extends PlainDagCompletionBarrierContext {
@@ -217,6 +225,15 @@ export interface PlainDagDurabilityHooks {
   readonly suspend?: (context: {
     readonly op: number;
     readonly operation: ExecutionIrOpV1;
+  }) => void | Promise<void>;
+  /**
+   * Persist a router's branch choice or a join's completion, with every readiness
+   * and skip consequence, before the run acts on it.
+   */
+  readonly controlResolved?: (context: {
+    readonly op: number;
+    readonly operation: ExecutionIrOpV1;
+    readonly branch?: string;
   }) => void | Promise<void>;
 }
 
@@ -307,11 +324,6 @@ function assertRetryPolicy(op: number, operation: ExecutionIrOpV1): void {
   if (retry.backoffMs !== undefined) {
     assertNonNegativeSafeInteger(`Run op ${String(op)} retry.backoffMs`, retry.backoffMs);
   }
-}
-
-/** Routers and joins are scheduler-owned control ops this run resolves itself. */
-function isStructuredControlOp(op: ExecutionIrOpV1): boolean {
-  return op.control?.kind === "router" || op.control?.kind === "join";
 }
 
 function assertPlainExecutableDag(
@@ -511,9 +523,7 @@ export class PlainDagRun {
   private readonly retryWaitTasks = new Set<Promise<void>>();
   private readonly pauseController = new AbortController();
   private suspendedForHuman = false;
-  private readonly controlEdges: RunControlEdges | undefined;
-  private readonly routers: RunRouterActivation | undefined;
-  private readonly joins: RunJoinActivation | undefined;
+  private readonly control: RunStructuredControl | undefined;
   readonly #selectRouterBranch: PlainDagControlHooks["selectRouterBranch"] | undefined;
   readonly #durability: PlainDagDurabilityHooks;
   private readonly initialRetryDelays: readonly (number | null)[];
@@ -541,6 +551,9 @@ export class PlainDagRun {
         ? {}
         : { attemptFailed: hooks.attemptFailed.bind(hooks) }),
       ...(hooks?.suspend === undefined ? {} : { suspend: hooks.suspend.bind(hooks) }),
+      ...(hooks?.controlResolved === undefined
+        ? {}
+        : { controlResolved: hooks.controlResolved.bind(hooks) }),
     });
     this.suspendedForHuman =
       options.restored?.readiness.ops.some((op) => op.status === "waiting") ?? false;
@@ -553,17 +566,35 @@ export class PlainDagRun {
     this.#selectRouterBranch = control?.selectRouterBranch.bind(control);
     const authority = options.capabilityAuthority;
     this.#evaluateCapability = authority?.evaluate.bind(authority);
-    this.readiness = new RunReadiness(ir, options.restored?.readiness);
-    if (ir.ops.some(isStructuredControlOp)) {
-      if (options.restored !== undefined) {
-        // Control-edge state and router choices are not part of the restore
-        // snapshot yet, so resuming would silently forget which branch was taken.
-        throw new TypeError("Restoring a run that contains routers or joins is not supported yet.");
-      }
-      this.controlEdges = new RunControlEdges(ir);
-      this.routers = new RunRouterActivation(ir, this.readiness, this.controlEdges);
-      this.joins = new RunJoinActivation(ir, this.readiness, this.controlEdges);
+    const restored = options.restored;
+    const structured = ir.ops.some(isStructuredControlOp);
+    const restoredControl =
+      restored?.controlEdges === undefined || restored.routerSelections === undefined
+        ? undefined
+        : { controlEdges: restored.controlEdges, routerSelections: restored.routerSelections };
+    if (structured && restored !== undefined && restoredControl === undefined) {
+      // Without committed edge state and branch choices a resumed run would
+      // silently forget which branch was taken.
+      throw new TypeError(
+        "Restoring a run with routers or joins requires its control-edge state and router selections.",
+      );
     }
+    this.readiness = new RunReadiness(
+      ir,
+      restored?.readiness,
+      structured && restored !== undefined && restoredControl !== undefined
+        ? {
+            releasedDependencies: deriveReleasedDependencies(ir, {
+              opStatuses: restored.readiness.ops.map(({ status }) => status),
+              remainingDependencies: restored.readiness.remainingDependencies,
+              ...restoredControl,
+            }),
+          }
+        : {},
+    );
+    this.control = structured
+      ? new RunStructuredControl(ir, this.readiness, restoredControl)
+      : undefined;
     this.attempts = [...(options.restored?.attempts ?? ir.ops.map(() => 0))];
     this.attemptBudgetUsed = [...(options.restored?.attemptBudgetUsed ?? ir.ops.map(() => 0))];
     this.initialRetryDelays = [...(options.restored?.retryDelaysMs ?? ir.ops.map(() => null))];
@@ -584,8 +615,10 @@ export class PlainDagRun {
         !Number.isSafeInteger(used) ||
         used < attempts ||
         used > (operation.behavior.retry?.maxAttempts ?? 1) ||
-        ((state === "completed" || state === "retry-wait") && attempts < 1) ||
-        ((state === "pending" || state === "waiting") && used !== 0) ||
+        (state === "retry-wait" && attempts < 1) ||
+        // Routers and joins complete without an attempt; every other op needs one.
+        (state === "completed" && attempts < 1 && !isStructuredControlOp(operation)) ||
+        ((state === "pending" || state === "waiting" || state === "skipped") && used !== 0) ||
         (state === "retry-wait" ? delay === null : delay !== null)
       ) {
         throw new TypeError("Invalid restored attempt accounting.");
@@ -611,12 +644,7 @@ export class PlainDagRun {
       attemptBudgetUsed: frozenCopy(this.attemptBudgetUsed),
       readiness: this.readiness.snapshot(),
       concurrency: this.concurrency.snapshot(),
-      ...(this.controlEdges === undefined || this.routers === undefined
-        ? {}
-        : {
-            controlEdges: this.controlEdges.snapshot(),
-            routerSelections: this.routers.snapshot().selections,
-          }),
+      ...(this.control === undefined ? {} : this.control.snapshot()),
     });
   }
 
@@ -890,7 +918,13 @@ export class PlainDagRun {
       }
 
       this.readiness.completeRunningOp(op);
-      this.releaseCompletedOp(op);
+      if (this.control === undefined) {
+        for (const targetOp of this.readiness.getDependents(op)) {
+          this.readiness.releaseDependency(op, targetOp);
+        }
+      } else {
+        this.control.releaseCompletedOp(op);
+      }
     } catch (error) {
       if (this.signal.aborted) {
         return;
@@ -1213,112 +1247,34 @@ export class PlainDagRun {
    * Resolve one dequeued router or join.
    *
    * Both are scheduler-owned: they take no concurrency permit and run no
-   * executor. A router's branch comes from the host hook, never from the op.
+   * executor. A router's branch comes from the host hook, never from the op, and
+   * a durable host commits the decision before the run acts on it.
    */
   private async executeControlOp(op: number): Promise<void> {
     const operation = this.ir.ops[op]!;
+    const control = this.control!;
+    const halted = (): boolean =>
+      this.signal.aborted || this.hasFailure || this.workStopController.signal.aborted;
     try {
       if (operation.control?.kind === "router") {
         const branches = operation.control.branches;
         const branch: unknown = await this.#selectRouterBranch!(
           Object.freeze({ op, operation, branches, signal: this.signal }),
         );
-        if (this.signal.aborted || this.hasFailure || this.workStopController.signal.aborted) {
-          return;
-        }
+        if (halted()) return;
         if (typeof branch !== "string" || !branches.includes(branch)) {
           throw new TypeError(`Router op ${String(op)} selected a branch it does not declare.`);
         }
-        this.routers!.activateReservedRouter(op, branch);
+        await this.#durability.controlResolved?.(Object.freeze({ op, operation, branch }));
+        if (halted()) return;
+        control.activateReservedRouter(op, branch);
       } else {
-        this.joins!.completeReservedJoin(op);
+        await this.#durability.controlResolved?.(Object.freeze({ op, operation }));
+        if (halted()) return;
+        control.completeReservedJoin(op);
       }
-      this.settleControl();
     } catch (error) {
       if (!this.signal.aborted) this.recordFailure(error);
-    }
-  }
-
-  /** Release everything a completed ordinary op was holding back. */
-  private releaseCompletedOp(op: number): void {
-    const controlEdges = this.controlEdges;
-    if (controlEdges === undefined) {
-      for (const targetOp of this.readiness.getDependents(op)) {
-        this.readiness.releaseDependency(op, targetOp);
-      }
-      return;
-    }
-
-    // A completed ordinary op is on the live path, so its outgoing control edges
-    // finish with it. A join decides for itself when its control lanes are
-    // satisfied, so those particular dependencies are left to reconciliation.
-    const joinLanes = new Set<number>();
-    for (const edgeIndex of controlEdges.getOutgoingEdgeIndexes(op)) {
-      if (controlEdges.getState(edgeIndex).status === "unresolved") {
-        controlEdges.activate(edgeIndex);
-      }
-      if (controlEdges.getState(edgeIndex).status === "active") {
-        controlEdges.complete(edgeIndex);
-      }
-      const target = controlEdges.getEdge(edgeIndex).to.op;
-      if (this.ir.ops[target]?.control?.kind === "join") joinLanes.add(target);
-    }
-    for (const targetOp of this.readiness.getDependents(op)) {
-      if (!joinLanes.has(targetOp)) this.readiness.releaseDependency(op, targetOp);
-    }
-    this.settleControl();
-  }
-
-  /**
-   * Bring joins and inactive paths up to date after a control decision.
-   *
-   * An ordinary op is skipped when every control edge from one of its sources
-   * was skipped, or when a source that feeds it data was skipped: either way it
-   * can never run. Joins are reconciled against the same edge state, and both
-   * repeat until nothing changes, so a skip cascades through the whole path.
-   */
-  private settleControl(): void {
-    const controlEdges = this.controlEdges;
-    const joins = this.joins;
-    if (controlEdges === undefined || joins === undefined) return;
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (let op = 0; op < this.ir.ops.length; op += 1) {
-        if (this.readiness.getOpState(op).status !== "pending") continue;
-        const operation = this.ir.ops[op]!;
-
-        if (operation.control?.kind === "join") {
-          const reconciliation = joins.reconcileJoin(op);
-          if (reconciliation.newlyReady || reconciliation.propagatedSkippedOps.length > 0) {
-            changed = true;
-          }
-          continue;
-        }
-
-        const edgesBySource = new Map<number, number[]>();
-        for (const edgeIndex of controlEdges.getIncomingEdgeIndexes(op)) {
-          const source = controlEdges.getEdge(edgeIndex).from.op;
-          edgesBySource.set(source, [...(edgesBySource.get(source) ?? []), edgeIndex]);
-        }
-        const controlStarved = [...edgesBySource.values()].some((edges) =>
-          edges.every((edgeIndex) => controlEdges.getState(edgeIndex).status === "skipped"),
-        );
-        const dataStarved = operation.dependencies.some(
-          (source) =>
-            !edgesBySource.has(source) && this.readiness.getOpState(source).status === "skipped",
-        );
-        if (!controlStarved && !dataStarved) continue;
-
-        this.readiness.skipPendingOp(op);
-        for (const edgeIndex of controlEdges.getOutgoingEdgeIndexes(op)) {
-          if (controlEdges.getState(edgeIndex).status === "unresolved") {
-            controlEdges.skip(edgeIndex);
-          }
-        }
-        changed = true;
-      }
     }
   }
 
