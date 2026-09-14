@@ -154,7 +154,8 @@ Phase 8  Loops + projects + agent mode     🚧 IN PROGRESS
            ├─ 8.8 sortable IDs and epoch-ms timestamps everywhere              ✅
            ├─ 8.9 deterministic next runnable todo                             ✅
            ├─ 8.10 context builder with hard byte/token budgets                ✅
-           ├─ 8.11–8.13 goal/todo actions, agent loop, blocked                 ▶ CURRENT
+           ├─ 8.11 model-visible goal/todo actions, applied once               ✅
+           ├─ 8.12–8.13 agent loop, blocked state and goal completion          ▶ CURRENT
            └─ 8.14–8.17 chat/goals UI, coding integration, golden trace, lock   ⏳
 Phase 9  Replay + memory + triggers        ⏳
 Phase 10 MCP + custom-node SDK + trust     ✅ 9/11 — 10.10 WASI, 10.11 npm/Git install pending
@@ -173,7 +174,7 @@ Phase 11 Packaging + optional scale-out    🚧 1/9
 | **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ✅ Complete |
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ✅ Complete except 6.12 (needs a real local model endpoint) |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ✅ Complete — **v0.1 boundary reached** |
-| **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | 🚧 In progress — control flow, 8.1 loops, 8.3 iteration identity, 8.2 run/loop limits and 8.4 subgraphs, 8.5 projects, 8.6 conversations and 8.7 goals/todos, 8.8 ids and 8.9 next-todo selection and 8.10 context builder done; 8.11 next (see `PHASE-8.md`) |
+| **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | 🚧 In progress — control flow, 8.1 loops, 8.3 iteration identity, 8.2 run/loop limits and 8.4 subgraphs, 8.5 projects, 8.6 conversations and 8.7 goals/todos, 8.8 ids and 8.9 next-todo selection, 8.10 context builder and 8.11 goal actions done; 8.12 next (see `PHASE-8.md`) |
 | **9 — Replay/Fork + Memory + Triggers + External clients** | recorded replay, checkpoint forks, lightweight memory, cron/webhook/API triggers, Copycat/client bridge | ⏳ Later |
 | **10 — MCP + Custom-node SDK + Trust tiers** | MCP through normal tool registry, local plugin loading, SDK/package manifests, process/WASI isolation options | ✅ Complete except 10.10 (WASI) and 10.11 (npm/Git install) |
 | **11 — Packaging + Optional scale-out** | Windows setup, config wizard, backup/import/export, optional desktop shell, optional Postgres/remote workers | 🚧 11.1 done; 11.2–11.9 pending |

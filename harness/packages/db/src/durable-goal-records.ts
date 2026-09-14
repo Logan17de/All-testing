@@ -995,3 +995,104 @@ export function selectNextRunnableTodo(
 ): RunnableTodo | undefined {
   return listRunnableTodos(connection, projectId, { ...options, limit: 1 })[0];
 }
+
+export const GOAL_ACTION_EFFECTS_TABLE = "goal_action_effects" as const;
+
+/**
+ * Results of model-visible goal and todo actions, keyed by the invocation's logical
+ * effect id, the action and a hash of its input.
+ *
+ * A retried attempt reuses its logical effect id, so looking the key up before acting
+ * makes every action apply at most once. Append new migrations; never edit v1-v10.
+ */
+export const DURABLE_GOAL_ACTION_EFFECTS_MIGRATION: SqliteMigration = Object.freeze({
+  version: 11,
+  name: "durable_goal_action_effects",
+  sql: `
+CREATE TABLE ${GOAL_ACTION_EFFECTS_TABLE} (
+  logical_effect_id TEXT NOT NULL CHECK (length(logical_effect_id) > 0),
+  action TEXT NOT NULL CHECK (length(action) > 0),
+  input_sha256 TEXT NOT NULL CHECK (length(input_sha256) = 64),
+  project_id TEXT NOT NULL,
+  result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+  recorded_at_ms INTEGER NOT NULL CHECK (recorded_at_ms >= 0),
+  PRIMARY KEY (logical_effect_id, action, input_sha256),
+  FOREIGN KEY (project_id) REFERENCES ${PROJECTS_TABLE}(project_id)
+    ON UPDATE RESTRICT ON DELETE RESTRICT
+) STRICT;
+
+CREATE TRIGGER goal_action_effects_are_append_only
+BEFORE UPDATE ON ${GOAL_ACTION_EFFECTS_TABLE}
+BEGIN
+  SELECT RAISE(ABORT, 'goal action effects are append-only');
+END;
+
+CREATE TRIGGER goal_action_effects_cannot_be_deleted
+BEFORE DELETE ON ${GOAL_ACTION_EFFECTS_TABLE}
+BEGIN
+  SELECT RAISE(ABORT, 'goal action effects are append-only');
+END;
+`,
+});
+
+export interface GoalActionEffectKey {
+  readonly logicalEffectId: string;
+  readonly action: string;
+  /** Lowercase hex SHA-256 of the canonical action input. */
+  readonly inputSha256: string;
+}
+
+export interface GoalActionEffectRecord extends GoalActionEffectKey {
+  readonly projectId: string;
+  readonly result: unknown;
+  readonly recordedAtMs: number;
+}
+
+export function readGoalActionEffect(
+  connection: GoalStatementRunner,
+  key: GoalActionEffectKey,
+): GoalActionEffectRecord | undefined {
+  const row = connection
+    .prepare(
+      `SELECT * FROM ${GOAL_ACTION_EFFECTS_TABLE}
+       WHERE logical_effect_id = ? AND action = ? AND input_sha256 = ?`,
+    )
+    .get(key.logicalEffectId, key.action, key.inputSha256);
+  if (row === undefined) return undefined;
+  return Object.freeze({
+    logicalEffectId: text(row["logical_effect_id"]),
+    action: text(row["action"]),
+    inputSha256: text(row["input_sha256"]),
+    projectId: text(row["project_id"]),
+    result: JSON.parse(text(row["result_json"])) as unknown,
+    recordedAtMs: integer(row["recorded_at_ms"]),
+  });
+}
+
+export function recordGoalActionEffect(
+  connection: GoalStatementRunner,
+  input: GoalActionEffectKey & {
+    readonly projectId: string;
+    readonly result: unknown;
+    readonly nowMs: number;
+  },
+): void {
+  const nowMs = checkTime(input.nowMs);
+  if (!/^[0-9a-f]{64}$/u.test(input.inputSha256)) {
+    invalid("inputSha256", "inputSha256 must be a lowercase hex SHA-256 digest.");
+  }
+  connection
+    .prepare(
+      `INSERT INTO ${GOAL_ACTION_EFFECTS_TABLE} (
+        logical_effect_id, action, input_sha256, project_id, result_json, recorded_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.logicalEffectId,
+      input.action,
+      input.inputSha256,
+      input.projectId,
+      JSON.stringify(input.result),
+      nowMs,
+    );
+}

@@ -274,7 +274,7 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 - [x] 8.8 Add sortable IDs and UTC epoch-millisecond timestamps consistently.
 - [x] 8.9 Add deterministic next-runnable-todo selection.
 - [x] 8.10 Add context builder with hard byte/token-budget hooks.
-- [ ] 8.11 Add model-visible goal/todo actions.
+- [x] 8.11 Add model-visible goal/todo actions.
 - [ ] 8.12 Express the bounded model→tool→model agent loop through the same structured loop/scheduler semantics.
 - [ ] 8.13 Add blocked state and goal-completion logic.
 - [ ] 8.14 Add chat/project/goals/todos UI.

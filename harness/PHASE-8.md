@@ -410,8 +410,40 @@ total byte caps under a counter that underestimates, tool-result pairing, every 
 derived from model manifests. Turning stored projects, goals, todos and conversation branches into
 these sections is part of the agent loop (8.12).
 
+## Slice 15 — goal and todo actions a model can call (8.11)
+
+A model can now plan and track its own work through tools, within one project and without being
+able to damage anything a retry or a mistake would otherwise repeat.
+
+- **Eight actions.** `createGoalActionTools({ database, projectId })` returns tool adapters for
+  `harness.goals.list`, `harness.goals.get`, `harness.goals.create`, `harness.goals.set-status`,
+  `harness.todos.create`, `harness.todos.update`, `harness.todos.set-status` and
+  `harness.todos.next`. Each has a strict JSON input schema (`additionalProperties: false`) and a
+  description written for the model. `goalActionToolSpecifications` turns them into the
+  `ModelToolSpecification`s a model request carries, with provider-safe names such as
+  `harness_goals_create`.
+- **Confined to one project.** The tools are bound to a project when they are created. A goal or
+  todo id from another project is reported as not found, and nothing about it is revealed.
+- **Refusals the model can act on.** Invalid input, an unknown id, an invalid status transition or
+  a goal with open todos comes back as `{ ok: false, error: { code, reason, field? } }`, the same
+  codes the HTTP API uses, so the model can correct itself. Only infrastructure failures throw.
+  A refused write rolls back to a savepoint, so it changes nothing.
+- **Applied once, even when retried.** Write actions declare `external-write` with
+  `idempotency-key`. Each write runs in one serialized commit that first looks up the invocation's
+  logical effect id, the action and a SHA-256 of the canonical input in `goal_action_effects`
+  (migration 11, append-only). A retried attempt gets the recorded result back instead of acting a
+  second time; a different input under the same effect id is a different action. Reads declare
+  `external-read` and are answered from current records.
+- **Valid tool metadata.** Every action's behavior passes the same node-behavior policy the tool
+  catalog enforces.
+
+Covered by `runtime-goal-actions.test.ts`: the model-facing names, schemas and behavior policy, a
+goal planned and completed through the actions in dependency order, refusals for every kind of
+mistake with nothing changed, project confinement, and retried writes, including a retried
+refusal, returning the recorded result.
+
 ## Next
 
-Model-visible goal and todo actions (8.11), the bounded model→tool→model agent loop (8.12), which
-brings the model and tool nodes that complete 8.2, and blocked-state and goal-completion logic
-(8.13).
+The bounded model→tool→model agent loop (8.12), expressed through the structured loop and scheduler,
+which brings the model and tool nodes that complete 8.2, then blocked-state and goal-completion
+logic (8.13).
