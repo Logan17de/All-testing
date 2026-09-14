@@ -27,6 +27,12 @@ export default async function HomePage() {
         {running ? "Runtime daemon is healthy" : "Runtime daemon is not reachable"}
       </div>
 
+      <nav className="navLinks" aria-label="Sections">
+        <Link href="/editor">Graph editor</Link>
+        <Link href="/runs">Runs</Link>
+        <Link href="/plugins">Plugins</Link>
+      </nav>
+
       {running ? (
         <div className="stats">
           <Link className="stat" href="/plugins">

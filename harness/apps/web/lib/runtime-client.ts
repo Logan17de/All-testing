@@ -78,3 +78,80 @@ export function fetchRuntimeHealth(): Promise<RuntimeFetch<RuntimeHealth>> {
 export function fetchPluginReport(): Promise<RuntimeFetch<PluginReport>> {
   return readRuntime<PluginReport>("/api/plugins");
 }
+
+export interface RuntimeResponse {
+  readonly status: number;
+  readonly body: unknown;
+}
+
+const RUNTIME_UNREACHABLE: RuntimeResponse = {
+  status: 503,
+  body: { error: { code: "RUNTIME_UNREACHABLE", reason: "The runtime daemon is not reachable." } },
+};
+
+async function sendToRuntime(path: string, init: RequestInit): Promise<RuntimeResponse> {
+  try {
+    const response = await fetch(`${runtimeOrigin()}${path}`, {
+      ...init,
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    });
+    const text = await response.text();
+    try {
+      return {
+        status: response.status,
+        body: text.length === 0 ? null : (JSON.parse(text) as unknown),
+      };
+    } catch {
+      return {
+        status: 502,
+        body: {
+          error: {
+            code: "RUNTIME_BAD_RESPONSE",
+            reason: "The runtime returned a non-JSON response.",
+          },
+        },
+      };
+    }
+  } catch {
+    return RUNTIME_UNREACHABLE;
+  }
+}
+
+export function getFromRuntime(path: string): Promise<RuntimeResponse> {
+  return sendToRuntime(path, { method: "GET" });
+}
+
+/**
+ * POST to the daemon on the user's behalf.
+ *
+ * The CSRF token is fetched here, on the server, and never sent to the browser:
+ * a page cannot leak a token it never held. Callers must have passed
+ * `guardLocalRequest` first, or this would authorize a cross-site request.
+ */
+export async function postToRuntime(path: string, body: unknown): Promise<RuntimeResponse> {
+  const session = await getFromRuntime("/api/session");
+  const token =
+    typeof session.body === "object" && session.body !== null && "csrfToken" in session.body
+      ? (session.body as { readonly csrfToken: unknown }).csrfToken
+      : undefined;
+  if (session.status !== 200 || typeof token !== "string") {
+    return session.status === 200 ? RUNTIME_UNREACHABLE : session;
+  }
+  return sendToRuntime(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-zet-csrf": token },
+    body: JSON.stringify(body),
+  });
+}
+
+export interface RunSummary {
+  readonly runId: string;
+  readonly status: string;
+  readonly graphId: string;
+  readonly createdAtMs: number;
+}
+
+export function fetchRecentRuns(): Promise<RuntimeFetch<{ readonly runs: readonly RunSummary[] }>> {
+  return readRuntime<{ readonly runs: readonly RunSummary[] }>("/api/runs");
+}

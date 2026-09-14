@@ -112,7 +112,7 @@ Phase 4  Runtime daemon + SQLite           ✅ COMPLETE
            ├─ 4.20 kill/restart fault-injection tests                          ✅
            ├─ 4.21 lightweight performance baseline                            ✅
            └─ 4.22 CI baseline check                                            ✅
-Phase 5  Effects + permissions + humans    🚧 WE ARE HERE
+Phase 5  Effects + permissions + humans    ✅ COMPLETE
            ├─ 5.1 effect/idempotency/recovery invariants                       ✅
            ├─ 5.2 stable logical effect/idempotency identity                   ✅
            ├─ 5.3 effect-aware retry rules                                     ✅
@@ -122,13 +122,25 @@ Phase 5  Effects + permissions + humans    🚧 WE ARE HERE
            ├─ 5.7 invocation-time capability re-check                           ✅
            ├─ 5.8 model/plugin self-grant prevention                            ✅
            ├─ 5.9 secret reference/provider boundary                            ✅
-           └─ 5.10 first-class approval records                                 ▶ CURRENT
-Phase 6  Model + tool adapters             ⏳
-Phase 7  Visual graph + inspector          ⏳  ← Harness v0.1 boundary
-Phase 8  Loops + projects + agent mode     ⏳
+           ├─ 5.10 first-class approval records                                 ✅
+           └─ 5.11–5.17 durable pause/resume, denials, redaction                ✅
+Phase 6  Model + tool adapters             ✅ 20/21 — 6.12 needs a real local model endpoint
+Phase 7  Visual graph + inspector          ✅ COMPLETE  ← Harness v0.1 boundary
+           ├─ 7.1 lazy-loaded React Flow, web side only                         ✅
+           ├─ 7.2 palette + canvas backed by Graph JSON                         ✅
+           ├─ 7.3 plugin node manifests in the palette                          ✅
+           ├─ 7.4 schema-generated config forms                                 ✅
+           ├─ 7.5 ports/connections + compiler-backed validation                ✅
+           ├─ 7.6 diagnostics on nodes/edges                                    ✅
+           ├─ 7.7 compile/run controls                                          ✅
+           ├─ 7.8 live node state overlay                                       ✅
+           ├─ 7.9 run timeline                                                  ✅
+           ├─ 7.10 node inspector                                               ✅
+           └─ 7.11 approval/resume cards                                        ✅
+Phase 8  Loops + projects + agent mode     ▶ NEXT
 Phase 9  Replay + memory + triggers        ⏳
-Phase 10 MCP + custom-node SDK + trust     ⏳
-Phase 11 Packaging + optional scale-out    ⏳
+Phase 10 MCP + custom-node SDK + trust     ✅ 9/11 — 10.10 WASI, 10.11 npm/Git install pending
+Phase 11 Packaging + optional scale-out    🚧 1/9
 ```
 
 ### Phase map
@@ -140,13 +152,13 @@ Phase 11 Packaging + optional scale-out    ⏳
 | **2 — Graph JSON + Compiler + Execution IR** | define portable graph source, semantic validation, deterministic compilation, canonical hashes, compact immutable IR | ✅ Complete |
 | **3 — In-memory DAG Scheduler** | readiness queue, bounded concurrency, routers, activation-aware joins, cancellation, timeout, retry, runtime events | ✅ Complete |
 | **4 — Runtime daemon + SQLite durability** | long-lived Node runtime, HTTP/SSE, `node:sqlite`, WAL, events, checkpoints, blobs, crash recovery, lightweight baseline | ✅ Complete |
-| **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | 🚧 In progress — **5.10 current** |
-| **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ⏳ Planned |
-| **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ⏳ **v0.1 finish line** |
-| **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | ⏳ After v0.1 |
+| **5 — Effects + Permissions + Human interrupts** | effect/idempotency/recovery rules, capability broker, secrets, approvals, structured denials, durable pause/resume | ✅ Complete |
+| **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ✅ Complete except 6.12 (needs a real local model endpoint) |
+| **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ✅ Complete — **v0.1 boundary reached** |
+| **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | ▶ Next |
 | **9 — Replay/Fork + Memory + Triggers + External clients** | recorded replay, checkpoint forks, lightweight memory, cron/webhook/API triggers, Copycat/client bridge | ⏳ Later |
-| **10 — MCP + Custom-node SDK + Trust tiers** | MCP through normal tool registry, local plugin loading, SDK/package manifests, process/WASI isolation options | ⏳ Later |
-| **11 — Packaging + Optional scale-out** | Windows setup, config wizard, backup/import/export, optional desktop shell, optional Postgres/remote workers | ⏳ Later |
+| **10 — MCP + Custom-node SDK + Trust tiers** | MCP through normal tool registry, local plugin loading, SDK/package manifests, process/WASI isolation options | ✅ Complete except 10.10 (WASI) and 10.11 (npm/Git install) |
+| **11 — Packaging + Optional scale-out** | Windows setup, config wizard, backup/import/export, optional desktop shell, optional Postgres/remote workers | 🚧 11.1 done; 11.2–11.9 pending |
 
 ### What “done enough to use” means
 

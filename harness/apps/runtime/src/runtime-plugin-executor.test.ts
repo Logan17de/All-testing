@@ -139,6 +139,7 @@ describe("resolving a plugin node", () => {
       sandboxes: [
         {
           pluginId: "com.example.s",
+          pluginVersion: "1",
           sandboxFlags: [],
           tools: [],
           close: () => Promise.resolve(),
@@ -156,6 +157,7 @@ describe("resolving a plugin node", () => {
       sandboxes: [
         {
           pluginId: "com.example.s",
+          pluginVersion: "1",
           sandboxFlags: [],
           tools: [],
           close: () => Promise.resolve(),

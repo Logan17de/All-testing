@@ -15,7 +15,12 @@ import {
 import { DURABLE_APPROVALS_MIGRATION } from "@zet-harness/db/durable-approval-records";
 import { DURABLE_FILE_CHANGES_MIGRATION } from "@zet-harness/db/durable-file-change-records";
 
-import type { PluginHost } from "@zet-harness/core";
+import {
+  PluginHost,
+  createHumanApprovalPlugin,
+  type CapabilityPermissionPolicy,
+} from "@zet-harness/core";
+import type { IsolatedPlugin } from "@zet-harness/plugin-loader";
 
 import { RuntimeEventStream, type RuntimeStreamEvent } from "./runtime-event-stream.js";
 import { inspectRuntimeHealth } from "./runtime-health.js";
@@ -29,10 +34,13 @@ import {
   type RuntimeApprovalAuthority,
   type SuspendForApprovalInput,
 } from "./runtime-human-approvals.js";
+import { createPluginNodeExecutor } from "./runtime-plugin-executor.js";
 import {
   RuntimeRunDispatcher,
   type RuntimeExecutionOptions,
   type RuntimeDispatchReport,
+  type RuntimeNodeExecution,
+  type RuntimeNodeExecutionResult,
 } from "./runtime-run-dispatcher.js";
 import { probeRuntimePathLimits, type RuntimePathLimitReport } from "./runtime-path-limits.js";
 import {
@@ -108,30 +116,42 @@ export class RuntimeDaemon {
   private readonly pluginOptions: RuntimePluginOptions | undefined;
   private pluginHost: PluginHost | undefined;
   private pluginReport: RuntimePluginReport;
-  private pluginSandboxes: readonly { readonly close: () => Promise<void> }[] = [];
+  private pluginSandboxes: readonly IsolatedPlugin[] = [];
+  private pluginPolicies: ReadonlyMap<string, CapabilityPermissionPolicy> = new Map();
 
   constructor(options: RuntimeDaemonOptions = {}) {
     this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
     this.migrations = options.migrations ?? RUNTIME_DATABASE_MIGRATIONS;
     this.redaction = options.redaction ?? new RuntimeRedactionRegistry();
+    // Plugins load in start(), after construction, so both of these read plugin
+    // state when they are called rather than capturing it now. A host-supplied
+    // authority or executor always takes precedence.
+    const authority: RuntimeApprovalAuthority | undefined =
+      options.permissionAuthority ??
+      (options.plugins === undefined
+        ? undefined
+        : { evaluate: (capability) => this.pluginAuthority(capability) });
+    const execution: RuntimeExecutionOptions | undefined =
+      options.execution ??
+      (options.plugins === undefined
+        ? undefined
+        : { execute: (request) => this.executePluginNode(request) });
     this.approvals = new RuntimeHumanApprovals(this.database, {
       redaction: this.redaction,
       onResolved: (runId) => {
         this.dispatcher?.wake(runId);
       },
-      ...(options.permissionAuthority === undefined
-        ? {}
-        : { authority: options.permissionAuthority }),
+      ...(authority === undefined ? {} : { authority }),
     });
     this.dispatcher =
-      options.execution === undefined
+      execution === undefined
         ? undefined
         : new RuntimeRunDispatcher(
             this.database,
             this.approvals,
-            options.execution,
+            execution,
             this.redaction,
-            options.permissionAuthority,
+            authority,
           );
     this.httpServer = new RuntimeHttpServer(
       options.api,
@@ -146,6 +166,22 @@ export class RuntimeDaemon {
         approvals: this.approvals,
         redaction: this.redaction,
         plugins: () => this.pluginReport,
+        graphs: {
+          database: this.database,
+          sources: () => ({
+            ...(this.pluginHost === undefined ? {} : { host: this.pluginHost }),
+            sandboxes: this.pluginSandboxes,
+          }),
+          capabilityAuthority: () =>
+            authority ?? { evaluate: () => ({ decision: "deny" as const }) },
+          redact: (value) => this.redaction.redact(value),
+          dispatch:
+            execution === undefined
+              ? undefined
+              : (runId) => {
+                  this.dispatcher?.wake(runId);
+                },
+        },
       },
     );
     this.pathLimitProbe =
@@ -220,10 +256,16 @@ export class RuntimeDaemon {
       if (this.pluginOptions !== undefined) {
         // A third-party plugin that fails to load is reported, not fatal: one
         // bad package must not stop the runtime from starting.
-        const loaded = await loadRuntimePlugins(this.pluginOptions);
+        // The human approval node is a runtime primitive rather than a third-party
+        // plugin, so it is always present: any graph can pause for a person, and the
+        // dispatcher handles it itself instead of sending it to an executor.
+        const host = new PluginHost();
+        await host.activate(createHumanApprovalPlugin());
+        const loaded = await loadRuntimePlugins(this.pluginOptions, host);
         this.pluginHost = loaded.host;
         this.pluginReport = loaded.report;
         this.pluginSandboxes = loaded.sandboxes;
+        this.pluginPolicies = loaded.policies;
       }
       await this.httpServer.start();
     } catch (error) {
@@ -254,6 +296,27 @@ export class RuntimeDaemon {
 
   waitUntilStopped(): Promise<void> {
     return this.stoppedPromise;
+  }
+
+  /**
+   * Coarse authority for compile time and the scheduler's invocation re-check:
+   * a capability is available when any enabled plugin was granted it. The plugin
+   * executor then checks the node's own plugin precisely, so this never lets one
+   * plugin's grant run another plugin's node.
+   */
+  private pluginAuthority(capability: string): { readonly decision: "allow" | "deny" } {
+    for (const policy of this.pluginPolicies.values()) {
+      if (policy.allows(capability)) return { decision: "allow" };
+    }
+    return { decision: "deny" };
+  }
+
+  private executePluginNode(request: RuntimeNodeExecution): Promise<RuntimeNodeExecutionResult> {
+    return createPluginNodeExecutor({
+      ...(this.pluginHost === undefined ? {} : { host: this.pluginHost }),
+      sandboxes: this.pluginSandboxes,
+      policies: this.pluginPolicies,
+    })(request);
   }
 
   /** Node/model/tool catalogs contributed by activated plugins. */

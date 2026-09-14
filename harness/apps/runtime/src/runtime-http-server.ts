@@ -6,6 +6,11 @@ import {
   type RuntimeHealthResponse,
 } from "./runtime-health.js";
 import {
+  handleGraphHttp,
+  isGraphHttpPath,
+  type RuntimeGraphHttpServices,
+} from "./runtime-graph-http.js";
+import {
   RuntimeEventCursorError,
   RuntimeEventStream,
   type RuntimeEventStreamUnsubscribe,
@@ -77,6 +82,7 @@ export class RuntimeHttpServer {
   private readonly eventStream: RuntimeEventStream;
   private readonly healthProvider: RuntimeHealthProvider;
   private readonly pluginsProvider: (() => unknown) | undefined;
+  private readonly graphServices: RuntimeGraphHttpServices | undefined;
   private readonly eventClients = new Map<ServerResponse, () => void>();
   private readonly security: RuntimeApiSecurity;
   private readonly redaction: RuntimeRedactionRegistry;
@@ -95,6 +101,8 @@ export class RuntimeHttpServer {
       readonly redaction?: RuntimeRedactionRegistry;
       /** Read-only view of installed plugins for the local UI. */
       readonly plugins?: () => unknown;
+      /** Editor endpoints: node palette, graph validation, runs. */
+      readonly graphs?: RuntimeGraphHttpServices;
     } = {},
   ) {
     this.host = options.host ?? DEFAULT_RUNTIME_HOST;
@@ -102,6 +110,7 @@ export class RuntimeHttpServer {
     this.eventStream = eventStream;
     this.healthProvider = healthProvider;
     this.pluginsProvider = services.plugins;
+    this.graphServices = services.graphs;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
     this.approvals = services.approvals;
     this.security = new RuntimeApiSecurity(options.allowedOrigins);
@@ -219,6 +228,19 @@ export class RuntimeHttpServer {
         }
         const health = this.readHealth();
         writeJson(response, health.status === "ok" ? 200 : 503, health);
+        return;
+      }
+      if (isGraphHttpPath(url.pathname)) {
+        const graphs = this.graphServices;
+        if (graphs === undefined) {
+          writeJson(response, 503, { error: { code: "GRAPH_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void handleGraphHttp(request, response, url, this.security, graphs).catch(
+          (error: unknown) => {
+            writeRuntimeApiError(response, error);
+          },
+        );
         return;
       }
       if (url.pathname === "/api/plugins") {

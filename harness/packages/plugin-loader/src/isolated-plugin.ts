@@ -220,6 +220,8 @@ export interface IsolatedPluginOptions {
 
 export interface IsolatedPlugin {
   readonly pluginId: string;
+  /** Pinned into compiled plans alongside the id, as for in-process plugins. */
+  readonly pluginVersion: string;
   readonly nodes: readonly NodeDefinition[];
   readonly tools: readonly ToolAdapter[];
   /** Flags the sandbox was started with, for auditing and tests. */
@@ -456,6 +458,7 @@ export async function startIsolatedPlugin(
 
   return Object.freeze({
     pluginId: loaded.manifest.id,
+    pluginVersion: loaded.manifest.version,
     nodes: Object.freeze(nodes),
     tools: Object.freeze(tools),
     sandboxFlags,

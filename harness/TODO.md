@@ -244,17 +244,17 @@ run. See `PHASE-6.5.md`; retain the open integration items until their complete 
 
 Goal: make the stable graph/compiler/runtime usable without letting the UI become execution architecture.
 
-- [ ] 7.1 Add React Flow (`@xyflow/react`) only to the web/editor side and lazy-load it.
-- [ ] 7.2 Implement node palette and graph canvas backed by Harness Graph JSON, not React Flow persistence types.
-- [ ] 7.3 Render plugin node definitions/manifests in the palette.
-- [ ] 7.4 Generate basic node configuration forms from schemas.
-- [ ] 7.5 Add ports/connections with compiler-backed validation.
-- [ ] 7.6 Show diagnostics directly on nodes/edges.
-- [ ] 7.7 Add compile/run controls.
-- [ ] 7.8 Overlay live node state on the graph.
-- [ ] 7.9 Add run timeline.
-- [ ] 7.10 Add node inspector: inputs, config, outputs, attempts, model route, tokens/cost, tools, permissions, retries, logs, checkpoints, errors, artifacts, sanitized raw events.
-- [ ] 7.11 Add approval/resume cards.
+- [x] 7.1 Add React Flow (`@xyflow/react`) only to the web/editor side and lazy-load it.
+- [x] 7.2 Implement node palette and graph canvas backed by Harness Graph JSON, not React Flow persistence types.
+- [x] 7.3 Render plugin node definitions/manifests in the palette.
+- [x] 7.4 Generate basic node configuration forms from schemas.
+- [x] 7.5 Add ports/connections with compiler-backed validation.
+- [x] 7.6 Show diagnostics directly on nodes/edges.
+- [x] 7.7 Add compile/run controls.
+- [x] 7.8 Overlay live node state on the graph.
+- [x] 7.9 Add run timeline.
+- [x] 7.10 Add node inspector: inputs, config, outputs, attempts, model route, tokens/cost, tools, permissions, retries, logs, checkpoints, errors, artifacts, sanitized raw events. Shows everything the runtime records per node today; model route, tool calls, logs, checkpoints and artifacts appear once they are recorded per node (see `PHASE-7.md`).
+- [x] 7.11 Add approval/resume cards.
 
 **Checkpoint / Harness v0.1 boundary:** draw/load graph → compile → run → pause/resume → restart → inspect durable execution end to end.
 

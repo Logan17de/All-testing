@@ -13,8 +13,8 @@ npm ci
 npm start
 ```
 
-That starts the runtime daemon and the web UI together. The UI is at `http://localhost:3000`; the
-daemon listens on `http://127.0.0.1:3211`. To run them separately:
+That starts the runtime daemon and the web UI together. The UI is at `http://127.0.0.1:3000`; the
+daemon listens on `http://127.0.0.1:3211`. Both bind to loopback only. To run them separately:
 
 ```sh
 npm run start --workspace @zet-harness/runtime
@@ -22,6 +22,10 @@ npm run dev --workspace @zet-harness/web
 ```
 
 Set `HARNESS_RUNTIME_URL` if the daemon listens somewhere other than the default.
+
+The daemon reads plugins from `apps/runtime/plugins/`. Set `ZET_RUNTIME_PLUGINS_DIR` to use another
+folder; the Plugins page shows which directory was read. A missing folder simply means no plugins
+are enabled.
 
 ## Before you enable a plugin
 
@@ -93,6 +97,26 @@ Two rules are worth stating plainly, because they are enforced rather than advis
 
 The daemon loads enabled plugins at startup. A plugin that fails to load is reported on the
 Plugins page and never prevents the harness from starting.
+
+## Building and running a graph
+
+Open `http://127.0.0.1:3000/editor`. The palette lists every node your enabled plugins registered,
+plus the built-in **Human approval** node, which any graph can use to pause for a person.
+
+- Drag a node onto the canvas, or click it to add it. Connect an output handle to an input handle.
+  An input nothing feeds can take a typed value in the inspector.
+- The compiler checks the graph as you edit. Problems appear on the node or connection they
+  concern, and **Run graph** stays disabled until there are none.
+- **Run graph** stores a new revision, starts a run and opens the run inspector.
+
+The run inspector (`/runs/<id>`) shows each node's durable state on the graph, the event timeline,
+and for a selected node its configuration, inputs, attempts, outputs, errors and permissions. When
+a run reaches a Human approval node an approval card appears, and approving or rejecting resumes
+the run. The single-use token that authorizes a decision is issued and spent by the web server, so
+the page never holds it.
+
+The editor saves your draft in the browser. **Export JSON** gives you the plain Graph JSON document,
+which is exactly what the runtime stores and runs; there is no separate editor format.
 
 ## Writing a plugin
 

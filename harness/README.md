@@ -93,46 +93,27 @@ The visual/editor representation is source code, not runtime state. The schedule
 
 ## Status
 
-Phases 0-2 are complete. Phase 3 is now current on `zet-harness-v1`:
+The Harness v0.1 boundary is reached: you can draw a graph, have the compiler check it, run it
+through your own plugins, pause for a person, resume, and inspect durable execution. Phase 8 is
+next. [`PLAN.md`](./PLAN.md) holds the detailed progress tree.
 
 ```text
-Phase 1 plugin + node contract  ✅ COMPLETE
-
-2.1 graph workspace             ✅
-2.2 Graph JSON v1               ✅
-2.3 JSON Schema Draft 2020-12   ✅
-2.4 Ajv boundary decision       ✅
-2.5 shape/schema validation     ✅
-2.6 semantic IDs/node resolution ✅
-2.7 ports/cardinality/bindings  ✅
-2.8 port compatibility           ✅
-2.9 reachability/liveness        ✅
-2.10 cycle/SCC rejection         ✅
-2.11 structured control contracts ✅
-2.12 compiler-visible loop bounds ✅
-2.13 capability/policy validation ✅
-2.14 side-effect/retry/recovery   ✅
-2.15 secret-only enforcement       ✅
-2.16 structured diagnostics         ✅
-2.17 normalization/version pins       ✅
-2.18 UI metadata stripping            ✅
-2.19 canonical source semantics       ✅
-2.20 Execution IR v1                  ✅
-2.21 hashes/compiler identity         ✅
-2.22 DAG/router/join lowering         ✅
-2.23 canonical hash tests             ✅
-2.24 golden diagnostic tests          ✅
-2.25 compiler stress tests            ✅
-
-Phase 2 graph + compiler + IR          ✅ COMPLETE
-3.1 op status state machine            ✅
-3.2 readiness queue + dependency counters ✅
-3.3 bounded global/per-run concurrency   ✅
-3.4 concurrent DAG branches              ✅
-3.5 router branch activation             ✅
-3.6 control-edge runtime states           ✅
-3.7 activation-aware all-active joins     ▶ CURRENT
+Phase 0  Foundation                         ✅
+Phase 1  Plugin API + universal node        ✅
+Phase 2  Graph JSON + compiler + IR         ✅
+Phase 3  In-memory DAG scheduler            ✅
+Phase 4  Runtime daemon + SQLite            ✅
+Phase 5  Effects + permissions + humans     ✅
+Phase 6  Model + tool adapters              ✅ 20/21 (6.12 needs a real local model endpoint)
+Phase 7  Visual graph + inspector           ✅ ← Harness v0.1 boundary
+Phase 8  Loops + projects + agent mode      ▶ next
+Phase 9  Replay + memory + triggers         ⏳
+Phase 10 MCP + custom-node SDK + trust      ✅ 9/11 (10.10 WASI, 10.11 npm/Git install)
+Phase 11 Packaging + optional scale-out     🚧 1/9
 ```
+
+To try it, follow [Running the harness](./PLUGINS.md#running-the-harness) and
+[Building and running a graph](./PLUGINS.md#building-and-running-a-graph).
 
 The Graph JSON v1 freeze now includes:
 
