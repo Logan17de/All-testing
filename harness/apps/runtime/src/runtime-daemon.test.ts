@@ -44,6 +44,7 @@ describe("RuntimeDaemon", () => {
       { version: 7, name: "durable_file_change_records" },
       { version: 8, name: "durable_projects" },
       { version: 9, name: "durable_conversations_and_messages" },
+      { version: 10, name: "durable_goals_and_todos" },
     ]);
   });
 
@@ -95,10 +96,10 @@ describe("RuntimeDaemon", () => {
           query: "ok",
           migrations: {
             status: "ok",
-            appliedCount: 9,
-            expectedCount: 9,
-            appliedVersion: 9,
-            expectedVersion: 9,
+            appliedCount: 10,
+            expectedCount: 10,
+            appliedVersion: 10,
+            expectedVersion: 10,
           },
         },
       },

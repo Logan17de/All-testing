@@ -294,8 +294,43 @@ explicit parents, branch paths, part and role validation, usage, append-only tri
 foreign key) and `runtime-conversation-http.test.ts`, which drives a daemon through a conversation
 with a retry branch and every refusal.
 
+## Slice 11 — goals and todos (8.7)
+
+A project now holds goals, and a goal holds ordered todos that can depend on each other.
+
+- **Goals.** Migration 10 adds `goals`: a sortable id, the project, an optional conversation of that
+  same project it came from, a title, a description, a priority from 0 (most urgent) to 1000
+  (default 100), and a status of `open`, `blocked`, `completed` or `cancelled`. A blocked goal
+  carries a reason, a completed or cancelled goal carries a close time, and SQLite checks both.
+- **Todos.** `todos` belong to one goal and carry a title, description, priority, a position within
+  the goal (new todos go last), and a status of `pending`, `in_progress`, `blocked`, `done` or
+  `cancelled`, with a blocked reason, the time work first started and the time it finished. Todos
+  list by priority, then position, then age.
+- **Valid transitions.** `GOAL_STATUS_TRANSITIONS` and `TODO_STATUS_TRANSITIONS` list every allowed
+  change, and anything else fails with `GOAL_TRANSITION_INVALID` or `TODO_TRANSITION_INVALID`.
+  Blocked work is unblocked before it can complete, and finished work is reopened before it can
+  change. A goal completes only when none of its todos are pending, in progress or blocked
+  (`GOAL_HAS_OPEN_TODOS`), and a closed goal refuses changes to itself and its todos
+  (`GOAL_CLOSED`).
+- **Dependencies.** `todo_dependencies` links todos of the same goal (composite foreign keys enforce
+  it). Dependency cycles are refused (`TODO_DEPENDENCY_CYCLE`). A todo starts or is done only once
+  every dependency is done (`TODO_DEPENDENCIES_UNFINISHED`), and a done todo reopens only while
+  nothing depending on it has started (`TODO_HAS_STARTED_DEPENDENTS`). This is what next-runnable
+  selection (8.9) builds on.
+- **Never deleted.** Goals and todos are closed or cancelled, never deleted, and keep their ids,
+  owners and creation times. Every change moves the goal's update time forward.
+- **HTTP.** `GET`/`POST /api/projects/:id/goals`, `GET /api/goals/:id` (the goal and its todos in
+  order), `POST /api/goals/:id`, `POST /api/goals/:id/status`, `POST /api/goals/:id/todos`,
+  `GET /api/todos/:id`, `POST /api/todos/:id` and `POST /api/todos/:id/status`. Every POST passes the
+  shared CSRF check and is one serialized commit.
+
+Covered by `durable-goal-records.test.ts` (creation rules, both transition tables, completion with
+open todos, closed goals, ordering, dependency scope, cycles, dependency-gated starts and reopens,
+and the tables' own checks and triggers) and `runtime-goal-http.test.ts`, which plans and completes
+a goal with dependent todos over HTTP and checks every refusal.
+
 ## Next
 
-Goals and todos with valid status transitions (8.7), consistent sortable ids and timestamps across
-the new records (8.8) and deterministic next-runnable-todo selection (8.9). After that, the context
-builder and agent loop (8.10–8.13) bring the model and tool nodes that complete 8.2.
+Consistent sortable ids and timestamps across the remaining runtime records (8.8), then
+deterministic next-runnable-todo selection (8.9). After that, the context builder and agent loop
+(8.10–8.13) bring the model and tool nodes that complete 8.2.
