@@ -29,6 +29,7 @@ export default async function HomePage() {
 
       <nav className="navLinks" aria-label="Sections">
         <Link href="/editor">Graph editor</Link>
+        <Link href="/projects">Projects</Link>
         <Link href="/runs">Runs</Link>
         <Link href="/plugins">Plugins</Link>
       </nav>

@@ -510,8 +510,38 @@ projects, and the new triggers), `runtime-goal-progress-http.test.ts`, which blo
 completes a goal through todo endpoints, and an agent loop test where every goal is blocked and the
 model step reports it.
 
+## Slice 18 — projects, conversations, goals and todos in the web app (8.14)
+
+Everything slices 9–17 stored is now usable from the browser.
+
+- **Projects.** `/projects` lists every project with its status and last change, and a form creates
+  one. The overview links to it.
+- **Project workspace.** `/projects/:id` shows the project's conversations, with a form to start one,
+  and its goals, each with its todos in the order they should be done. The todo the runtime would
+  take next is marked. Todos have one-click status changes (start, done, pause, cancel, unblock,
+  reopen), and blocking asks for a reason inline. Goals can be cancelled, unblocked when a person
+  blocked them, and reopened. A goal its todos blocked shows that, and it reopens on its own when a
+  todo moves. Every change goes through the runtime, so the transition tables, dependency checks
+  and automatic completion from 8.7 and 8.13 apply exactly as they do to the agent. An archived
+  project is read-only.
+- **Conversation.** `/conversations/:id` shows the branch that ends at the newest message: text,
+  collapsible reasoning, tool calls and tool results, with the model that wrote each reply. It says
+  how many messages sit on other branches, and a composer appends the next user message.
+- **One guarded proxy.** The browser reaches the runtime only through
+  `/api/editor/workspace/[...path]`, which applies the same loopback, same-origin and JSON checks as
+  the editor routes and attaches the runtime's CSRF token on the server. It forwards only an
+  allowlist of project, conversation, goal and todo paths with sortable ids, and only the `status`,
+  `goalId` and `limit` query parameters, so it cannot be used to reach runs, approvals or anything
+  else in the daemon.
+
+Covered by `workspace-routes.test.ts` (allowed paths, filtered query parameters, and refusals for
+other endpoints, bad ids, traversal and embedded separators), `workspace-types.test.ts` (latest
+branch and error reasons), and the web build, which type-checks every page and route.
+
+Not yet in the UI: editing or retrying a message as a new branch, starting an agent run from a
+conversation, and reordering todos or editing dependencies.
+
 ## Next
 
-The chat, project, goal and todo UI (8.14), the multi-step coding integration test on the scripted
-provider (8.15), a golden trace for a complete deterministic goal run (8.16) and the per-project run
-lock (8.17).
+The multi-step coding integration test on the scripted provider (8.15), a golden trace for a
+complete deterministic goal run (8.16) and the per-project run lock (8.17).

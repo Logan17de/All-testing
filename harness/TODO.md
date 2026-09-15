@@ -277,7 +277,7 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 - [x] 8.11 Add model-visible goal/todo actions.
 - [x] 8.12 Express the bounded model→tool→model agent loop through the same structured loop/scheduler semantics.
 - [x] 8.13 Add blocked state and goal-completion logic.
-- [ ] 8.14 Add chat/project/goals/todos UI.
+- [x] 8.14 Add chat/project/goals/todos UI.
 - [ ] 8.15 Add multi-step coding integration test using the scripted provider.
 - [ ] 8.16 Add golden trace assertion for a complete deterministic goal run.
 - [ ] 8.17 Add per-project run lock before two autonomous runs can mutate one project concurrently.

@@ -155,3 +155,16 @@ export interface RunSummary {
 export function fetchRecentRuns(): Promise<RuntimeFetch<{ readonly runs: readonly RunSummary[] }>> {
   return readRuntime<{ readonly runs: readonly RunSummary[] }>("/api/runs");
 }
+export interface ProjectSummary {
+  readonly projectId: string;
+  readonly name: string;
+  readonly description: string;
+  readonly status: string;
+  readonly updatedAtMs: number;
+}
+
+export function fetchProjects(): Promise<
+  RuntimeFetch<{ readonly projects: readonly ProjectSummary[] }>
+> {
+  return readRuntime<{ readonly projects: readonly ProjectSummary[] }>("/api/projects?status=all");
+}
