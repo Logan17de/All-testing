@@ -571,7 +571,25 @@ scripted; everything else is the production path.
 
 It runs in `npm test` with every other integration script.
 
+## Slice 20 — a golden trace for a complete goal run (8.16)
+
+`scripts/agent-goal-golden-trace.test.ts` pins down what one complete, deterministic goal run looks
+like, so a change to the scheduler, durability, the agent loop or the goal logic that alters its
+observable behavior fails loudly.
+
+- **The run.** A project, conversation, goal and one todo. The scripted model starts the todo,
+  finishes it and replies. The agent graph runs through the durable dispatcher, and the goal
+  completes through the 8.13 reconcile.
+- **The trace.** Everything that must not drift, and nothing that legitimately varies. It holds
+  every durable event by type, node, loop iteration and attempt, in journal order; every recorded
+  agent step by node, iteration and kind; every message by role and part kind (tool calls by tool
+  name, tool results as ok or refused); and the final todo and goal states. Ids, timestamps, hashes
+  and payload values are left out.
+- **Two guarantees.** The run is executed twice in fresh databases and the two traces must be equal,
+  which proves determinism on its own. The trace must also equal the committed
+  `scripts/golden/agent-goal-run.trace.json`. A missing golden file fails the test. A new golden is
+  recorded only deliberately, with `ZET_UPDATE_GOLDEN=1`, and reviewed like any other change.
+
 ## Next
 
-A golden trace assertion for a complete deterministic goal run (8.16) and the per-project run lock
-(8.17).
+The per-project run lock (8.17).
