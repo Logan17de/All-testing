@@ -20,6 +20,8 @@ The original notebook remains the production notebook. Setup, model filenames/re
 
 Run the notebook's Diagnostics cell after Section 2, including while downloads are paused. It prints the curl HTTP result, `ss` listener for 8188, connector PIDs and the last 50 lines of both logs. It does not need models or a token. Log output is redacted; process arguments are never printed.
 
+Installation output is streamed into the notebook and appended to `/content/h3_comfy_logs/setup.log`, also included in diagnostics. Failures name the setup stage and shell line; required custom-node installation failures stop the cell. The Extender width patch anchors to the unique render-function header and preserves upstream prompt-state capture. An unknown or ambiguous header still stops installation rather than applying an unverified patch.
+
 The launcher passes the token through the documented [`TUNNEL_TOKEN` environment variable](https://developers.cloudflare.com/tunnel/reference/run-parameters/#token), equivalent to `--token`, so it is absent from process arguments. No permanent OS service is installed.
 
 After generation, save/download completed outputs before disconnecting and deleting the Colab runtime. The user controls those actions. Offline regression checks: `python -m pytest video/minimax_h3_comfy/tests/test_preflight.py -q`; these use mocks and temporary text fixtures, with no HTTP test server, GPU, tunnel connection or model download.

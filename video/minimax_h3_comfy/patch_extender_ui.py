@@ -23,11 +23,13 @@ def main() -> None:
         print("H3 Extender full-width UI patch already applied.")
         return
 
-    needle = """function render(node, runtime) {\n    const { state, cards, counter, status } = runtime;\n    cards.replaceChildren();\n"""
-    replacement = f"""function render(node, runtime) {{\n    const {{ state, cards, counter, status }} = runtime;\n\n    // {MARKER}\n    // ComfyUI Nodes 2.0 can recompute a DOM-widget wrapper to its intrinsic\n    // content width after the clip list changes. Keep the Extender timeline\n    // stretched across the actual node while preserving fixed-width cards.\n    const timelineRoot = runtime.root;\n    const timelineHost = timelineRoot?.parentElement;\n    if (timelineHost) {{\n        timelineHost.style.width = \"100%\";\n        timelineHost.style.maxWidth = \"100%\";\n        timelineHost.style.minWidth = \"0\";\n        timelineHost.style.justifySelf = \"stretch\";\n        timelineHost.style.alignSelf = \"stretch\";\n        timelineHost.style.boxSizing = \"border-box\";\n    }}\n    if (timelineRoot) {{\n        timelineRoot.style.width = \"100%\";\n        timelineRoot.style.maxWidth = \"100%\";\n        timelineRoot.style.minWidth = \"0\";\n        timelineRoot.style.boxSizing = \"border-box\";\n    }}\n    cards.style.width = \"100%\";\n    cards.style.maxWidth = \"100%\";\n    cards.style.minWidth = \"0\";\n\n    cards.replaceChildren();\n"""
+    needle = """function render(node, runtime) {\n    const { state, cards, counter, status } = runtime;\n"""
+    replacement = f"""function render(node, runtime) {{\n    const {{ state, cards, counter, status }} = runtime;\n\n    // {MARKER}\n    // ComfyUI Nodes 2.0 can recompute a DOM-widget wrapper to its intrinsic\n    // content width after the clip list changes. Keep the Extender timeline\n    // stretched across the actual node while preserving fixed-width cards.\n    const timelineRoot = runtime.root;\n    const timelineHost = timelineRoot?.parentElement;\n    if (timelineHost) {{\n        timelineHost.style.width = \"100%\";\n        timelineHost.style.maxWidth = \"100%\";\n        timelineHost.style.minWidth = \"0\";\n        timelineHost.style.justifySelf = \"stretch\";\n        timelineHost.style.alignSelf = \"stretch\";\n        timelineHost.style.boxSizing = \"border-box\";\n    }}\n    if (timelineRoot) {{\n        timelineRoot.style.width = \"100%\";\n        timelineRoot.style.maxWidth = \"100%\";\n        timelineRoot.style.minWidth = \"0\";\n        timelineRoot.style.boxSizing = \"border-box\";\n    }}\n    cards.style.width = \"100%\";\n    cards.style.maxWidth = \"100%\";\n    cards.style.minWidth = \"0\";\n\n"""
 
-    if needle not in text:
-        raise SystemExit("Upstream extender.js changed: render() anchor not found; refusing a blind patch.")
+    # Anchor only the unique function header. Preserve upstream prompt UI-state
+    # capture and all other render statements verbatim after the inserted styles.
+    if text.count(needle) != 1:
+        raise SystemExit("Upstream extender.js changed: render() anchor missing or ambiguous; refusing a blind patch.")
 
     backup = path.with_suffix(path.suffix + ".pre-colab-width-patch")
     if not backup.exists():

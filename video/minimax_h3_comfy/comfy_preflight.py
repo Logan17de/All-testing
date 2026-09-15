@@ -30,6 +30,33 @@ def redact(text):
     )
 
 
+def run_setup_command(args, *, label, cwd=None):
+    """Relay child output through notebook stdout and preserve a redacted setup log."""
+    LOG.mkdir(parents=True, exist_ok=True)
+    path = LOG / "setup.log"
+    with path.open("a", encoding="utf-8") as log:
+        def emit(text):
+            safe = redact(text)
+            print(safe, end="", flush=True)
+            log.write(safe)
+            log.flush()
+
+        emit(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} | {label} ===\n")
+        try:
+            with subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True,
+                                  encoding="utf-8", errors="replace", bufsize=1) as child:
+                for line in child.stdout:
+                    emit(line)
+                status = child.wait()
+        except OSError as error:
+            emit(f"Could not start setup command: {error}\n")
+            raise SystemExit(f"Setup stopped: {label}. See {path}.") from None
+        if status:
+            emit(f"SETUP FAILED: {label} (exit {status}). Log: {path}\n")
+            raise SystemExit("Setup stopped. Share the error lines above; model downloads remain gated.")
+
+
 def extract_token(raw):
     tokens = re.findall(TOKEN_PATTERN, raw or "")
     if len(tokens) != 1:
@@ -245,7 +272,7 @@ def diagnostics():
         except (OSError, subprocess.TimeoutExpired):
             print("Diagnostic command unavailable or timed out.")
     print("cloudflared running PIDs (this runtime):", [p["pid"] for p in processes("cloudflared")])
-    for name in ("cloudflared.log", "comfyui.log"):
+    for name in ("setup.log", "cloudflared.log", "comfyui.log"):
         print(f"\n=== {name}: last 50 lines ===")
         tail_log(name)
 

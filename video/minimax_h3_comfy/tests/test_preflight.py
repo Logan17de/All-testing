@@ -204,3 +204,64 @@ def test_local_probe_rejects_non_200_and_non_comfy_json(monkeypatch):
         context = Mock(__enter__=lambda _: response, __exit__=lambda *a: None)
         monkeypatch.setattr(preflight.urllib.request, "build_opener", lambda *a: Mock(open=lambda *a, **k: context))
         assert preflight.healthy() is expected
+
+
+def test_setup_streams_stdout_stderr_and_preserves_previous_log(runtime, capsys):
+    path = runtime / "setup.log"
+    path.write_text("previous setup attempt\n", encoding="utf-8")
+    preflight.run_setup_command(
+        [sys.executable, "-u", "-c", "import sys; print('visible stdout'); print('visible stderr', file=sys.stderr)"],
+        label="offline output check",
+    )
+    output = capsys.readouterr().out
+    saved = path.read_text(encoding="utf-8")
+    assert saved.startswith("previous setup attempt\n")
+    for line in ("visible stdout", "visible stderr"):
+        assert line in output and line in saved
+
+
+def test_setup_failure_reports_cause_redacts_token_and_stops(runtime, capsys):
+    with pytest.raises(SystemExit, match="Setup stopped"):
+        preflight.run_setup_command(
+            [sys.executable, "-u", "-c",
+             "import sys; print('dependency failure eyJtest-secret==', file=sys.stderr); sys.exit(7)"],
+            label="offline failure check",
+        )
+    output = capsys.readouterr().out
+    saved = (runtime / "setup.log").read_text(encoding="utf-8")
+    for text in (output, saved):
+        assert "dependency failure" in text
+        assert "exit 7" in text
+        assert "eyJtest-secret==" not in text
+
+
+@pytest.mark.parametrize("render_body", [
+    "    cards.replaceChildren();\n",
+    "    // Preserve prompt position before rebuilding cards.\n    capturePromptUiState(runtime);\n    cards.replaceChildren();\n",
+])
+def test_width_patch_preserves_upstream_render_body(tmp_path, render_body):
+    source = "function render(node, runtime) {\n    const { state, cards, counter, status } = runtime;\n" + render_body + "}\n"
+    target = tmp_path / "extender.js"
+    target.write_text(source, encoding="utf-8")
+    command = [sys.executable, str(DIRECTORY / "patch_extender_ui.py"), str(target)]
+    preflight.subprocess.run(command, check=True, capture_output=True)
+    patched = target.read_text(encoding="utf-8")
+    assert render_body + "}\n" in patched
+    assert patched.count("cards.replaceChildren();") == 1
+    assert "H3_COLAB_FULL_WIDTH_PATCH_V1" in patched
+    assert target.with_suffix(".js.pre-colab-width-patch").read_text(encoding="utf-8") == source
+    preflight.subprocess.run(command, check=True, capture_output=True)
+    assert target.read_text(encoding="utf-8") == patched
+
+
+@pytest.mark.parametrize("source", ["function unrelated() {}\n", (
+    "function render(node, runtime) {\n    const { state, cards, counter, status } = runtime;\n}\n"
+) * 2])
+def test_width_patch_refuses_unknown_or_ambiguous_source(tmp_path, source):
+    target = tmp_path / "extender.js"
+    target.write_text(source, encoding="utf-8")
+    result = preflight.subprocess.run(
+        [sys.executable, str(DIRECTORY / "patch_extender_ui.py"), str(target)], capture_output=True,
+    )
+    assert result.returncode == 1
+    assert target.read_text(encoding="utf-8") == source
