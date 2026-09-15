@@ -103,10 +103,63 @@ def test_tailscale_pending_login_returns_without_logging_url(runtime, monkeypatc
     command = Mock(return_value=Mock(returncode=1, stderr='timed out'))
     monkeypatch.setattr(preflight, 'ts_command', command)
     preflight.prepare_tailscale_login()
-    assert start.call_count == 1 and command.call_count == 1
+    assert start.call_count == 1 and command.call_count == 0
     assert '--state=mem:' in start.call_args.args[0]
     assert '--tun=userspace-networking' in start.call_args.args[0]
     assert 'private-login' not in capsys.readouterr().out
+
+
+def login_waiter(monkeypatch, state, exit_code=None, stderr=b''):
+    clock = [0]
+    monkeypatch.setattr(preflight.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(preflight.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr(preflight, 'tailscale_status', lambda: state(clock[0]))
+    child = Mock(poll=lambda: exit_code)
+    def start(args, **kwargs):
+        kwargs['stderr'].write(stderr)
+        kwargs['stderr'].flush()
+        return child
+    monkeypatch.setattr(preflight.subprocess, 'Popen', start)
+    return child, clock
+
+
+def test_tailscale_login_waits_for_delayed_registration(runtime, monkeypatch, capsys):
+    def state(seconds):
+        return {**ts_state('NeedsLogin'), 'AuthURL':
+                'https://login.tailscale.com/a/private-login' if seconds >= 12 else ''}
+    child, clock = login_waiter(monkeypatch, state)
+    stop_daemon = Mock()
+    monkeypatch.setattr(preflight, 'stop_processes', stop_daemon)
+    result = preflight.request_tailscale_login()
+    assert result['AuthURL'].endswith('private-login') and clock[0] == 12
+    child.terminate.assert_called_once()
+    stop_daemon.assert_not_called()
+    output = capsys.readouterr().out
+    assert 'Still waiting' in output and 'private-login' not in output
+
+
+def test_tailscale_login_wait_has_a_bounded_timeout(runtime, monkeypatch):
+    child, clock = login_waiter(monkeypatch, lambda _: ts_state('NeedsLogin'))
+    with pytest.raises(RuntimeError, match='registration.*45 seconds'):
+        preflight.request_tailscale_login()
+    assert clock[0] == 45
+    child.terminate.assert_called_once()
+
+
+def test_tailscale_login_cli_failure_preserves_redacted_cause(runtime, monkeypatch):
+    child, _ = login_waiter(monkeypatch, lambda _: ts_state('NeedsLogin'), exit_code=1,
+                           stderr=b'control server: connection refused https://login.tailscale.com/a/secret')
+    with pytest.raises(RuntimeError, match='connection refused') as error:
+        preflight.request_tailscale_login()
+    assert '/a/secret' not in str(error.value)
+    child.terminate.assert_not_called()
+
+
+def test_tailscale_login_stops_waiting_after_authentication(runtime, monkeypatch):
+    child, clock = login_waiter(monkeypatch, lambda _: ts_state())
+    assert preflight.request_tailscale_login()['BackendState'] == 'Running'
+    assert clock[0] == 0
+    child.terminate.assert_called_once()
 
 
 def test_tailscale_logs_hide_auth_material():

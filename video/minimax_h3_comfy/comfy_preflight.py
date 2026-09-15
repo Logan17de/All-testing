@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.request
 
@@ -99,6 +100,51 @@ def install_tailscale():
             staging.replace(TS_ROOT / name)
 
 
+def request_tailscale_login(wait_seconds=45):
+    """Wait for a usable login state, keeping CLI output out of notebook logs."""
+    args = [str(TS_ROOT / 'tailscale'), '--socket=' + TS_SOCKET, 'up',
+            '--hostname=colab-comfy', '--accept-dns=false', '--accept-routes=false',
+            f'--timeout={wait_seconds}s']
+    print('Requesting Tailscale sign-in link; waiting for registration (up to 45 seconds).', flush=True)
+    # A temporary anonymous file avoids pipe deadlock and does not retain auth URLs.
+    with tempfile.TemporaryFile() as output:
+        child = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=output, stderr=output)
+        try:
+            deadline = time.monotonic() + wait_seconds
+            next_progress = time.monotonic() + 10
+            while True:
+                status = tailscale_status()
+                if (status['BackendState'] in ('Running', 'NeedsMachineAuth')
+                        or (status['BackendState'] == 'NeedsLogin' and status.get('AuthURL'))):
+                    return status
+                code = child.poll()
+                if code is not None and code != 0:
+                    output.seek(0)
+                    details = redact(output.read().decode(errors='replace')[-4096:]).strip()
+                    raise RuntimeError('Tailscale sign-in command failed: ' + (details or f'exit {code}'))
+                now = time.monotonic()
+                if now >= deadline:
+                    raise RuntimeError(
+                        'Tailscale registration has not returned a sign-in link within 45 seconds. '
+                        'The daemon remains running. Rerun Section 4 to check again; '
+                        'if this repeats, inspect tailscaled.log for control-server connectivity errors. '
+                        'Do not reinstall ComfyUI or download models.'
+                    )
+                if now >= next_progress:
+                    print('Still waiting for the Tailscale control server...', flush=True)
+                    next_progress = now + 10
+                time.sleep(1)
+        finally:
+            # Stop only this short-lived CLI waiter, never the Tailscale daemon.
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=5)
+
+
 def prepare_tailscale_login():
     install_tailscale()
     existing = processes('tailscaled')
@@ -117,15 +163,9 @@ def prepare_tailscale_login():
             if time.monotonic() >= deadline or (child and child.poll() is not None):
                 raise RuntimeError('Tailscale daemon did not start. See tailscaled.log.') from None
             time.sleep(0.5)
-    if status['BackendState'] != 'Running':
-        # Capture the authorization URL privately: notebook displays it, logs never do.
-        result = ts_command('up', '--hostname=colab-comfy', '--accept-dns=false',
-                            '--accept-routes=false', '--timeout=8s', timeout=15)
-        status = tailscale_status()
-        if status['BackendState'] not in ('Running', 'NeedsLogin', 'NeedsMachineAuth'):
-            raise RuntimeError('Tailscale sign-in could not start: ' + redact(result.stderr))
-        if status['BackendState'] == 'NeedsLogin' and not status.get('AuthURL'):
-            raise RuntimeError('No Tailscale sign-in URL was returned; rerun Section 4.')
+    if (status['BackendState'] not in ('Running', 'NeedsMachineAuth')
+            and not (status['BackendState'] == 'NeedsLogin' and status.get('AuthURL'))):
+        status = request_tailscale_login()
     print('Tailscale state: ' + status['BackendState'])
     print('Complete the notebook sign-in link, then run Section 5. No models downloaded.')
 
