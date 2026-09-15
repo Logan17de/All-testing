@@ -611,8 +611,40 @@ Covered by `runtime-project-lock.test.ts`: the lock passing from a completed run
 run to the next, a run re-taking its own lock, and an agent step refused while another active run
 holds the project, with the lock left with its holder.
 
+## Slice 22 — run-wide budgets for agent work (8.2 complete)
+
+The last independent hard bounds are in place. Beside loop iterations, loop and run wall time and
+node executions, an agent run now has limits on model calls, tool calls, tokens and cost.
+
+- **Where they live.** They are config on the agent steps, not new Graph JSON v1 policies. The
+  `policies` object is part of the frozen v1 contract, and extending it would change normalization,
+  canonical semantics, lowering and identity for every graph. The model step takes `maxModelCalls`,
+  `maxTokens` and `maxCost` (`{ amountDecimal, currency }`), and the tools step takes `maxToolCalls`.
+  The editor validates them with each node's config schema.
+- **Counted across the run.** Every limit counts the whole run's recorded work, not one node's.
+  Model calls are the run's recorded model steps. Tokens are the provider-reported input and output
+  tokens on the run's messages. Tool calls are the tool results the run has appended. Cost is the
+  sum of the provider-reported costs, added exactly as decimals, never floats.
+- **Checked before spending.** A model step checks its limits before calling a model, and a tools
+  step checks that every one of its calls fits before running any of them. A step over a limit fails
+  with `AGENT_BUDGET_EXCEEDED`, naming the limit, and the run fails without calling anything more.
+  A reported cost in a different currency from the limit fails closed, because it cannot be compared.
+  Costs a provider does not report are not counted.
+
+Covered by `runtime-agent-budgets.test.ts`: a run stopped after its model-call limit, a tools step
+refused before running calls that would pass the tool-call limit, token and cost limits reached from
+provider-reported usage, a cost in another currency refused, and a run within every limit completing
+normally.
+
+## Phase 8 complete
+
+Structured bounded loops, subgraphs, iteration identity and every hard bound; projects,
+conversations with branching messages, goals and todos with valid transitions, dependencies,
+blocking and completion; sortable ids; next-runnable-todo selection; a budgeted context builder;
+model-visible goal actions applied once; a durable model→tool→model agent loop with run-wide limits
+and a per-project run lock; the workspace UI; and a scripted multi-step coding run with a golden
+trace.
+
 ## Next
 
-Phase 8's remaining item is 8.2's run-wide budgets for agent work: model calls, tool calls, tokens
-and cost, enforced alongside the loop and node-execution bounds that already hold. After that comes
-Phase 9 (replay, memory and triggers).
+Phase 9: replay, memory and triggers.

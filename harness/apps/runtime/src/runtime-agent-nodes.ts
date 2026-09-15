@@ -44,7 +44,11 @@ export const DEFAULT_RESERVE_OUTPUT_TOKENS = 1_024;
 const GOAL_SUMMARY_LIMIT = 50;
 
 export type AgentStepErrorCode =
-  "AGENT_CONFIG_INVALID" | "AGENT_CONVERSATION_NOT_FOUND" | "AGENT_NO_MODEL" | "AGENT_PROJECT_BUSY";
+  | "AGENT_CONFIG_INVALID"
+  | "AGENT_CONVERSATION_NOT_FOUND"
+  | "AGENT_NO_MODEL"
+  | "AGENT_PROJECT_BUSY"
+  | "AGENT_BUDGET_EXCEEDED";
 
 export class AgentStepError extends Error {
   readonly code: AgentStepErrorCode;
@@ -198,6 +202,56 @@ function invocationContext(
   };
 }
 
+/** The run-wide limits an agent step enforces (8.2). */
+export type AgentBudget = "model-calls" | "tool-calls" | "tokens" | "cost";
+
+function budgetExceeded(budget: AgentBudget, message: string): AgentStepError {
+  return new AgentStepError("AGENT_BUDGET_EXCEEDED", `${message} (${budget})`);
+}
+
+function countOf(row: Record<string, unknown> | undefined): number {
+  const value = row?.["count"];
+  return typeof value === "number" ? value : 0;
+}
+
+const DECIMAL_PATTERN = /^(?:0|[1-9][0-9]{0,30})(?:\.[0-9]{1,18})?$/u;
+const DECIMAL_PLACES = 18;
+
+/** A decimal amount as an exact integer of 10^-18 units, so costs never go through floats. */
+function scaledDecimal(amount: string): bigint {
+  const [whole = "0", fraction = ""] = amount.split(".");
+  return (
+    BigInt(whole) * 10n ** BigInt(DECIMAL_PLACES) +
+    BigInt(fraction.padEnd(DECIMAL_PLACES, "0").slice(0, DECIMAL_PLACES))
+  );
+}
+
+function costConfig(
+  config: JsonObject,
+  field: string,
+): { readonly amountDecimal: string; readonly currency: string } | undefined {
+  const value = config[field];
+  if (value === undefined) return undefined;
+  const record =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as JsonObject)
+      : undefined;
+  const amountDecimal = record?.["amountDecimal"];
+  const currency = record?.["currency"];
+  if (
+    typeof amountDecimal !== "string" ||
+    !DECIMAL_PATTERN.test(amountDecimal) ||
+    typeof currency !== "string" ||
+    !/^[A-Z]{3}$/u.test(currency)
+  ) {
+    throw new AgentStepError(
+      "AGENT_CONFIG_INVALID",
+      `${field} must be { amountDecimal, currency } with a decimal string and an ISO 4217 code.`,
+    );
+  }
+  return { amountDecimal, currency };
+}
+
 /**
  * Run the agent steps of a graph, and hand every other node to `fallback`.
  *
@@ -239,6 +293,92 @@ export function createAgentNodeExecutor(
       throw new AgentStepError(
         "AGENT_PROJECT_BUSY",
         `Run '${outcome.holderRunId}' is already working on this project.`,
+      );
+    }
+  };
+
+  /**
+   * 8.2: run-wide limits on model work, counted from what this run has recorded:
+   * model steps, provider-reported tokens, and provider-reported cost.
+   */
+  const enforceModelBudgets = (runId: string, config: JsonObject): void => {
+    const connection = database.connection();
+    const maxModelCalls = integerConfig(config, "maxModelCalls");
+    if (maxModelCalls !== undefined) {
+      const used = countOf(
+        connection
+          .prepare("SELECT COUNT(*) AS count FROM agent_steps WHERE run_id = ? AND kind = 'model'")
+          .get(runId),
+      );
+      if (used >= maxModelCalls) {
+        throw budgetExceeded(
+          "model-calls",
+          `The run used its limit of ${String(maxModelCalls)} model calls.`,
+        );
+      }
+    }
+    const maxTokens = integerConfig(config, "maxTokens");
+    if (maxTokens !== undefined) {
+      const used = countOf(
+        connection
+          .prepare(
+            `SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS count
+             FROM messages WHERE run_id = ?`,
+          )
+          .get(runId),
+      );
+      if (used >= maxTokens) {
+        throw budgetExceeded(
+          "tokens",
+          `The run used ${String(used)} of its ${String(maxTokens)} tokens.`,
+        );
+      }
+    }
+    const maxCost = costConfig(config, "maxCost");
+    if (maxCost !== undefined) {
+      let spent = 0n;
+      for (const row of connection
+        .prepare(
+          `SELECT cost_amount_decimal AS amount, cost_currency AS currency
+           FROM messages WHERE run_id = ? AND cost_amount_decimal IS NOT NULL`,
+        )
+        .all(runId)) {
+        const currency = typeof row["currency"] === "string" ? row["currency"] : "";
+        if (currency !== maxCost.currency) {
+          // Costs in another currency cannot be compared with the limit, so the limit fails closed.
+          throw budgetExceeded(
+            "cost",
+            `A reported cost is in ${currency}, not ${maxCost.currency}, so the cost limit cannot be checked.`,
+          );
+        }
+        spent += scaledDecimal(typeof row["amount"] === "string" ? row["amount"] : "0");
+      }
+      if (spent >= scaledDecimal(maxCost.amountDecimal)) {
+        throw budgetExceeded(
+          "cost",
+          `The run spent its limit of ${maxCost.amountDecimal} ${maxCost.currency}.`,
+        );
+      }
+    }
+  };
+
+  /** 8.2: a tools step runs only when all of its calls fit in the run's remaining tool calls. */
+  const enforceToolBudget = (runId: string, config: JsonObject, requested: number): void => {
+    const maxToolCalls = integerConfig(config, "maxToolCalls");
+    if (maxToolCalls === undefined || requested === 0) return;
+    const used = countOf(
+      database
+        .connection()
+        .prepare(
+          `SELECT COALESCE(SUM(json_array_length(content_json)), 0) AS count
+           FROM messages WHERE run_id = ? AND role = 'tool'`,
+        )
+        .get(runId),
+    );
+    if (used + requested > maxToolCalls) {
+      throw budgetExceeded(
+        "tool-calls",
+        `${String(requested)} more tool calls would pass the run's limit of ${String(maxToolCalls)}; ${String(used)} are used.`,
       );
     }
   };
@@ -311,6 +451,7 @@ export function createAgentNodeExecutor(
       );
     }
     await holdProject(execution, conversation.projectId);
+    enforceModelBudgets(execution.runId, config);
     const tools = offeredTools(conversation.projectId);
     const decision = routeModel({
       manifests: options.models
@@ -434,6 +575,7 @@ export function createAgentNodeExecutor(
       head?.role === "assistant"
         ? head.parts.filter((part): part is DurableToolCallPart => part.kind === "tool-call")
         : [];
+    enforceToolBudget(execution.runId, config, calls.length);
     const tools = offeredTools(conversation.projectId).filter(
       (tool) =>
         allowedTools === undefined || allowedTools.includes(modelToolName(tool.manifest.id)),

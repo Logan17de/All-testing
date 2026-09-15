@@ -69,6 +69,20 @@ export function createAgentPlugin(): HarnessPlugin {
               maxContextBytes: { type: "integer", minimum: 1 },
               modelId: { type: "string", minLength: 1 },
               modelVersion: { type: "string", minLength: 1 },
+              maxModelCalls: { type: "integer", minimum: 1 },
+              maxTokens: { type: "integer", minimum: 1 },
+              maxCost: {
+                type: "object",
+                properties: {
+                  amountDecimal: {
+                    type: "string",
+                    pattern: "^(?:0|[1-9][0-9]{0,30})(?:\\.[0-9]{1,18})?$",
+                  },
+                  currency: { type: "string", pattern: "^[A-Z]{3}$" },
+                },
+                required: ["amountDecimal", "currency"],
+                additionalProperties: false,
+              },
             },
             required: ["conversationId", "systemPrompt"],
             additionalProperties: false,
@@ -91,6 +105,7 @@ export function createAgentPlugin(): HarnessPlugin {
             type: "object",
             properties: {
               conversationId: SORTABLE_ID_SCHEMA,
+              maxToolCalls: { type: "integer", minimum: 1 },
               allowedTools: {
                 type: "array",
                 items: { type: "string", minLength: 1 },
