@@ -288,7 +288,7 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 
 ## Phase 9 — Replay/fork, memory, triggers, external clients
 
-- [ ] 9.1 Add read-only recorded trace replay with no external/model/tool/human invocation.
+- [x] 9.1 Add read-only recorded trace replay with no external/model/tool/human invocation.
 - [ ] 9.2 Add execution fork from a checkpoint; keep historical run immutable.
 - [ ] 9.3 Record parent run + fork checkpoint metadata.
 - [ ] 9.4 Add graph/run identity checks so edited graphs do not silently resume old runs.

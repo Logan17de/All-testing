@@ -15,6 +15,7 @@ import {
   readRunView,
   type GraphSources,
 } from "./runtime-graphs.js";
+import { replayRecordedRun } from "./runtime-replay.js";
 
 /** Services the editor endpoints need; supplied by the daemon. */
 export interface RuntimeGraphHttpServices {
@@ -146,6 +147,22 @@ export async function handleGraphHttp(
         ...created,
         // A run with no executor stays pending; say so rather than implying it started.
         dispatched: services.dispatch !== undefined,
+      });
+      return;
+    }
+
+    // 9.1: a read-only replay of the run's recorded journal; it runs nothing.
+    const replayMatch = /^\/api\/runs\/([^/]+)\/replay$/u.exec(url.pathname);
+    if (replayMatch !== null) {
+      if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+      let replayRunId: string;
+      try {
+        replayRunId = decodeURIComponent(replayMatch[1] ?? "");
+      } catch {
+        throw new RuntimeGraphError("RUN_NOT_FOUND", "No run exists with this id.", 404);
+      }
+      writeRuntimeJson(response, 200, {
+        replay: replayRecordedRun(services.database.connection(), replayRunId, services.redact),
       });
       return;
     }
