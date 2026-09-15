@@ -7,18 +7,15 @@ LOG_DIR="${H3_LOG_DIR:-/content/h3_comfy_logs}"
 VRAM_MODE="${H3_VRAM_MODE:-auto}"
 RESERVE_VRAM_GB="${H3_RESERVE_VRAM_GB:-4}"
 PREVIEW_METHOD="${H3_PREVIEW_METHOD:-none}"
+PUBLIC_URL="https://comfy.zetbros.com"
 mkdir -p "$LOG_DIR"
 
-# Long video sampling can fragment the CUDA allocator across clips. Expandable
-# segments let PyTorch reuse/free large blocks more gracefully on Colab GPUs.
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 export CUDA_MODULE_LOADING="${CUDA_MODULE_LOADING:-LAZY}"
 
 VRAM_ARGS=()
 case "$VRAM_MODE" in
   highvram) VRAM_ARGS+=(--highvram) ;;
-  # Legacy notebooks set normalvram. Modern ComfyUI has no such CLI flag;
-  # leave its default memory manager enabled rather than forcing highvram.
   auto|default|normalvram) ;;
   lowvram) VRAM_ARGS+=(--lowvram) ;;
   *) echo "ERROR: H3_VRAM_MODE must be auto, default, normalvram, highvram, or lowvram"; exit 2 ;;
@@ -27,12 +24,10 @@ VRAM_ARGS+=(--reserve-vram "$RESERVE_VRAM_GB" --preview-method "$PREVIEW_METHOD"
 
 COMFY_ARGS=(--listen 0.0.0.0 --port "$PORT" --disable-auto-launch "${VRAM_ARGS[@]}")
 
-# Launch or reuse ComfyUI. The notebook's legacy normalvram setting is accepted.
+# Launch or reuse ComfyUI exactly as before.
 if curl -fsS --connect-timeout 2 --max-time 3 "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
   echo "✅ Existing ComfyUI is healthy on port $PORT; reusing it."
 else
-  # Validate with the installed ComfyUI parser before loading CUDA or models.
-  # Do not use --help for validation: argparse can exit before rejecting flags.
   if ! (
     cd "$COMFY_ROOT"
     python - "${COMFY_ARGS[@]}" <<'PYCLI'
@@ -46,12 +41,14 @@ PYCLI
     cat "$LOG_DIR/cli-check.log"
     exit 2
   fi
+
   cat "$LOG_DIR/cli-check.log"
   echo "Starting ComfyUI on port $PORT..."
   echo "VRAM policy: $VRAM_MODE | reserved: ${RESERVE_VRAM_GB} GB | preview: $PREVIEW_METHOD"
   case "$VRAM_MODE" in
     auto|default|normalvram) echo "Using ComfyUI's default memory manager (no explicit VRAM mode flag)." ;;
   esac
+
   pkill -f "python.*main.py.*--port $PORT" >/dev/null 2>&1 || true
   (
     cd "$COMFY_ROOT"
@@ -82,74 +79,81 @@ PYCLI
   echo "✅ ComfyUI is healthy on the Colab VM."
 fi
 
-# Keep ComfyUI alive when refreshing the public tunnel.
-pkill -f "cloudflared tunnel" >/dev/null 2>&1 || true
-pkill -f "lt --port $PORT" >/dev/null 2>&1 || true
+# Replace the original Pinggy public tunnel with the named Cloudflare Tunnel.
 pkill -f "free.pinggy.io" >/dev/null 2>&1 || true
+pkill -f "lt --port $PORT" >/dev/null 2>&1 || true
+pkill -f "cloudflared.*tunnel.*run" >/dev/null 2>&1 || true
 
-if ! command -v ssh >/dev/null 2>&1; then
-  apt-get update -qq
-  apt-get install -y -qq openssh-client >/dev/null
+if ! command -v cloudflared >/dev/null 2>&1; then
+  echo "Installing cloudflared..."
+  ARCH="$(uname -m)"
+  case "$ARCH" in
+    x86_64|amd64) CF_ARCH="amd64" ;;
+    aarch64|arm64) CF_ARCH="arm64" ;;
+    *) echo "ERROR: Unsupported cloudflared architecture: $ARCH"; exit 4 ;;
+  esac
+  curl -fL --retry 3 --retry-delay 2 \
+    "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" \
+    -o /usr/local/bin/cloudflared
+  chmod 0755 /usr/local/bin/cloudflared
 fi
 
-rm -f "$LOG_DIR/pinggy.log"
-echo "Creating Pinggy tunnel..."
-nohup ssh \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  -o ServerAliveInterval=30 \
-  -o ServerAliveCountMax=3 \
-  -o ExitOnForwardFailure=yes \
-  -p 443 \
-  -R0:127.0.0.1:"$PORT" \
-  free.pinggy.io \
-  >"$LOG_DIR/pinggy.log" 2>&1 &
-echo $! >"$LOG_DIR/pinggy.pid"
+# Read the tunnel credential directly from Colab Secrets. The secret may contain
+# either the raw eyJ... token or Cloudflare's full install command.
+RAW_TOKEN="$(python - <<'PYTOKEN'
+import re
+from google.colab import userdata
+raw = userdata.get('CF_TUNNEL_TOKEN') or ''
+m = re.search(r'(eyJ[A-Za-z0-9._=-]+)', raw)
+print(m.group(1) if m else raw.strip())
+PYTOKEN
+)"
 
-PUBLIC_URL=""
-for _ in $(seq 1 60); do
-  PUBLIC_URL="$(grep -oE 'https://[-A-Za-z0-9.]+(pinggy\.link|pinggy-free\.link)' "$LOG_DIR/pinggy.log" | head -n1 || true)"
-  [[ -n "$PUBLIC_URL" ]] && break
-  sleep 1
-done
-
-if [[ -z "$PUBLIC_URL" ]]; then
-  echo "ERROR: Pinggy did not return a public URL."
-  tail -n 100 "$LOG_DIR/pinggy.log" || true
-  exit 4
-fi
-
-echo "Checking remote ComfyUI HTTP endpoint..."
-HTTP_STATUS="$(curl -A 'h3-colab-health/1.0' -sS -o /tmp/h3_remote_stats.json -w '%{http_code}' \
-  --connect-timeout 15 --max-time 25 "$PUBLIC_URL/system_stats" || true)"
-if [[ "$HTTP_STATUS" != "200" ]]; then
-  echo "ERROR: Tunnel URL exists but /system_stats returned HTTP ${HTTP_STATUS:-failed}."
-  tail -n 100 "$LOG_DIR/pinggy.log" || true
+if [[ -z "$RAW_TOKEN" || "$RAW_TOKEN" != eyJ* ]]; then
+  echo "ERROR: Colab Secret CF_TUNNEL_TOKEN is missing or is not a Cloudflare Tunnel token."
   exit 5
 fi
 
-python -m pip install -q websocket-client >/dev/null 2>&1
-WS_URL="${PUBLIC_URL/https:\/\//wss://}/ws?clientId=h3-colab-tunnel-test"
-if ! python - "$WS_URL" <<'PY'
-import sys
-import websocket
-ws = websocket.create_connection(sys.argv[1], timeout=20)
-ws.close()
-print("WebSocket OK")
-PY
-then
-  echo "ERROR: HTTP works but the ComfyUI WebSocket cannot pass through this tunnel."
-  exit 6
+rm -f "$LOG_DIR/cloudflared.log"
+echo "Starting Cloudflare Tunnel for $PUBLIC_URL ..."
+nohup cloudflared tunnel --no-autoupdate run --token "$RAW_TOKEN" \
+  >"$LOG_DIR/cloudflared.log" 2>&1 </dev/null &
+CF_PID=$!
+echo "$CF_PID" >"$LOG_DIR/cloudflared.pid"
+
+REGISTERED=0
+for _ in $(seq 1 60); do
+  if ! kill -0 "$CF_PID" 2>/dev/null; then
+    echo "ERROR: cloudflared exited before connecting. Last log lines:"
+    tail -n 100 "$LOG_DIR/cloudflared.log" || true
+    exit 6
+  fi
+  if grep -q "Registered tunnel connection" "$LOG_DIR/cloudflared.log"; then
+    REGISTERED=1
+    break
+  fi
+  sleep 1
+done
+
+if [[ "$REGISTERED" != "1" ]]; then
+  echo "ERROR: Cloudflare Tunnel did not register within 60 seconds."
+  tail -n 100 "$LOG_DIR/cloudflared.log" || true
+  exit 7
+fi
+
+# Local origin check: Cloudflare is configured to forward comfy.zetbros.com to
+# http://127.0.0.1:8188, so this verifies the exact origin service is alive.
+if ! curl -fsS --connect-timeout 2 --max-time 5 "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
+  echo "ERROR: Cloudflare connected, but the local ComfyUI origin is not responding."
+  exit 8
 fi
 
 echo
 echo "============================================================"
-echo "✅ COMFYUI HTTP CHECK: PASSED"
-echo "✅ COMFYUI WEBSOCKET CHECK: PASSED"
+echo "✅ COMFYUI LOCAL CHECK: PASSED"
+echo "✅ CLOUDFLARE TUNNEL: CONNECTED"
 echo "🌐 OPEN COMFYUI HERE: $PUBLIC_URL"
 echo "============================================================"
-echo "Recommended workflow: MiniMax_H3_G4_Optimized_FullBatch.json"
-echo "OOM fallback:          MiniMax_H3_G4_Optimized_Safe_ClipByClip.json"
 echo "Keep this Colab runtime running while you use ComfyUI."
-echo "ComfyUI log: $LOG_DIR/comfyui.log"
-echo "Pinggy log:  $LOG_DIR/pinggy.log"
+echo "ComfyUI log:    $LOG_DIR/comfyui.log"
+echo "Cloudflare log: $LOG_DIR/cloudflared.log"
