@@ -24,7 +24,7 @@ try:
 except Exception:
     pass
 
-MODEL_ROOT = f'{DRIVE_ROOT}/models' if PERSIST_MODELS_TO_DRIVE else '/content/ComfyUI/models'
+MODEL_ROOT = '/content/ComfyUI/models'
 
 cmd = [
     sys.executable,

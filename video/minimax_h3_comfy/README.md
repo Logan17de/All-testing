@@ -4,7 +4,7 @@ This is the main MiniMax H3 **ComfyUI in Colab** setup, exposed at **https://com
 
 ## Current notebook execution order
 
-1. Mount Drive, retain the GPU/VRAM settings, and fetch `minimax-h3-colab`.
+1. Use local runtime storage, retain the GPU/VRAM settings, and fetch `minimax-h3-colab`.
 2. Install real ComfyUI, H3 Extender, latent upscaler code, Director, VideoHelperSuite, KJNodes and Pixaroma. No model-download cell runs yet.
 3. Read `CF_TUNNEL_TOKEN` with Colab `userdata`. A raw `eyJ...` token or a pasted install command is accepted; the command is never executed.
 4. Start/reuse ComfyUI on **127.0.0.1:8188**, require HTTP 200 and ComfyUI JSON from `/system_stats`, then start one cloudflared connector in this runtime. Wait for `Registered tunnel connection` before displaying `OPEN COMFYUI`.
@@ -12,7 +12,7 @@ This is the main MiniMax H3 **ComfyUI in Colab** setup, exposed at **https://com
 6. Run Section 7 for the original eight H3 download entries, unchanged. This cell checks approval and current preflight health itself, even when run directly. A failed/interrupted download cannot authorize the final restart.
 7. Run Section 8: restart only ComfyUI, wait for HTTP 200, and display `FINAL READY` at the same URL. The connector remains running. Refresh the browser to reload model choices.
 
-The original notebook remains the production notebook. Setup, model filenames/repositories, workflows, Drive persistence and GPU settings are preserved. Rerunning preflight resets the notebook approval; no automatic UI approval or generation is performed.
+The original notebook remains the production notebook. Setup, model filenames/repositories, workflows and GPU settings are preserved. Google Drive integration is removed at the user's request; all storage is local to the runtime. Rerunning preflight resets the notebook approval; no automatic UI approval or generation is performed.
 
 ### Launcher and diagnostics
 
@@ -109,7 +109,7 @@ try:
 except Exception:
     pass
 
-MODEL_ROOT = f'{DRIVE_ROOT}/models' if PERSIST_MODELS_TO_DRIVE else '/content/ComfyUI/models'
+MODEL_ROOT = '/content/ComfyUI/models'
 cmd = [
     sys.executable,
     '/content/minimax_h3_comfy/download_ltx_models.py',
@@ -158,15 +158,34 @@ For the YouTube pipeline, start with **LTX_2.5_T2V** for generated B-roll and **
 
 ## Colab defaults
 
-Model weights stay on the Colab VM by default because loading large video-model weights through Google Drive/FUSE is much slower. Output, user state and Extender caches remain Drive-backed so completed work survives runtime resets.
+Models, inputs, output, temporary previews, workflow state and caches use the Colab VM's local disk. The notebook never mounts Google Drive and the installer no longer supports Drive persistence. Download each wanted result directly from its ComfyUI workflow output, and export any workflow JSON you want to keep, before disconnecting and deleting the runtime.
 
 ```text
-MyDrive/MiniMax_H3_ComfyUI/
+/content/ComfyUI/
+├── models/
+├── input/
 ├── output/
-└── user/
+├── temp/
+└── user/default/workflows/
 ```
 
-Set `PERSIST_MODELS_TO_DRIVE = True` only when avoiding model downloads matters more than model-load speed.
+A fresh runtime needs its local weights downloaded again, after the UI approval gate.
+
+### Existing sessions that used Drive
+
+The updated installer and preflight replace legacy data-directory symlinks with local directories. The original targets are never deleted or copied. An active generation queue prevents conversion. If ComfyUI is idle, only its process is stopped before conversion; the tunnel stays running. Existing local files and model weights are retained.
+
+To switch an already-installed session without reinstalling or redownloading local weights: download any wanted existing results first, run Section 2 to fetch the new helpers, then run this cell:
+
+```python
+import sys, importlib
+sys.path.insert(0, '/content/minimax_h3_comfy')
+import comfy_preflight
+importlib.reload(comfy_preflight)
+comfy_preflight.run_launcher('local-storage')
+```
+
+Then rerun Sections 4 and 5 to open ComfyUI using local storage. Previously linked user settings/workflows and outputs are no longer loaded automatically; upload a saved workflow if needed. The notebook does not unmount Drive or manage other applications using it; it stops using it.
 
 ## Workflows available through the optional preparation tools
 

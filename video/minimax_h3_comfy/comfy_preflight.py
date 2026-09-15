@@ -64,7 +64,7 @@ def run_setup_command(args, *, label, cwd=None):
 
 def run_launcher(action, *, token=None):
     """Notebook entry point: stream launcher errors, retaining the secret in env only."""
-    if action not in ("preflight", "check", "restart"):
+    if action not in ("preflight", "check", "restart", "local-storage"):
         raise ValueError("Unsupported launcher action.")
     env = os.environ.copy()
     env.pop("CF_TUNNEL_TOKEN", None)
@@ -169,6 +169,50 @@ def stop_processes(items):
                 time.sleep(0.2)
         if same_process(info):
             raise RuntimeError(f"Process {info['pid']} did not stop; refusing to start a duplicate.")
+
+
+def prepare_local_storage():
+    """Replace legacy storage links with local directories; never alter their targets."""
+    drive = Path("/content/drive")
+    if ROOT == drive or drive in ROOT.parents:
+        raise RuntimeError("COMFY_ROOT must be on local runtime disk, outside /content/drive.")
+    paths = [ROOT / name for name in ("models", "input", "output", "user", "temp")]
+    paths += [ROOT / "models" / name for name in (
+        "diffusion_models", "text_encoders", "vae", "loras", "checkpoints",
+        "latent_upscale_models", "model_patches",
+    )]
+    links = []
+    for path in paths:
+        # Never walk a linked parent into external storage.
+        if not any(parent in path.parents for parent in links) and path.is_symlink():
+            links.append(path)
+    if links:
+        existing = processes("comfyui")
+        if existing:
+            try:
+                with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+                    ORIGIN + "/queue", timeout=5
+                ) as response:
+                    queue = json.load(response)
+                    if response.status != 200 or not all(
+                        isinstance(queue.get(key), list) for key in ("queue_running", "queue_pending")
+                    ):
+                        raise ValueError("Invalid queue response")
+            except (OSError, ValueError, AttributeError):
+                raise RuntimeError("Cannot verify an idle ComfyUI queue; storage links were left unchanged.") from None
+            if queue["queue_running"] or queue["queue_pending"]:
+                raise RuntimeError("Finish queued generation before changing storage. Nothing was changed.")
+            stop_processes(existing)
+            print("Stopped only idle ComfyUI before detaching storage links; cloudflared is unchanged.")
+        for path in links:
+            path.unlink()  # Remove the link itself, never the directory it points to.
+            print(f"Detached legacy storage link: {path}. Its target was left untouched.")
+    for path in paths:
+        path.mkdir(parents=True, exist_ok=True)
+    (ROOT / "user/default/workflows").mkdir(parents=True, exist_ok=True)
+    print("ComfyUI storage is local to the Colab runtime. Download results from the workflow before ending the session.")
+    if links:
+        print("Previous linked files were not copied. Start preflight again to open ComfyUI with local storage.")
 
 
 def healthy():
@@ -320,7 +364,7 @@ def diagnostics():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("preflight", "restart", "check", "diagnostics"))
+    parser.add_argument("action", choices=("preflight", "restart", "check", "diagnostics", "local-storage"))
     action = parser.parse_args().action
     if sys.platform != "linux":
         raise RuntimeError("Run this helper inside the Colab Linux runtime.")
@@ -335,7 +379,9 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError("Another launch/restart is in progress; wait for it to finish.") from None
-        if action == "check":
+        if action == "local-storage":
+            prepare_local_storage()
+        elif action == "check":
             check_preflight()
         elif action == "restart":
             check_preflight()
@@ -344,6 +390,7 @@ def main():
             print("FINAL READY\n" + PUBLIC_URL)
             print("Refresh the browser once so the model dropdowns reload.")
         else:
+            prepare_local_storage()
             start_comfy()
             if not healthy():
                 raise RuntimeError("Local /system_stats must return HTTP 200 before starting Cloudflare.")

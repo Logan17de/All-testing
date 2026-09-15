@@ -5,9 +5,6 @@ SETUP_STAGE="initialize installer"
 trap 'status=$?; printf "\nINSTALL FAILED: stage=%s line=%s exit=%s\n" "$SETUP_STAGE" "$LINENO" "$status" >&2; exit "$status"' ERR
 
 COMFY_ROOT="${COMFY_ROOT:-/content/ComfyUI}"
-H3_DRIVE_ROOT="${H3_DRIVE_ROOT:-}"
-H3_PERSIST_MODELS="${H3_PERSIST_MODELS:-0}"
-H3_PERSIST_OUTPUT="${H3_PERSIST_OUTPUT:-1}"
 EXTENDER_DIR="$COMFY_ROOT/custom_nodes/ComfyUI_MiniMax_H3_Extender"
 LATENT_UPSCALER_DIR="$COMFY_ROOT/custom_nodes/Comfyui_Minimax_h3_latent_Upscaler"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +25,9 @@ else
   rm -rf "$COMFY_ROOT"
   git clone --depth 1 https://github.com/Comfy-Org/ComfyUI.git "$COMFY_ROOT"
 fi
+
+SETUP_STAGE="local runtime storage"
+python "$SCRIPT_DIR/comfy_preflight.py" local-storage
 
 SETUP_STAGE="ComfyUI Python requirements"
 python -m pip install -q -r "$COMFY_ROOT/requirements.txt"
@@ -70,34 +70,6 @@ fi
 SETUP_STAGE="H3 Extender UI compatibility patch"
 if [[ -f "$SCRIPT_DIR/patch_extender_ui.py" ]]; then
   python "$SCRIPT_DIR/patch_extender_ui.py" "$EXTENDER_DIR/web/extender.js"
-fi
-
-SETUP_STAGE="Google Drive persistence"
-if [[ -n "$H3_DRIVE_ROOT" ]]; then
-  if [[ ! -d "/content/drive/MyDrive" ]]; then
-    echo "ERROR: Google Drive is not mounted. Mount Drive first or unset H3_DRIVE_ROOT."
-    exit 2
-  fi
-
-  mkdir -p "$H3_DRIVE_ROOT"/{models,output,user}
-
-  if [[ "$H3_PERSIST_MODELS" == "1" ]]; then
-    echo "Using Drive-backed ComfyUI model folders: $H3_DRIVE_ROOT/models"
-    echo "NOTE: local VM model storage is faster; Drive-backed weights are for convenience only."
-    # Keep every model family used by H3 + LTX in the same Drive-backed model root.
-    for sub in diffusion_models text_encoders vae loras checkpoints latent_upscale_models model_patches; do
-      mkdir -p "$H3_DRIVE_ROOT/models/$sub"
-      rm -rf "$COMFY_ROOT/models/$sub"
-      ln -s "$H3_DRIVE_ROOT/models/$sub" "$COMFY_ROOT/models/$sub"
-    done
-  fi
-
-  if [[ "$H3_PERSIST_OUTPUT" == "1" ]]; then
-    echo "Using Drive-backed ComfyUI output/user data."
-    rm -rf "$COMFY_ROOT/output" "$COMFY_ROOT/user"
-    ln -s "$H3_DRIVE_ROOT/output" "$COMFY_ROOT/output"
-    ln -s "$H3_DRIVE_ROOT/user" "$COMFY_ROOT/user"
-  fi
 fi
 
 SETUP_STAGE="ComfyUI model/input/output directory creation"

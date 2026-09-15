@@ -63,7 +63,7 @@ def test_download_completion_controls_restart(monkeypatch, tmp_path, failure):
     monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(hf_hub_download=download))
     monkeypatch.setattr(preflight.subprocess, "run", lambda args, **kwargs: events.append(args[-1]))
     namespace = {"PROCEED_WITH_H3_MODEL_DOWNLOADS": True, "H3_PREFLIGHT_COMPLETE": True,
-                 "H3_MODELS_DOWNLOADED": True, "PERSIST_MODELS_TO_DRIVE": False,
+                 "H3_MODELS_DOWNLOADED": True,
                  "comfy_preflight": types.SimpleNamespace(run_launcher=lambda action: events.append(action))}
     source = cell("## 7.").replace("/content/ComfyUI/models", tmp_path.as_posix())
     if failure:
@@ -286,7 +286,7 @@ def test_invalid_tunnel_secret_fails_fast_and_stops_only_rejected_connector(runt
     sleep.assert_not_called()
 
 
-@pytest.mark.parametrize("action", ["preflight", "check", "restart"])
+@pytest.mark.parametrize("action", ["preflight", "check", "restart", "local-storage"])
 def test_notebook_launcher_streams_with_private_environment(runtime, monkeypatch, action):
     calls = []
     def logged(args, **kwargs):
@@ -319,3 +319,98 @@ def test_notebook_secret_reload_ignores_stale_environment(monkeypatch):
     monkeypatch.setitem(sys.modules, "google.colab", types.SimpleNamespace(
         userdata=types.SimpleNamespace(get=lambda name: "eyJcurrent==")))
     assert preflight.read_token(use_environment=False) == "eyJcurrent=="
+
+
+def test_local_storage_keeps_existing_local_files(runtime, monkeypatch):
+    root = runtime / "ComfyUI"
+    monkeypatch.setattr(preflight, "ROOT", root)
+    output = root / "output"
+    output.mkdir(parents=True)
+    saved = output / "existing.mp4"
+    saved.write_bytes(b"existing output fixture")
+    stop = Mock()
+    monkeypatch.setattr(preflight, "stop_processes", stop)
+    preflight.prepare_local_storage()
+    assert saved.read_bytes() == b"existing output fixture"
+    assert (root / "user/default/workflows").is_dir()
+    assert (root / "models/text_encoders").is_dir()
+    stop.assert_not_called()
+
+
+def legacy_storage(runtime, monkeypatch, simulate):
+    root = runtime / "ComfyUI"
+    target = runtime / "previous-storage"
+    root.mkdir()
+    target.mkdir()
+    (target / "keep.txt").write_text("preserve old storage")
+    link = root / "output"
+    if simulate:
+        # Exercise queue/stop/unlink ordering on hosts without symlink privileges.
+        links = {link}
+        original_is_symlink = Path.is_symlink
+        original_unlink = Path.unlink
+        monkeypatch.setattr(Path, "is_symlink", lambda path: path in links or original_is_symlink(path))
+        def unlink(path, *args, **kwargs):
+            if path in links:
+                links.remove(path)
+            else:
+                original_unlink(path, *args, **kwargs)
+        monkeypatch.setattr(Path, "unlink", unlink)
+    else:
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except OSError:
+            pytest.skip("This host does not permit directory symlinks.")
+    monkeypatch.setattr(preflight, "ROOT", root)
+    return root, target, link
+
+
+@pytest.mark.parametrize("simulate", [False, True])
+def test_local_storage_detaches_only_link_and_preserves_target(runtime, monkeypatch, simulate):
+    root, target, link = legacy_storage(runtime, monkeypatch, simulate)
+    monkeypatch.setattr(preflight, "processes", lambda kind: [])
+    preflight.prepare_local_storage()
+    assert link.is_dir() and not link.is_symlink()
+    assert (target / "keep.txt").read_text() == "preserve old storage"
+    assert not (link / "keep.txt").exists()
+
+
+@pytest.mark.parametrize("queue", [
+    {"queue_running": [[1]], "queue_pending": []},
+    {"queue_running": [], "queue_pending": [[1]]},
+    {"unexpected": "response"},
+])
+@pytest.mark.parametrize("simulate", [False, True])
+def test_local_storage_does_not_interrupt_generation_or_unverified_queue(runtime, monkeypatch, queue, simulate):
+    root, target, link = legacy_storage(runtime, monkeypatch, simulate)
+    monkeypatch.setattr(preflight, "processes", lambda kind: [comfy_info()])
+    response = Mock(status=200, read=lambda: json.dumps(queue).encode())
+    context = Mock(__enter__=lambda _: response, __exit__=lambda *a: None)
+    monkeypatch.setattr(preflight.urllib.request, "build_opener", lambda *a: Mock(open=lambda *a, **k: context))
+    stop = Mock()
+    monkeypatch.setattr(preflight, "stop_processes", stop)
+    with pytest.raises(RuntimeError):
+        preflight.prepare_local_storage()
+    assert link.is_symlink()
+    assert (target / "keep.txt").read_text() == "preserve old storage"
+    stop.assert_not_called()
+
+
+@pytest.mark.parametrize("simulate", [False, True])
+def test_local_storage_stops_only_idle_comfy_before_detaching(runtime, monkeypatch, simulate):
+    root, target, link = legacy_storage(runtime, monkeypatch, simulate)
+    info = comfy_info()
+    kinds = []
+    monkeypatch.setattr(preflight, "processes", lambda kind: kinds.append(kind) or [info])
+    response = Mock(status=200, read=lambda: b'{"queue_running": [], "queue_pending": []}')
+    context = Mock(__enter__=lambda _: response, __exit__=lambda *a: None)
+    monkeypatch.setattr(preflight.urllib.request, "build_opener", lambda *a: Mock(open=lambda *a, **k: context))
+    stopped = []
+    def stop(items):
+        assert link.is_symlink()
+        stopped.extend(items)
+    monkeypatch.setattr(preflight, "stop_processes", stop)
+    preflight.prepare_local_storage()
+    assert stopped == [info] and kinds == ["comfyui"]
+    assert not link.is_symlink()
+    assert (target / "keep.txt").exists()
