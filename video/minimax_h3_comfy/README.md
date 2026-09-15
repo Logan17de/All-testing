@@ -1,6 +1,30 @@
 # MiniMax H3 + ComfyUI Extender (Colab)
 
-This is the optimized long-video path for MiniMax H3. It runs **ComfyUI in Colab**, installs the current `ComfyUI_MiniMax_H3_Extender`, prepares OOM-resistant workflows, and exposes ComfyUI through a temporary Pinggy URL.
+This is the main MiniMax H3 **ComfyUI in Colab** setup, exposed at **https://comfy.zetbros.com** through the existing named Cloudflare Tunnel.
+
+## Current notebook execution order
+
+1. Mount Drive, retain the GPU/VRAM settings, and fetch `minimax-h3-colab`.
+2. Install real ComfyUI, H3 Extender, latent upscaler code, Director, VideoHelperSuite, KJNodes and Pixaroma. No model-download cell runs yet.
+3. Read `CF_TUNNEL_TOKEN` with Colab `userdata`. A raw `eyJ...` token or a pasted install command is accepted; the command is never executed.
+4. Start/reuse ComfyUI on **127.0.0.1:8188**, require HTTP 200 and ComfyUI JSON from `/system_stats`, then start one cloudflared connector in this runtime. Wait for `Registered tunnel connection` before displaying `OPEN COMFYUI`.
+5. **Stop by default.** Open the URL, complete Access login if prompted, and confirm the real canvas, menus and live UI connection work. Then change `PROCEED_WITH_H3_MODEL_DOWNLOADS = False` to `True` in Section 6 and rerun that cell. Registration/local health alone do not prove browser success.
+6. Run Section 7 for the original eight H3 download entries, unchanged. This cell checks approval and current preflight health itself, even when run directly. A failed/interrupted download cannot authorize the final restart.
+7. Run Section 8: restart only ComfyUI, wait for HTTP 200, and display `FINAL READY` at the same URL. The connector remains running. Refresh the browser to reload model choices.
+
+The original notebook remains the production notebook. Setup, model filenames/repositories, workflows, Drive persistence and GPU settings are preserved. Rerunning preflight resets the notebook approval; no automatic UI approval or generation is performed.
+
+### Launcher and diagnostics
+
+`launch_comfy.sh` and the notebook share the small standard-library `comfy_preflight.py` helper. Actions are `preflight` (default), `check`, `restart` and `diagnostics`. The launcher retains its existing VRAM options and rejects ports other than 8188. Process cleanup checks the runtime's Linux PID/network namespaces and UID; ComfyUI cleanup additionally requires its exact root and port. No remote/Windows connectors are managed. A launch lock prevents overlapping starts.
+
+Run the notebook's Diagnostics cell after Section 2, including while downloads are paused. It prints the curl HTTP result, `ss` listener for 8188, connector PIDs and the last 50 lines of both logs. It does not need models or a token. Log output is redacted; process arguments are never printed.
+
+The launcher passes the token through the documented [`TUNNEL_TOKEN` environment variable](https://developers.cloudflare.com/tunnel/reference/run-parameters/#token), equivalent to `--token`, so it is absent from process arguments. No permanent OS service is installed.
+
+After generation, save/download completed outputs before disconnecting and deleting the Colab runtime. The user controls those actions. Offline regression checks: `python -m pytest video/minimax_h3_comfy/tests/test_preflight.py -q`; these use mocks and temporary text fixtures, with no HTTP test server, GPU, tunnel connection or model download.
+
+The sections below retain the optional optimized profiles and workflow tools. The current notebook's eight-entry model list is authoritative for its default download phase.
 
 The older `video/minimax_h3/` direct runner is intentionally left untouched.
 
@@ -11,7 +35,7 @@ The older `video/minimax_h3/` direct runner is intentionally left untouched.
 3. **L4 24 GB** — use `ref2va-int8` + `normalvram`/`lowvram`
 4. **T4 16 GB** — testing only; use `ref2va-int8` + `lowvram`
 
-The Colab notebook detects the GPU and chooses a profile automatically. For G4, the default workflow uses the official FP8-scaled Ref2VA diffusion model plus the NVFP4 Qwen3-VL encoder.
+The Colab notebook detects the GPU for VRAM reservation. The optional G4 profile below uses the official FP8-scaled Ref2VA diffusion model plus the NVFP4 Qwen3-VL encoder; the current notebook retains its existing fixed model list.
 
 ## Why the G4 workflow is different
 
@@ -39,7 +63,8 @@ After a successful full run, try 0.75 MP. Only move back toward 0.90 MP after pr
 - `download_models.py` — downloads GPU-specific H3 model profiles
 - `download_ltx_models.py` — installs LTX-2.5 models plus the official ComfyUI T2V/I2V/FLF2V workflows into the **same** `/content/ComfyUI`
 - `prepare_workflow.py` — creates the optimized Full Batch workflow plus a safe Clip-by-Clip fallback
-- `launch_comfy.sh` — starts ComfyUI with memory-safe defaults and exposes it through Pinggy
+- `launch_comfy.sh` — starts ComfyUI with the existing memory defaults and runs the Cloudflare preflight
+- `comfy_preflight.py` — shared process control, local health checks and redacted diagnostics
 
 ## G4 model profile
 
@@ -61,10 +86,13 @@ Before downloading LTX-2.5:
 
 1. Open `https://huggingface.co/Lightricks/LTX-2.5` once and click **Agree and Access**.
 2. Add a Colab secret named `HF_TOKEN` containing a Hugging Face read token.
-3. Run the normal H3 notebook through its ComfyUI install/update step.
-4. Run the following extra cell before launching ComfyUI:
+3. Run the normal H3 notebook through preflight, personally verify the full UI, and approve downloads in Section 6.
+4. Only then run the following optional extra cell:
 
 ```python
+if (globals().get('PROCEED_WITH_H3_MODEL_DOWNLOADS') is not True
+        or globals().get('H3_PREFLIGHT_COMPLETE') is not True):
+    raise SystemExit('Verify the ComfyUI UI and approve downloads in Section 6 first.')
 import os, subprocess, sys
 from google.colab import userdata
 
@@ -134,7 +162,7 @@ MyDrive/MiniMax_H3_ComfyUI/
 
 Set `PERSIST_MODELS_TO_DRIVE = True` only when avoiding model downloads matters more than model-load speed.
 
-## Workflows created by the notebook
+## Workflows available through the optional preparation tools
 
 - `MiniMax_H3_G4_Optimized_FullBatch.json` — first choice
 - `MiniMax_H3_G4_Optimized_Safe_ClipByClip.json` — OOM fallback
@@ -150,4 +178,4 @@ Validated clips remain part of the Extender's continuous motion chain. Keep the 
 
 ## API later
 
-Once the UI workflow is stable, the same Colab server can be automated through ComfyUI's HTTP `/prompt` API.
+The same server supports ComfyUI's HTTP `/prompt` API. Current operation remains manual upload and queueing by the user; this preflight change does not enable automatic generation.
