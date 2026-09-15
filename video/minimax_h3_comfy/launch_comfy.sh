@@ -21,14 +21,14 @@ case "$VRAM_MODE" in
 esac
 VRAM_ARGS+=(--reserve-vram "$RESERVE_VRAM_GB" --preview-method "$PREVIEW_METHOD")
 
-# The named Cloudflare origin is fixed; reject an accidental port override.
+# Both access methods forward to the fixed local ComfyUI port.
 if [[ "$PORT" != "8188" ]]; then
-  echo "ERROR: This tunnel requires COMFY_PORT=8188."
+  echo "ERROR: ComfyUI access requires COMFY_PORT=8188."
   exit 2
 fi
 export COMFY_ROOT H3_LOG_DIR="$LOG_DIR"
 export H3_COMFY_VRAM_ARGS
 H3_COMFY_VRAM_ARGS="$(python -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "${VRAM_ARGS[@]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Default: preflight only. Restart never starts/stops cloudflared.
+# Default: preflight only. Restart leaves the selected access connector running.
 exec python "$SCRIPT_DIR/comfy_preflight.py" "${1:-preflight}"

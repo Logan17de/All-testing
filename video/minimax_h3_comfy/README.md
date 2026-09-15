@@ -1,38 +1,42 @@
-# MiniMax H3 + ComfyUI Extender (Colab)
+# MiniMax H3 + ComfyUI on Colab — private Tailscale access
 
-This is the main MiniMax H3 **ComfyUI in Colab** setup, exposed at **https://comfy.zetbros.com** through the existing named Cloudflare Tunnel.
+The production notebook runs ComfyUI on Colab's GPU and exposes it privately to your Tailscale-connected PC. Models, inputs, outputs and workflow state stay on local runtime disk. Download wanted results directly from ComfyUI before deleting the runtime.
 
 ## Current notebook execution order
 
-1. Use local runtime storage, retain the GPU/VRAM settings, and fetch `minimax-h3-colab`.
-2. Install real ComfyUI, H3 Extender, latent upscaler code, Director, VideoHelperSuite, KJNodes and Pixaroma. No model-download cell runs yet.
-3. Read `CF_TUNNEL_TOKEN` with Colab `userdata`. A raw `eyJ...` token or a pasted install command is accepted; the command is never executed.
-4. Start/reuse ComfyUI on **127.0.0.1:8188**, require HTTP 200 and ComfyUI JSON from `/system_stats`, then start one cloudflared connector in this runtime. Wait for `Registered tunnel connection` before displaying `OPEN COMFYUI`.
-5. **Stop by default.** Open the URL, complete Access login if prompted, and confirm the real canvas, menus and live UI connection work. Then change `PROCEED_WITH_H3_MODEL_DOWNLOADS = False` to `True` in Section 6 and rerun that cell. Registration/local health alone do not prove browser success.
-6. Run Section 7 for the original eight H3 download entries, unchanged. This cell checks approval and current preflight health itself, even when run directly. A failed/interrupted download cannot authorize the final restart.
-7. Run Section 8: restart only ComfyUI, wait for HTTP 200, and display `FINAL READY` at the same URL. The connector remains running. Refresh the browser to reload model choices.
+1. Sections 0–2: local storage, existing GPU settings, fetch `minimax-h3-colab`.
+2. Section 3: install ComfyUI and the original H3 custom nodes. No model weights yet.
+3. Section 4: install the checksum-verified Tailscale 1.102.4 static binaries and start one managed userspace daemon. Open the sign-in link and use the same account as the PC. No auth key, Cloudflare token or public domain is required. Finish any device approval first.
+4. Section 5: verify Tailscale sign-in, start/reuse ComfyUI at `127.0.0.1:8188`, check `/system_stats`, and configure private TCP forwarding on Tailscale port 8188. Open the printed `http://100.x.x.x:8188/` address by pasting it into your PC browser's address bar. Traffic is encrypted by Tailscale. Access follows the tailnet's device policy; no public Funnel is enabled.
+5. Section 6: **stop by default**. Confirm the real canvas, menus and live connection work before changing `PROCEED_WITH_H3_MODEL_DOWNLOADS` to `True`.
+6. Section 7: download the original eight H3 model entries. The cell independently checks approval, local backend health, Tailscale login and the exact private forwarding route. Failed downloads cannot authorize restart.
+7. Section 8: restart only ComfyUI, retaining the private connection. Refresh the same address to reload models.
 
-The original notebook remains the production notebook. Setup, model filenames/repositories, workflows and GPU settings are preserved. Google Drive integration is removed at the user's request; all storage is local to the runtime. Rerunning preflight resets the notebook approval; no automatic UI approval or generation is performed.
+### Already-running Colab session
 
-### Launcher and diagnostics
+If ComfyUI and models are already installed locally, run **Sections 0, 2, 4 and 5** in the updated notebook using that same runtime. Skip reinstalling or downloading weights already present. Section 5 reuses a healthy ComfyUI process. Legacy Drive symlinks are handled as documented below; conversion never copies old Drive models into the runtime.
 
-`launch_comfy.sh` and the notebook share the small standard-library `comfy_preflight.py` helper. Actions are `preflight` (default), `check`, `restart` and `diagnostics`. The launcher retains its existing VRAM options and rejects ports other than 8188. Process cleanup checks the runtime's Linux PID/network namespaces and UID; ComfyUI cleanup additionally requires its exact root and port. No remote/Windows connectors are managed. A launch lock prevents overlapping starts.
+Existing Cloudflare connections are left untouched during migration. Fresh sessions started by this notebook use only Tailscale. The private address does not use `comfy.zetbros.com`.
 
-Run the notebook's Diagnostics cell after Section 2, including while downloads are paused. It prints the curl HTTP result, `ss` listener for 8188, connector PIDs and the last 50 lines of both logs. It does not need models or a token. Log output is redacted; process arguments are never printed.
+### New sessions and troubleshooting
 
-Installation output is streamed into the notebook and appended to `/content/h3_comfy_logs/setup.log`, also included in diagnostics. Failures name the setup stage and shell line; required custom-node installation failures stop the cell. The Extender width patch anchors to the unique render-function header and preserves upstream prompt-state capture. An unknown or ambiguous header still stops installation rather than applying an unverified patch.
+Tailscale binaries/socket are under `/content/h3_tailscale`, outside the helper directory replaced by Section 2. Identity state is held only in memory (`--state=mem:`). A new runtime or daemon restart needs sign-in again and may get a different address. Section 4 reuses the existing managed process and login within the same runtime. Keep Tailscale connected on the PC.
 
-Preflight, health-check and restart output also stream into the notebook and append to `launcher.log`. On failure, existing diagnostics print automatically without retrying or launching another process. The Diagnostics cell calls the read-only helper directly so its output is visible in Colab.
+If Section 4 prints a login link, complete sign-in before Section 5. `NeedsMachineAuth` means device approval is required in the Tailscale admin console. Do not post pending login URLs or auth keys in chat; diagnostic logs redact them. If a port-forwarding configuration conflicts, inspect it rather than resetting unrelated routes.
 
-If cloudflared reports `Unauthorized: Invalid tunnel secret`, the connector credential was rejected. The launcher stops that newly rejected connector immediately and leaves ComfyUI running. Copy the current connector token for the existing tunnel serving `comfy.zetbros.com` from Cloudflare into the Colab secret `CF_TUNNEL_TOKEN`. Rerun **Section 4 → Section 5**, then verify the full browser UI before approving downloads. Section 4 rereads Colab Secrets instead of using a stale environment value. This recovery does not require rerunning installation, rotating credentials, changing DNS/Access or downloading models. Do not paste the token into chat or logs.
+Use the notebook Diagnostics cell to read local health, process IDs, Tailscale state and redacted logs. It does not install, restart, download models or queue generation. Local checks cannot prove full browser compatibility or a fast direct peer connection. After opening the UI, test uploads, live status and downloading a result. On the PC, `tailscale ping <Colab-IP>` identifies whether the path is direct or relayed; faster performance is not assumed.
 
-The launcher passes the token through the documented [`TUNNEL_TOKEN` environment variable](https://developers.cloudflare.com/tunnel/reference/run-parameters/#token), equivalent to `--token`, so it is absent from process arguments. No permanent OS service is installed.
+### Launcher and offline checks
 
-After generation, save/download completed outputs before disconnecting and deleting the Colab runtime. The user controls those actions. Offline regression checks: `python -m pytest video/minimax_h3_comfy/tests/test_preflight.py -q`; these use mocks and temporary text fixtures, with no HTTP test server, GPU, tunnel connection or model download.
+The standard-library helper `comfy_preflight.py` supports `tailscale-login`, `preflight`, `check`, `restart`, `local-storage` and `diagnostics`. A shared lock serializes launcher actions. The notebook sets `H3_ACCESS_METHOD=tailscale`; standalone legacy scripts retain the Cloudflare default for compatibility. ComfyUI's GPU settings, custom nodes and eight model entries are unchanged.
 
-The sections below retain the optional optimized profiles and workflow tools. The current notebook's eight-entry model list is authoritative for its default download phase.
+Static Tailscale archives come from https://pkgs.tailscale.com/stable/ and are checked against pinned SHA-256 hashes before extracting only the expected two binaries. No OS service, public Funnel, exit node or subnet route is configured in Colab. The private TCP forwarder preserves HTTP/WebSocket requests without rewriting ComfyUI code.
 
-The older `video/minimax_h3/` direct runner is intentionally left untouched.
+Run offline regressions with `python -m pytest video/minimax_h3_comfy/tests/test_preflight.py -q`. They cover model gates, process reuse, pending sign-in, checksum failures, exact private route validation and log redaction. They do not run a real Colab GPU or claim a live browser/generation test.
+
+References: [userspace networking](https://tailscale.com/docs/concepts/userspace-networking), [Serve TCP forwarding](https://tailscale.com/docs/reference/tailscale-cli/serve), [ephemeral nodes](https://tailscale.com/docs/features/ephemeral-nodes).
+
+The sections below retain the existing optional profiles and workflow tools. The notebook's eight-entry model list remains authoritative for its default download phase.
 
 ## Recommended hardware
 
@@ -69,7 +73,7 @@ After a successful full run, try 0.75 MP. Only move back toward 0.90 MP after pr
 - `download_models.py` — downloads GPU-specific H3 model profiles
 - `download_ltx_models.py` — installs LTX-2.5 models plus the official ComfyUI T2V/I2V/FLF2V workflows into the **same** `/content/ComfyUI`
 - `prepare_workflow.py` — creates the optimized Full Batch workflow plus a safe Clip-by-Clip fallback
-- `launch_comfy.sh` — starts ComfyUI with the existing memory defaults and runs the Cloudflare preflight
+- `launch_comfy.sh` — starts ComfyUI with the existing memory defaults and runs the selected private-access preflight
 - `comfy_preflight.py` — shared process control, local health checks and redacted diagnostics
 
 ## G4 model profile

@@ -24,9 +24,114 @@ def cell(section):
 
 @pytest.fixture
 def runtime(monkeypatch, tmp_path):
+    monkeypatch.delenv('H3_ACCESS_METHOD', raising=False)
     monkeypatch.setattr(preflight, "LOG", tmp_path)
     monkeypatch.setattr(preflight.time, "sleep", lambda _: None)
     return tmp_path
+
+
+def ts_state(state='Running'):
+    return {'BackendState': state, 'TailscaleIPs': ['100.64.1.2'],
+            'Self': {'DNSName': 'colab-comfy.example.ts.net.'}}
+
+
+def test_tailscale_private_route_requires_login():
+    assert preflight.tailscale_url(ts_state()) == 'http://100.64.1.2:8188/'
+    for state in ('NeedsLogin', 'NeedsMachineAuth', 'Stopped'):
+        with pytest.raises(RuntimeError, match='sign-in'):
+            preflight.tailscale_url(ts_state(state))
+    with pytest.raises(RuntimeError, match='IPv4'):
+        preflight.tailscale_url({**ts_state(), 'TailscaleIPs': ['8.8.8.8']})
+
+
+@pytest.mark.parametrize('config,valid', [
+    ({'TCP': {'8188': {'TCPForward': '127.0.0.1:8188'}}}, True),
+    ({'TCP': {'8188': {'TCPForward': '127.0.0.1:9999'}}}, False),
+    ({'TCP': {'8188': {'TCPForward': '127.0.0.1:8188', 'HTTPS': True}}}, False),
+    ({'TCP': {'8188': {'TCPForward': '127.0.0.1:8188'}}, 'AllowFunnel': {'any:443': True}}, False),
+    ({}, False),
+])
+def test_tailscale_gate_checks_exact_private_route(runtime, monkeypatch, config, valid):
+    monkeypatch.setattr(preflight, 'processes', lambda kind: [{'pid': 1}])
+    monkeypatch.setattr(preflight, 'tailscale_status', ts_state)
+    monkeypatch.setattr(preflight, 'ts_command', lambda *a: Mock(returncode=0, stdout=json.dumps(config)))
+    if valid:
+        assert preflight.check_tailscale() == 'http://100.64.1.2:8188/'
+    else:
+        with pytest.raises(RuntimeError, match='route'):
+            preflight.check_tailscale()
+
+
+def test_tailscale_preflight_has_no_cloudflare_dependency(runtime, monkeypatch):
+    monkeypatch.setenv('H3_ACCESS_METHOD', 'tailscale')
+    kinds = []
+    monkeypatch.setattr(preflight, 'processes', lambda kind: kinds.append(kind) or [comfy_info()])
+    monkeypatch.setattr(preflight, 'healthy', lambda: True)
+    check = Mock()
+    monkeypatch.setattr(preflight, 'check_tailscale', check)
+    preflight.check_preflight()
+    assert kinds == ['comfyui']
+    check.assert_called_once()
+
+
+def test_tailscale_daemon_matching_excludes_unmanaged_instances():
+    args = [str(preflight.TS_ROOT / 'tailscaled'), '--socket=' + preflight.TS_SOCKET]
+    assert preflight.matches({'args': args}, 'tailscaled')
+    assert not preflight.matches({'args': ['tailscaled', '--socket=/other']}, 'tailscaled')
+    assert not preflight.matches({'args': args[:1]}, 'tailscaled')
+
+
+def test_tailscale_login_reuses_running_daemon(runtime, monkeypatch):
+    monkeypatch.setattr(preflight, 'install_tailscale', Mock())
+    monkeypatch.setattr(preflight, 'processes', lambda kind: [{'pid': 1}])
+    monkeypatch.setattr(preflight, 'tailscale_status', ts_state)
+    start, command = Mock(), Mock()
+    monkeypatch.setattr(preflight, 'start_process', start)
+    monkeypatch.setattr(preflight, 'ts_command', command)
+    preflight.prepare_tailscale_login()
+    start.assert_not_called()
+    command.assert_not_called()
+
+
+def test_tailscale_pending_login_returns_without_logging_url(runtime, monkeypatch, capsys):
+    monkeypatch.setattr(preflight, 'install_tailscale', Mock())
+    monkeypatch.setattr(preflight, 'processes', lambda kind: [])
+    start = Mock(return_value=Mock(poll=lambda: None))
+    monkeypatch.setattr(preflight, 'start_process', start)
+    monkeypatch.setattr(preflight, 'tailscale_status', lambda: {
+        **ts_state('NeedsLogin'), 'AuthURL': 'https://login.tailscale.com/a/private-login'})
+    command = Mock(return_value=Mock(returncode=1, stderr='timed out'))
+    monkeypatch.setattr(preflight, 'ts_command', command)
+    preflight.prepare_tailscale_login()
+    assert start.call_count == 1 and command.call_count == 1
+    assert '--state=mem:' in start.call_args.args[0]
+    assert '--tun=userspace-networking' in start.call_args.args[0]
+    assert 'private-login' not in capsys.readouterr().out
+
+
+def test_tailscale_logs_hide_auth_material():
+    output = preflight.redact('visit https://login.tailscale.com/a/private-login\nkey tskey-auth-secret')
+    assert 'private-login' not in output and 'auth-secret' not in output
+
+
+def test_tailscale_serve_preserves_backend_and_uses_tcp(runtime, monkeypatch):
+    monkeypatch.setattr(preflight, 'tailscale_url', lambda: 'http://100.64.1.2:8188/')
+    monkeypatch.setattr(preflight, 'check_tailscale', lambda: 'http://100.64.1.2:8188/')
+    command = Mock(return_value=Mock(returncode=0))
+    monkeypatch.setattr(preflight, 'ts_command', command)
+    preflight.start_tailscale_serve()
+    command.assert_called_once_with('serve', '--bg', '--tcp=8188', 'tcp://127.0.0.1:8188', timeout=30)
+
+
+def test_tailscale_checksum_failure_installs_no_binaries(runtime, monkeypatch):
+    import io
+    monkeypatch.setattr(preflight, 'TS_ROOT', runtime)
+    monkeypatch.setattr(preflight.platform, 'machine', lambda: 'x86_64')
+    monkeypatch.setattr(preflight.urllib.request, 'urlopen', lambda *a, **k: io.BytesIO(b'corrupt archive'))
+    with pytest.raises(RuntimeError, match='checksum'):
+        preflight.install_tailscale()
+    assert not (runtime / 'tailscale').exists()
+    assert not (runtime / 'tailscaled').exists()
 
 
 @pytest.mark.parametrize("approval", [None, False, 1, "True"])
@@ -47,7 +152,7 @@ def test_run_all_defaults_pause(capsys):
     with pytest.raises(SystemExit, match="remain running"):
         exec(cell("## 6."), namespace)
     assert namespace["PROCEED_WITH_H3_MODEL_DOWNLOADS"] is False
-    assert "Verify https://comfy.zetbros.com first." in capsys.readouterr().out
+    assert "Verify the private ComfyUI address from Section 5 first." in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("failure", [False, True])
@@ -286,7 +391,7 @@ def test_invalid_tunnel_secret_fails_fast_and_stops_only_rejected_connector(runt
     sleep.assert_not_called()
 
 
-@pytest.mark.parametrize("action", ["preflight", "check", "restart", "local-storage"])
+@pytest.mark.parametrize("action", ["preflight", "check", "restart", "local-storage", "tailscale-login"])
 def test_notebook_launcher_streams_with_private_environment(runtime, monkeypatch, action):
     calls = []
     def logged(args, **kwargs):

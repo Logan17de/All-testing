@@ -2,6 +2,8 @@
 """Local Colab process control only; never downloads models or queues a workflow."""
 
 import argparse
+import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -11,6 +13,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 import time
 import urllib.request
 
@@ -19,9 +22,142 @@ ORIGIN = "http://127.0.0.1:8188"
 ROOT = Path(os.environ.get("COMFY_ROOT", "/content/ComfyUI")).resolve()
 LOG = Path(os.environ.get("H3_LOG_DIR", "/content/h3_comfy_logs"))
 TOKEN_PATTERN = r"eyJ[A-Za-z0-9._=+/-]+"
+TS_ROOT = Path('/content/h3_tailscale')
+TS_SOCKET = str(TS_ROOT / 'tailscaled.sock')
+TS_VERSION = '1.102.4'
+TS_HASHES = {
+    'amd64': '50748df1045e60b5b695f19f4c56b0da36c019948b440fb456b6584a50f0d8b9',
+    'arm64': '9dd1e6a592a014bbaea0103167ffe299adeda4ba14e078ce9c2895364f6c4c3f',
+}
+
+
+def access_method():
+    method = os.environ.get('H3_ACCESS_METHOD', 'cloudflare')
+    if method not in ('tailscale', 'cloudflare'):
+        raise RuntimeError('H3_ACCESS_METHOD must be tailscale or cloudflare.')
+    return method
+
+
+def ts_command(*args, timeout=15):
+    return subprocess.run([str(TS_ROOT / 'tailscale'), '--socket=' + TS_SOCKET, *args],
+                          capture_output=True, text=True, timeout=timeout)
+
+
+def tailscale_status():
+    result = ts_command('status', '--json')
+    # Logged-out status can return nonzero but still contain usable JSON.
+    try:
+        status = json.loads(result.stdout)
+        if not isinstance(status, dict) or not status.get('BackendState'):
+            raise ValueError()
+        return status
+    except ValueError:
+        raise RuntimeError('Tailscale is unavailable. Run Section 4; see tailscaled.log.') from None
+
+
+def tailscale_url(status=None):
+    status = tailscale_status() if status is None else status
+    if status.get('BackendState') != 'Running':
+        raise RuntimeError('Finish the Tailscale sign-in from Section 4 before preflight.')
+    for value in status.get('TailscaleIPs') or []:
+        address = ipaddress.ip_address(value)
+        if address.version == 4 and address in ipaddress.ip_network('100.64.0.0/10'):
+            return f'http://{address}:8188/'
+    raise RuntimeError('Tailscale has no private IPv4 address yet. Rerun Section 4.')
+
+
+def access_url():
+    return tailscale_url() if access_method() == 'tailscale' else PUBLIC_URL
+
+
+def install_tailscale():
+    if all((TS_ROOT / name).is_file() for name in ('tailscale', 'tailscaled')):
+        return
+    arch = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(platform.machine().lower())
+    if arch not in TS_HASHES:
+        raise RuntimeError('Unsupported Tailscale architecture.')
+    TS_ROOT.mkdir(parents=True, exist_ok=True)
+    archive = TS_ROOT / 'download.tgz'
+    url = f'https://pkgs.tailscale.com/stable/tailscale_{TS_VERSION}_{arch}.tgz'
+    print(f'Downloading Tailscale {TS_VERSION} ({arch}); no model downloads.', flush=True)
+    with urllib.request.urlopen(url, timeout=60) as source, archive.open('wb') as dest:
+        shutil.copyfileobj(source, dest)
+    with archive.open('rb') as stream:
+        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+    if digest != TS_HASHES[arch]:
+        raise RuntimeError('Tailscale archive checksum mismatch; nothing was installed.')
+    # Read only the two expected regular files; never extract arbitrary archive paths.
+    with tarfile.open(archive) as package:
+        for name in ('tailscale', 'tailscaled'):
+            member = package.getmember(f'tailscale_{TS_VERSION}_{arch}/{name}')
+            if not member.isfile():
+                raise RuntimeError('Invalid Tailscale archive member.')
+            staging = TS_ROOT / (name + '.new')
+            with package.extractfile(member) as source, staging.open('wb') as dest:
+                shutil.copyfileobj(source, dest)
+            staging.chmod(0o755)
+            staging.replace(TS_ROOT / name)
+
+
+def prepare_tailscale_login():
+    install_tailscale()
+    existing = processes('tailscaled')
+    if len(existing) > 1:
+        raise RuntimeError('Multiple managed Tailscale daemons found; refusing to add another.')
+    child = None
+    if not existing:
+        child = start_process([str(TS_ROOT / 'tailscaled'), '--tun=userspace-networking',
+                               '--state=mem:', '--socket=' + TS_SOCKET], 'tailscaled')
+    deadline = time.monotonic() + 15
+    while True:
+        try:
+            status = tailscale_status()
+            break
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            if time.monotonic() >= deadline or (child and child.poll() is not None):
+                raise RuntimeError('Tailscale daemon did not start. See tailscaled.log.') from None
+            time.sleep(0.5)
+    if status['BackendState'] != 'Running':
+        # Capture the authorization URL privately: notebook displays it, logs never do.
+        result = ts_command('up', '--hostname=colab-comfy', '--accept-dns=false',
+                            '--accept-routes=false', '--timeout=8s', timeout=15)
+        status = tailscale_status()
+        if status['BackendState'] not in ('Running', 'NeedsLogin', 'NeedsMachineAuth'):
+            raise RuntimeError('Tailscale sign-in could not start: ' + redact(result.stderr))
+        if status['BackendState'] == 'NeedsLogin' and not status.get('AuthURL'):
+            raise RuntimeError('No Tailscale sign-in URL was returned; rerun Section 4.')
+    print('Tailscale state: ' + status['BackendState'])
+    print('Complete the notebook sign-in link, then run Section 5. No models downloaded.')
+
+
+def check_tailscale():
+    if len(processes('tailscaled')) != 1:
+        raise RuntimeError('Managed Tailscale daemon is missing or duplicated. Rerun Section 4.')
+    status = tailscale_status()
+    url = tailscale_url(status)
+    result = ts_command('serve', 'status', '--json')
+    try:
+        config = json.loads(result.stdout)
+        handler = config['TCP']['8188']
+        if (result.returncode or handler.get('TCPForward') != '127.0.0.1:8188'
+                or handler.get('HTTP') or handler.get('HTTPS') or handler.get('TerminateTLS')
+                or any(config.get('AllowFunnel', {}).values())):
+            raise ValueError()
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise RuntimeError('Private Tailscale Serve route is not ready. Rerun Section 5.') from None
+    return url
+
+
+def start_tailscale_serve():
+    tailscale_url()  # Fail before mutating Serve if login is incomplete.
+    result = ts_command('serve', '--bg', '--tcp=8188', 'tcp://127.0.0.1:8188', timeout=30)
+    if result.returncode:
+        raise RuntimeError('Tailscale Serve failed: ' + redact(result.stderr))
+    print('Private Tailscale route configured: ' + check_tailscale())
 
 
 def redact(text):
+    text = re.sub(r'https://login\.tailscale\.com/\S+|tskey-[A-Za-z0-9_-]+', '[REDACTED]', text)
     text = re.sub(TOKEN_PATTERN, "[REDACTED]", text)
     return re.sub(
         r"(?i)((?:--token|(?:CF_)?TUNNEL_TOKEN|CF[-_]ACCESS[-_]CLIENT[-_](?:SECRET|ID)|"
@@ -64,7 +200,7 @@ def run_setup_command(args, *, label, cwd=None):
 
 def run_launcher(action, *, token=None):
     """Notebook entry point: stream launcher errors, retaining the secret in env only."""
-    if action not in ("preflight", "check", "restart", "local-storage"):
+    if action not in ("preflight", "check", "restart", "local-storage", "tailscale-login"):
         raise ValueError("Unsupported launcher action.")
     env = os.environ.copy()
     env.pop("CF_TUNNEL_TOKEN", None)
@@ -134,6 +270,9 @@ def matches(info, kind):
         return False
     if kind == "cloudflared":
         return Path(args[0]).name == "cloudflared" and "tunnel" in args and "run" in args
+    if kind == 'tailscaled':
+        return (args[0] == str(TS_ROOT / 'tailscaled')
+                and option(args, '--socket') == TS_SOCKET)
     return (Path(args[0]).name.startswith("python")
             and any(arg == "main.py" or arg == str(ROOT / "main.py") for arg in args[1:])
             and info["cwd"] == ROOT
@@ -289,6 +428,12 @@ def registered():
 
 def check_preflight():
     comfy = processes("comfyui")
+    if access_method() == 'tailscale':
+        if (len(comfy) != 1 or option(comfy[0]['args'], '--listen') != '127.0.0.1'
+                or not healthy()):
+            raise RuntimeError('ComfyUI preflight is no longer healthy. Rerun Section 5.')
+        check_tailscale()
+        return
     tunnels = processes("cloudflared")
     if (len(comfy) != 1 or option(comfy[0]["args"], "--listen") != "127.0.0.1"
             or not healthy() or len(tunnels) != 1 or not registered()):
@@ -357,14 +502,21 @@ def diagnostics():
         except (OSError, subprocess.TimeoutExpired):
             print("Diagnostic command unavailable or timed out.")
     print("cloudflared running PIDs (this runtime):", [p["pid"] for p in processes("cloudflared")])
-    for name in ("setup.log", "launcher.log", "cli-check.log", "cloudflared.log", "comfyui.log"):
+    print('managed tailscaled PIDs:', [p['pid'] for p in processes('tailscaled')])
+    if access_method() == 'tailscale':
+        try:
+            state = tailscale_status()
+            print('Tailscale:', state['BackendState'], state.get('TailscaleIPs'))
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+            print(redact(str(error)))
+    for name in ("setup.log", "launcher.log", "cli-check.log", "cloudflared.log", "tailscaled.log", "comfyui.log"):
         print(f"\n=== {name}: last 50 lines ===")
         tail_log(name)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("preflight", "restart", "check", "diagnostics", "local-storage"))
+    parser.add_argument("action", choices=("preflight", "restart", "check", "diagnostics", "local-storage", "tailscale-login"))
     action = parser.parse_args().action
     if sys.platform != "linux":
         raise RuntimeError("Run this helper inside the Colab Linux runtime.")
@@ -379,7 +531,9 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError("Another launch/restart is in progress; wait for it to finish.") from None
-        if action == "local-storage":
+        if action == 'tailscale-login':
+            prepare_tailscale_login()
+        elif action == "local-storage":
             prepare_local_storage()
         elif action == "check":
             check_preflight()
@@ -387,16 +541,21 @@ def main():
             check_preflight()
             start_comfy(restart=True)
             check_preflight()
-            print("FINAL READY\n" + PUBLIC_URL)
+            print("FINAL READY\n" + access_url())
             print("Refresh the browser once so the model dropdowns reload.")
         else:
+            if access_method() == 'tailscale':
+                tailscale_url()  # Sign-in must finish before starting ComfyUI.
             prepare_local_storage()
             start_comfy()
             if not healthy():
-                raise RuntimeError("Local /system_stats must return HTTP 200 before starting Cloudflare.")
-            start_tunnel()
+                raise RuntimeError("Local /system_stats must return HTTP 200 before exposing ComfyUI.")
+            if access_method() == 'tailscale':
+                start_tailscale_serve()
+            else:
+                start_tunnel()
             check_preflight()
-            print("OPEN COMFYUI:\n" + PUBLIC_URL)
+            print("OPEN COMFYUI:\n" + access_url())
             print("Verify the full UI, workflow canvas and connection in your browser before approving downloads.")
 
 
