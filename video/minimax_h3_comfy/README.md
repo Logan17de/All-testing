@@ -22,6 +22,10 @@ Run the notebook's Diagnostics cell after Section 2, including while downloads a
 
 Installation output is streamed into the notebook and appended to `/content/h3_comfy_logs/setup.log`, also included in diagnostics. Failures name the setup stage and shell line; required custom-node installation failures stop the cell. The Extender width patch anchors to the unique render-function header and preserves upstream prompt-state capture. An unknown or ambiguous header still stops installation rather than applying an unverified patch.
 
+Preflight, health-check and restart output also stream into the notebook and append to `launcher.log`. On failure, existing diagnostics print automatically without retrying or launching another process. The Diagnostics cell calls the read-only helper directly so its output is visible in Colab.
+
+If cloudflared reports `Unauthorized: Invalid tunnel secret`, the connector credential was rejected. The launcher stops that newly rejected connector immediately and leaves ComfyUI running. Copy the current connector token for the existing tunnel serving `comfy.zetbros.com` from Cloudflare into the Colab secret `CF_TUNNEL_TOKEN`. Rerun **Section 4 → Section 5**, then verify the full browser UI before approving downloads. Section 4 rereads Colab Secrets instead of using a stale environment value. This recovery does not require rerunning installation, rotating credentials, changing DNS/Access or downloading models. Do not paste the token into chat or logs.
+
 The launcher passes the token through the documented [`TUNNEL_TOKEN` environment variable](https://developers.cloudflare.com/tunnel/reference/run-parameters/#token), equivalent to `--token`, so it is absent from process arguments. No permanent OS service is installed.
 
 After generation, save/download completed outputs before disconnecting and deleting the Colab runtime. The user controls those actions. Offline regression checks: `python -m pytest video/minimax_h3_comfy/tests/test_preflight.py -q`; these use mocks and temporary text fixtures, with no HTTP test server, GPU, tunnel connection or model download.

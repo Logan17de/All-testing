@@ -30,10 +30,11 @@ def redact(text):
     )
 
 
-def run_setup_command(args, *, label, cwd=None):
-    """Relay child output through notebook stdout and preserve a redacted setup log."""
+def run_logged_command(args, *, label, cwd=None, env=None, log_name="setup.log"):
+    """Relay child output through notebook stdout and preserve a redacted log."""
     LOG.mkdir(parents=True, exist_ok=True)
-    path = LOG / "setup.log"
+    path = LOG / log_name
+    phase = "Setup" if log_name == "setup.log" else "Launcher"
     with path.open("a", encoding="utf-8") as log:
         def emit(text):
             safe = redact(text)
@@ -43,18 +44,43 @@ def run_setup_command(args, *, label, cwd=None):
 
         emit(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} | {label} ===\n")
         try:
-            with subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE,
+            with subprocess.Popen(args, cwd=cwd, env=env, stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, text=True,
                                   encoding="utf-8", errors="replace", bufsize=1) as child:
                 for line in child.stdout:
                     emit(line)
                 status = child.wait()
         except OSError as error:
-            emit(f"Could not start setup command: {error}\n")
-            raise SystemExit(f"Setup stopped: {label}. See {path}.") from None
+            emit(f"Could not start command: {error}\n")
+            raise SystemExit(f"{phase} stopped: {label}. See {path}.") from None
         if status:
-            emit(f"SETUP FAILED: {label} (exit {status}). Log: {path}\n")
-            raise SystemExit("Setup stopped. Share the error lines above; model downloads remain gated.")
+            emit(f"{phase.upper()} FAILED: {label} (exit {status}). Log: {path}\n")
+            raise SystemExit(f"{phase} stopped. See the error lines above; model downloads remain gated.")
+
+
+def run_setup_command(args, *, label, cwd=None):
+    run_logged_command(args, label=label, cwd=cwd)
+
+
+def run_launcher(action, *, token=None):
+    """Notebook entry point: stream launcher errors, retaining the secret in env only."""
+    if action not in ("preflight", "check", "restart"):
+        raise ValueError("Unsupported launcher action.")
+    env = os.environ.copy()
+    env.pop("CF_TUNNEL_TOKEN", None)
+    env.pop("TUNNEL_TOKEN", None)
+    env["PYTHONUNBUFFERED"] = "1"
+    if token is not None:
+        env["CF_TUNNEL_TOKEN"] = extract_token(token)
+    try:
+        run_logged_command(["bash", str(Path(__file__).with_name("launch_comfy.sh")), action],
+                           label=action, env=env, log_name="launcher.log")
+    except SystemExit:
+        # Read existing evidence only; never start a second process after failure.
+        diagnostics()
+        raise
+    finally:
+        env.pop("CF_TUNNEL_TOKEN", None)
 
 
 def extract_token(raw):
@@ -64,9 +90,9 @@ def extract_token(raw):
     return tokens[0]
 
 
-def read_token():
+def read_token(*, use_environment=True):
     try:
-        if os.environ.get("CF_TUNNEL_TOKEN"):
+        if use_environment and os.environ.get("CF_TUNNEL_TOKEN"):
             return extract_token(os.environ["CF_TUNNEL_TOKEN"])
         from google.colab import userdata
         return extract_token(userdata.get("CF_TUNNEL_TOKEN"))
@@ -240,6 +266,7 @@ def start_tunnel():
                         "-o", "/usr/local/bin/cloudflared"], check=True)
         Path("/usr/local/bin/cloudflared").chmod(0o755)
     stop_processes(processes("cloudflared"))
+    print("Starting one Cloudflare connector; waiting for tunnel registration.", flush=True)
     env = os.environ.copy()
     # Official equivalent of --token, without a credential in process arguments.
     env["TUNNEL_TOKEN"] = token
@@ -250,6 +277,20 @@ def start_tunnel():
         if child.poll() is not None:
             tail_log("cloudflared.log")
             raise RuntimeError("cloudflared exited before registering.")
+        log_path = LOG / "cloudflared.log"
+        log_text = log_path.read_text(errors="replace") if log_path.exists() else ""
+        if "unauthorized: invalid tunnel secret" in log_text.lower():
+            # A rejected secret cannot succeed through retries. Stop only the
+            # connector just launched, retaining the healthy ComfyUI process.
+            info = process_info(child.pid)
+            if info and matches(info, "cloudflared"):
+                stop_processes([info])
+            raise RuntimeError(
+                "Cloudflare rejected CF_TUNNEL_TOKEN: Unauthorized: Invalid tunnel secret. "
+                "Copy the current connector token for the existing tunnel into Colab Secrets, "
+                "then rerun Section 4 (read secret) and Section 5 (preflight). "
+                "ComfyUI remains running; do not reinstall or download models."
+            )
         if registered():
             return
         time.sleep(1)
@@ -272,7 +313,7 @@ def diagnostics():
         except (OSError, subprocess.TimeoutExpired):
             print("Diagnostic command unavailable or timed out.")
     print("cloudflared running PIDs (this runtime):", [p["pid"] for p in processes("cloudflared")])
-    for name in ("setup.log", "cloudflared.log", "comfyui.log"):
+    for name in ("setup.log", "launcher.log", "cli-check.log", "cloudflared.log", "comfyui.log"):
         print(f"\n=== {name}: last 50 lines ===")
         tail_log(name)
 

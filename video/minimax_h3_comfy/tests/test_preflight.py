@@ -63,7 +63,8 @@ def test_download_completion_controls_restart(monkeypatch, tmp_path, failure):
     monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(hf_hub_download=download))
     monkeypatch.setattr(preflight.subprocess, "run", lambda args, **kwargs: events.append(args[-1]))
     namespace = {"PROCEED_WITH_H3_MODEL_DOWNLOADS": True, "H3_PREFLIGHT_COMPLETE": True,
-                 "H3_MODELS_DOWNLOADED": True, "PERSIST_MODELS_TO_DRIVE": False}
+                 "H3_MODELS_DOWNLOADED": True, "PERSIST_MODELS_TO_DRIVE": False,
+                 "comfy_preflight": types.SimpleNamespace(run_launcher=lambda action: events.append(action))}
     source = cell("## 7.").replace("/content/ComfyUI/models", tmp_path.as_posix())
     if failure:
         with pytest.raises(OSError, match="interrupted"):
@@ -265,3 +266,56 @@ def test_width_patch_refuses_unknown_or_ambiguous_source(tmp_path, source):
     )
     assert result.returncode == 1
     assert target.read_text(encoding="utf-8") == source
+
+
+def test_invalid_tunnel_secret_fails_fast_and_stops_only_rejected_connector(runtime, monkeypatch):
+    monkeypatch.setattr(preflight, "read_token", lambda: "eyJtest-token==")
+    monkeypatch.setattr(preflight.shutil, "which", lambda _: "cloudflared")
+    monkeypatch.setattr(preflight, "processes", lambda kind: [])
+    info = {"pid": 2560, "start": "50", "args": ["cloudflared", "tunnel", "run"]}
+    monkeypatch.setattr(preflight, "process_info", lambda pid: info if pid == 2560 else None)
+    stop = Mock()
+    monkeypatch.setattr(preflight, "stop_processes", stop)
+    monkeypatch.setattr(preflight, "start_process", lambda *a, **k: Mock(pid=2560, poll=lambda: None))
+    (runtime / "cloudflared.log").write_text('ERR Unauthorized: Invalid tunnel secret\n')
+    sleep = Mock()
+    monkeypatch.setattr(preflight.time, "sleep", sleep)
+    with pytest.raises(RuntimeError, match="Section 4.*Section 5"):
+        preflight.start_tunnel()
+    assert stop.call_args_list[-1].args == ([info],)
+    sleep.assert_not_called()
+
+
+@pytest.mark.parametrize("action", ["preflight", "check", "restart"])
+def test_notebook_launcher_streams_with_private_environment(runtime, monkeypatch, action):
+    calls = []
+    def logged(args, **kwargs):
+        calls.append(args[-1])
+        assert kwargs["env"]["PYTHONUNBUFFERED"] == "1"
+        assert kwargs["log_name"] == "launcher.log"
+        assert "eyJtest-token==" not in str(args)
+        if action == "preflight":
+            assert kwargs["env"]["CF_TUNNEL_TOKEN"] == "eyJtest-token=="
+        else:
+            assert "CF_TUNNEL_TOKEN" not in kwargs["env"]
+    monkeypatch.setattr(preflight, "run_logged_command", logged)
+    preflight.run_launcher(action, token="eyJtest-token==" if action == "preflight" else None)
+    assert calls == [action]
+
+
+def test_launcher_failure_shows_existing_diagnostics_without_retry(runtime, monkeypatch):
+    run = Mock(side_effect=SystemExit("Launcher stopped"))
+    diagnostics = Mock()
+    monkeypatch.setattr(preflight, "run_logged_command", run)
+    monkeypatch.setattr(preflight, "diagnostics", diagnostics)
+    with pytest.raises(SystemExit, match="Launcher stopped"):
+        preflight.run_launcher("preflight", token="eyJtest-token==")
+    run.assert_called_once()
+    diagnostics.assert_called_once()
+
+
+def test_notebook_secret_reload_ignores_stale_environment(monkeypatch):
+    monkeypatch.setenv("CF_TUNNEL_TOKEN", "eyJstale==")
+    monkeypatch.setitem(sys.modules, "google.colab", types.SimpleNamespace(
+        userdata=types.SimpleNamespace(get=lambda name: "eyJcurrent==")))
+    assert preflight.read_token(use_environment=False) == "eyJcurrent=="
