@@ -48,6 +48,7 @@ describe("RuntimeDaemon", () => {
       { version: 11, name: "durable_goal_action_effects" },
       { version: 12, name: "durable_agent_steps" },
       { version: 13, name: "durable_goal_blocking" },
+      { version: 14, name: "durable_project_run_locks" },
     ]);
   });
 
@@ -99,10 +100,10 @@ describe("RuntimeDaemon", () => {
           query: "ok",
           migrations: {
             status: "ok",
-            appliedCount: 13,
-            expectedCount: 13,
-            appliedVersion: 13,
-            expectedVersion: 13,
+            appliedCount: 14,
+            expectedCount: 14,
+            appliedVersion: 14,
+            expectedVersion: 14,
           },
         },
       },

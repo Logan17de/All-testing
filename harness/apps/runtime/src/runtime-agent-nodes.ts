@@ -8,6 +8,7 @@ import {
 } from "@zet-harness/core";
 import type { SqliteDatabase } from "@zet-harness/db";
 import { readAgentStep, recordAgentStep } from "@zet-harness/db/durable-agent-step-records";
+import { acquireProjectRunLock } from "@zet-harness/db/durable-project-lock-records";
 import {
   appendMessage,
   readConversation,
@@ -43,7 +44,7 @@ export const DEFAULT_RESERVE_OUTPUT_TOKENS = 1_024;
 const GOAL_SUMMARY_LIMIT = 50;
 
 export type AgentStepErrorCode =
-  "AGENT_CONFIG_INVALID" | "AGENT_CONVERSATION_NOT_FOUND" | "AGENT_NO_MODEL";
+  "AGENT_CONFIG_INVALID" | "AGENT_CONVERSATION_NOT_FOUND" | "AGENT_NO_MODEL" | "AGENT_PROJECT_BUSY";
 
 export class AgentStepError extends Error {
   readonly code: AgentStepErrorCode;
@@ -229,6 +230,19 @@ export function createAgentNodeExecutor(
     };
   };
 
+  /** 8.17: one autonomous run works on a project at a time. */
+  const holdProject = async (execution: RuntimeNodeExecution, projectId: string): Promise<void> => {
+    const outcome = await database.commit((writer) =>
+      acquireProjectRunLock(writer, { projectId, runId: execution.runId, nowMs: now() }),
+    );
+    if (!outcome.acquired) {
+      throw new AgentStepError(
+        "AGENT_PROJECT_BUSY",
+        `Run '${outcome.holderRunId}' is already working on this project.`,
+      );
+    }
+  };
+
   const offeredTools = (projectId: string): readonly ToolAdapter[] => [
     ...createGoalActionTools({ database, projectId, now, createId }),
     ...(options.tools ?? []).filter((tool) => granted(tool.manifest.behavior.requiredCapabilities)),
@@ -296,6 +310,7 @@ export function createAgentNodeExecutor(
         `Conversation '${conversationId}' does not exist.`,
       );
     }
+    await holdProject(execution, conversation.projectId);
     const tools = offeredTools(conversation.projectId);
     const decision = routeModel({
       manifests: options.models
@@ -412,6 +427,7 @@ export function createAgentNodeExecutor(
         `Conversation '${conversationId}' does not exist.`,
       );
     }
+    await holdProject(execution, conversation.projectId);
 
     const head = latestMessage(conversation.conversationId);
     const calls =

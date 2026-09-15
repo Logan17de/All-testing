@@ -280,7 +280,7 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 - [x] 8.14 Add chat/project/goals/todos UI.
 - [x] 8.15 Add multi-step coding integration test using the scripted provider.
 - [x] 8.16 Add golden trace assertion for a complete deterministic goal run.
-- [ ] 8.17 Add per-project run lock before two autonomous runs can mutate one project concurrently.
+- [x] 8.17 Add per-project run lock before two autonomous runs can mutate one project concurrently.
 
 **Checkpoint:** three-todo coding goal progresses to completion, survives restart, and emits reproducible durable trace ordering.
 

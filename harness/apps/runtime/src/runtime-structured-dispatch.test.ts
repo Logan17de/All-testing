@@ -131,7 +131,14 @@ const join: NodeDefinition = {
   },
 };
 
-/** A step that takes a little while, so a time budget can run out. */
+/**
+ * How long the slow step takes. Far longer than the wall-time limits the tests set, so
+ * a limit is spent by the slow step and never by clock granularity or scheduling:
+ * Windows' Date.now() can move in ~15 ms steps.
+ */
+const SLOW_STEP_MS = 500;
+
+/** A step that takes a while, so a time budget can run out. */
 const slow: NodeDefinition = {
   manifest: {
     type: "flow.slow",
@@ -148,7 +155,7 @@ const slow: NodeDefinition = {
     behavior: PURE,
   },
   execute: async (request) => {
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, SLOW_STEP_MS));
     const label = request.config["label"];
     const name = typeof label === "string" ? label : "";
     ran.push(name);
@@ -683,7 +690,7 @@ describe("hard limits (8.2)", () => {
   it("fails a run that passes its wall-time limit, before the next node starts", async () => {
     const db = database();
     const host = await flowHost();
-    const runId = await createRun(db, host, chainGraph({ maxWallTimeMs: 10 }, "flow.slow"));
+    const runId = await createRun(db, host, chainGraph({ maxWallTimeMs: 200 }, "flow.slow"));
     const { dispatcher } = startRuntime(db, host);
 
     const report = await dispatcher.dispatch(runId);
@@ -691,7 +698,7 @@ describe("hard limits (8.2)", () => {
     expect(report).toMatchObject({ status: "failed", code: "RUNTIME_BUDGET_EXCEEDED" });
     expect(ran).toEqual(["start", "middle"]);
     expect(eventPayloads(db, runId, "harness.run.budget-exceeded")).toEqual([
-      { budget: "run-wall-time", limit: 10 },
+      { budget: "run-wall-time", limit: 200 },
     ]);
   });
 

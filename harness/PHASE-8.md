@@ -590,6 +590,29 @@ observable behavior fails loudly.
   `scripts/golden/agent-goal-run.trace.json`. A missing golden file fails the test. A new golden is
   recorded only deliberately, with `ZET_UPDATE_GOLDEN=1`, and reviewed like any other change.
 
+## Slice 21 — one autonomous run per project (8.17)
+
+Two agent runs can no longer change the same project at the same time.
+
+- **The lock.** Migration 14 adds `project_run_locks`, one row per project naming the run that holds
+  it. `acquireProjectRunLock` gives the project to a run when nobody holds it, when that run already
+  holds it, or when the holder has completed, failed or been cancelled. While the holder is pending,
+  running or waiting (including waiting for a person), every other run is refused. Taking over a
+  finished run's lock needs no cleanup hook, so a crash can never leave a project locked forever.
+- **Where it applies.** Every agent model step and tools step takes its conversation's project lock
+  in its own serialized commit before calling a model or a tool. A run that cannot take it fails that
+  step with `AGENT_PROJECT_BUSY`, naming the run that holds the project, before anything changes. A
+  retried step that already completed answers from its record without touching the lock.
+- **Not locked.** People's own edits through the API and the web app, and graphs without agent
+  steps, are unaffected: the lock guards against two autonomous writers, not against a person working
+  alongside one.
+
+Covered by `runtime-project-lock.test.ts`: the lock passing from a completed run and then a cancelled
+run to the next, a run re-taking its own lock, and an agent step refused while another active run
+holds the project, with the lock left with its holder.
+
 ## Next
 
-The per-project run lock (8.17).
+Phase 8's remaining item is 8.2's run-wide budgets for agent work: model calls, tool calls, tokens
+and cost, enforced alongside the loop and node-execution bounds that already hold. After that comes
+Phase 9 (replay, memory and triggers).

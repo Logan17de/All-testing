@@ -39,6 +39,10 @@
     "./durable-agent-step-records": {
       "types": "./src/durable-agent-step-records.ts",
       "default": "./dist/durable-agent-step-records.js"
+    },
+    "./durable-project-lock-records": {
+      "types": "./src/durable-project-lock-records.ts",
+      "default": "./dist/durable-project-lock-records.js"
     }
   },
   "scripts": {
