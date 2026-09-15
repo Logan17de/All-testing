@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { DURABLE_CONVERSATIONS_MIGRATION } from "./durable-conversation-records.js";
 import {
   DURABLE_GOALS_MIGRATION,
+  DURABLE_GOAL_BLOCKING_MIGRATION,
   createGoal,
   createTodo,
   listRunnableTodos,
@@ -45,6 +46,7 @@ const withDatabase = (run: (fixture: Fixture) => void): void => {
         DURABLE_PROJECTS_MIGRATION,
         DURABLE_CONVERSATIONS_MIGRATION,
         DURABLE_GOALS_MIGRATION,
+        DURABLE_GOAL_BLOCKING_MIGRATION,
       ],
       { now: () => 1 },
     );

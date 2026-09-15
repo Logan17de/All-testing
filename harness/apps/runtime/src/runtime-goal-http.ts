@@ -9,6 +9,7 @@ import {
   listRunnableTodos,
   listTodos,
   readGoal,
+  reconcileGoalProgress,
   readTodo,
   selectNextRunnableTodo,
   setGoalStatus,
@@ -336,16 +337,19 @@ export async function handleGoalHttp(
         const title = requiredString(body, "title");
         const fields = textFields(body);
         const dependsOn = optionalIdList(body, "dependsOn");
-        const todo = await database.commit((connection) =>
-          createTodo(connection, {
+        const todo = await database.commit((connection) => {
+          const created = createTodo(connection, {
             ...fields,
             todoId: createId(),
             goalId,
             title,
             ...(dependsOn === undefined ? {} : { dependsOn }),
             nowMs: now(),
-          }),
-        );
+          });
+          // 8.13: a new todo can reopen a goal its todos had blocked.
+          reconcileGoalProgress(connection, created.goalId, now());
+          return created;
+        });
         writeRuntimeJson(response, 201, { todo });
         return;
       }
@@ -390,22 +394,28 @@ export async function handleGoalHttp(
     let todo: DurableTodoRecord | undefined;
     if (action === "status") {
       const change = statusChange<DurableTodoStatus>(body);
-      todo = await database.commit((connection) =>
-        setTodoStatus(connection, todoId, { ...change, nowMs: now() }),
-      );
+      todo = await database.commit((connection) => {
+        const changed = setTodoStatus(connection, todoId, { ...change, nowMs: now() });
+        // 8.13: finishing, blocking or starting a todo can complete, block or reopen its goal.
+        if (changed !== undefined) reconcileGoalProgress(connection, changed.goalId, now());
+        return changed;
+      });
     } else {
       onlyFields(body, ["title", "description", "priority", "position", "dependsOn"]);
       const fields = textFields(body);
       const position = optionalInteger(body, "position");
       const dependsOn = optionalIdList(body, "dependsOn");
-      todo = await database.commit((connection) =>
-        updateTodo(connection, todoId, {
+      todo = await database.commit((connection) => {
+        const changed = updateTodo(connection, todoId, {
           ...fields,
           ...(position === undefined ? {} : { position }),
           ...(dependsOn === undefined ? {} : { dependsOn }),
           nowMs: now(),
-        }),
-      );
+        });
+        // 8.13: new dependencies can block a goal, and dropped ones can reopen it.
+        if (changed !== undefined) reconcileGoalProgress(connection, changed.goalId, now());
+        return changed;
+      });
     }
     if (todo === undefined) throw todoNotFound();
     writeRuntimeJson(response, 200, { todo });

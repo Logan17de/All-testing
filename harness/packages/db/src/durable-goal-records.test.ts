@@ -8,6 +8,7 @@ import {
 } from "./durable-conversation-records.js";
 import {
   DURABLE_GOALS_MIGRATION,
+  DURABLE_GOAL_BLOCKING_MIGRATION,
   DurableGoalError,
   GOALS_TABLE,
   TODOS_TABLE,
@@ -56,6 +57,7 @@ const withDatabase = (run: (fixture: Fixture) => void): void => {
         DURABLE_PROJECTS_MIGRATION,
         DURABLE_CONVERSATIONS_MIGRATION,
         DURABLE_GOALS_MIGRATION,
+        DURABLE_GOAL_BLOCKING_MIGRATION,
       ],
       { now: () => 1 },
     );
@@ -113,6 +115,7 @@ describe("durable goals and todos", () => {
         description: "Now",
         status: "open",
         blockedReason: null,
+        blockedBy: null,
         priority: 5,
         createdAtMs: 20,
         updatedAtMs: 20,

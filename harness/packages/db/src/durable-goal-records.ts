@@ -18,6 +18,7 @@ const LIST_LIMIT = 1_000;
 export const GOAL_STATUSES = ["open", "blocked", "completed", "cancelled"] as const;
 export type DurableGoalStatus = (typeof GOAL_STATUSES)[number];
 export type GoalListStatus = DurableGoalStatus | "all";
+export type GoalBlockedBy = "person" | "todos";
 
 export const TODO_STATUSES = ["pending", "in_progress", "blocked", "done", "cancelled"] as const;
 export type DurableTodoStatus = (typeof TODO_STATUSES)[number];
@@ -57,6 +58,8 @@ export interface DurableGoalRecord {
   readonly status: DurableGoalStatus;
   /** Set exactly while the goal is blocked. */
   readonly blockedReason: string | null;
+  /** Who blocked the goal: a person, or its own todos. Set exactly while it is blocked. */
+  readonly blockedBy: GoalBlockedBy | null;
   /** 0 is most urgent. */
   readonly priority: number;
   readonly createdAtMs: number;
@@ -365,6 +368,7 @@ function toGoal(row: Record<string, unknown>): DurableGoalRecord {
     description: text(row["description"]),
     status: text(row["status"]) as DurableGoalStatus,
     blockedReason: optionalText(row["blocked_reason"]),
+    blockedBy: blockedByOf(row["blocked_by"]),
     priority: integer(row["priority"]),
     createdAtMs: integer(row["created_at_ms"]),
     updatedAtMs: integer(row["updated_at_ms"]),
@@ -469,6 +473,7 @@ export function createGoal(
     description,
     status: "open",
     blockedReason: null,
+    blockedBy: null,
     priority,
     createdAtMs: nowMs,
     updatedAtMs: nowMs,
@@ -575,18 +580,21 @@ export function setGoalStatus(
   }
   const updatedAtMs = Math.max(nowMs, current.updatedAtMs);
   const closedAtMs = CLOSED_GOAL_STATUSES.has(input.status) ? updatedAtMs : null;
+  // A goal blocked through this call was blocked by a person.
+  const blockedBy: GoalBlockedBy | null = input.status === "blocked" ? "person" : null;
 
   connection
     .prepare(
       `UPDATE ${GOALS_TABLE}
-       SET status = ?, blocked_reason = ?, closed_at_ms = ?, updated_at_ms = ?
+       SET status = ?, blocked_reason = ?, blocked_by = ?, closed_at_ms = ?, updated_at_ms = ?
        WHERE goal_id = ?`,
     )
-    .run(input.status, reason, closedAtMs, updatedAtMs, goalId);
+    .run(input.status, reason, blockedBy, closedAtMs, updatedAtMs, goalId);
   return Object.freeze({
     ...current,
     status: input.status,
     blockedReason: reason,
+    blockedBy,
     closedAtMs,
     updatedAtMs,
   });
@@ -1095,4 +1103,123 @@ export function recordGoalActionEffect(
       JSON.stringify(input.result),
       nowMs,
     );
+}
+function blockedByOf(value: unknown): GoalBlockedBy | null {
+  return value === "person" || value === "todos" ? value : null;
+}
+
+/**
+ * Record who blocked each goal (8.13). Goals blocked before this migration were
+ * blocked by a person. Append new migrations; never edit v1-v12.
+ */
+export const DURABLE_GOAL_BLOCKING_MIGRATION: SqliteMigration = Object.freeze({
+  version: 13,
+  name: "durable_goal_blocking",
+  sql: `
+ALTER TABLE ${GOALS_TABLE}
+ADD COLUMN blocked_by TEXT CHECK (blocked_by IS NULL OR blocked_by IN ('person', 'todos'));
+
+UPDATE ${GOALS_TABLE} SET blocked_by = 'person' WHERE status = 'blocked';
+
+CREATE TRIGGER goals_blocked_by_on_insert
+BEFORE INSERT ON ${GOALS_TABLE}
+WHEN (NEW.status = 'blocked') <> (NEW.blocked_by IS NOT NULL)
+BEGIN
+  SELECT RAISE(ABORT, 'a goal records who blocked it exactly while it is blocked');
+END;
+
+CREATE TRIGGER goals_blocked_by_on_update
+BEFORE UPDATE OF status, blocked_by ON ${GOALS_TABLE}
+WHEN (NEW.status = 'blocked') <> (NEW.blocked_by IS NOT NULL)
+BEGIN
+  SELECT RAISE(ABORT, 'a goal records who blocked it exactly while it is blocked');
+END;
+`,
+});
+
+export type GoalProgressChange = "unchanged" | "completed" | "blocked" | "reopened";
+
+export interface GoalProgress {
+  readonly goal: DurableGoalRecord;
+  readonly change: GoalProgressChange;
+}
+
+/**
+ * Bring a goal's status in line with its todos (8.13).
+ *
+ * - An open goal whose todos are all finished, at least one of them done, completes.
+ * - An open goal with unfinished todos, none in progress and none able to start, is
+ *   blocked by its todos, with a reason naming the blocked ones.
+ * - A goal its todos blocked reopens once a todo is in progress or can start, and
+ *   completes directly when its todos are all finished.
+ *
+ * Goals a person blocked, completed or cancelled are never changed, and neither is
+ * any goal of an archived project. Returns undefined when no goal has this id.
+ */
+export function reconcileGoalProgress(
+  connection: GoalStatementRunner,
+  goalId: string,
+  nowMs: number,
+): GoalProgress | undefined {
+  const time = checkTime(nowMs);
+  const goal = readGoal(connection, goalId);
+  if (goal === undefined) return undefined;
+  const unchanged: GoalProgress = Object.freeze({ goal, change: "unchanged" });
+  const project = connection
+    .prepare(`SELECT status FROM ${PROJECTS_TABLE} WHERE project_id = ?`)
+    .get(goal.projectId);
+  if (project?.["status"] !== "active") return unchanged;
+  const managed =
+    goal.status === "open" || (goal.status === "blocked" && goal.blockedBy === "todos");
+  if (!managed) return unchanged;
+
+  const todos = listTodos(connection, goalId);
+  const done = new Set(todos.filter((todo) => todo.status === "done").map((todo) => todo.todoId));
+  const unfinished = todos.filter((todo) => !FINISHED_TODO_STATUSES.has(todo.status));
+  const moving = unfinished.some(
+    (todo) =>
+      todo.status === "in_progress" ||
+      (todo.status === "pending" && todo.dependsOn.every((dependency) => done.has(dependency))),
+  );
+
+  let status: "open" | "blocked" | "completed";
+  let reason: string | null = null;
+  if (todos.length > 0 && unfinished.length === 0 && done.size > 0) {
+    status = "completed";
+  } else if (unfinished.length > 0 && !moving) {
+    status = "blocked";
+    const blocked = unfinished
+      .filter((todo) => todo.status === "blocked")
+      .map((todo) => todo.title);
+    reason = (
+      blocked.length > 0
+        ? `Waiting on blocked todos: ${blocked.join("; ")}`
+        : "No remaining todo can start."
+    ).slice(0, BLOCKED_REASON_MAX_LENGTH);
+  } else {
+    status = "open";
+  }
+  if (status === goal.status && reason === goal.blockedReason) return unchanged;
+
+  const updatedAtMs = Math.max(time, goal.updatedAtMs);
+  const blockedBy: GoalBlockedBy | null = status === "blocked" ? "todos" : null;
+  const closedAtMs = status === "completed" ? updatedAtMs : null;
+  connection
+    .prepare(
+      `UPDATE ${GOALS_TABLE}
+       SET status = ?, blocked_reason = ?, blocked_by = ?, closed_at_ms = ?, updated_at_ms = ?
+       WHERE goal_id = ?`,
+    )
+    .run(status, reason, blockedBy, closedAtMs, updatedAtMs, goalId);
+  return Object.freeze({
+    goal: Object.freeze({
+      ...goal,
+      status,
+      blockedReason: reason,
+      blockedBy,
+      closedAtMs,
+      updatedAtMs,
+    }),
+    change: status === "completed" ? "completed" : status === "blocked" ? "blocked" : "reopened",
+  });
 }

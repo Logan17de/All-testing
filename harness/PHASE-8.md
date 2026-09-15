@@ -482,8 +482,36 @@ second model request seeing the tool result and the new goal; a model that never
 loop's hard bound; and a retried model step answered from its record without a second model call or
 message.
 
+## Slice 17 — blocked goals and goal completion (8.13)
+
+Goals now follow their todos: they complete when the work is done, block when the work cannot
+move, and reopen when it can, without ever overriding a person.
+
+- **Who blocked a goal.** Migration 13 adds `blocked_by` to goals: `person` when someone blocked it
+  through the API or a goal action, `todos` when its own todos did. Triggers keep it set exactly while
+  a goal is blocked, and goals blocked before the migration count as blocked by a person.
+- **`reconcileGoalProgress`.** An open goal whose todos are all finished, at least one of them done,
+  completes. An open goal with unfinished todos where none is in progress and none can start (every
+  remaining todo is blocked or waits on one that is) is blocked by its todos, with a reason naming the
+  blocked todos. A goal its todos blocked reopens as soon as a todo is in progress or can start, and
+  completes directly if everything is finished. Goals a person blocked, completed or cancelled, and
+  every goal of an archived project, are left alone. The call reports what changed.
+- **Applied where todos change.** The todo endpoints (create, change, status) and the model-visible
+  todo actions reconcile the todo's goal in the same commit as the todo change. The actions return
+  the goal and `goalChange`, so a model sees at once that it finished or blocked a goal. A person
+  can still reopen a completed goal.
+- **Blocked agents.** The agent model step has a new `blocked` output that is true when the project
+  has unfinished goals and every one of them is blocked. A graph can route on it, for example to a
+  human approval, instead of spending model turns on work that cannot move.
+
+Covered by `durable-goal-progress.test.ts` (completion rules, blocking with named todos, reopening
+from blocked and pending todos, dependency-gated blocking, a person's block left alone, archived
+projects, and the new triggers), `runtime-goal-progress-http.test.ts`, which blocks, reopens and
+completes a goal through todo endpoints, and an agent loop test where every goal is blocked and the
+model step reports it.
+
 ## Next
 
-Blocked-state and goal-completion logic (8.13), then the chat, project, goal and todo UI (8.14), the
-multi-step coding integration test (8.15), a golden trace (8.16) and the per-project run lock
-(8.17).
+The chat, project, goal and todo UI (8.14), the multi-step coding integration test on the scripted
+provider (8.15), a golden trace for a complete deterministic goal run (8.16) and the per-project run
+lock (8.17).

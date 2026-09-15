@@ -16,7 +16,13 @@ import {
   createConversation,
   readConversationMessages,
 } from "@zet-harness/db/durable-conversation-records";
-import { listGoals } from "@zet-harness/db/durable-goal-records";
+import {
+  createGoal,
+  createTodo,
+  listGoals,
+  reconcileGoalProgress,
+  setTodoStatus,
+} from "@zet-harness/db/durable-goal-records";
 import { createProject } from "@zet-harness/db/durable-project-records";
 import { SortableIdGenerator } from "@zet-harness/db/sortable-id";
 import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "@zet-harness/graph";
@@ -360,11 +366,41 @@ describe("the bounded agent loop", () => {
       },
     } as unknown as RuntimeNodeExecution);
 
-    expect(retried.outputs).toEqual({ again: false, finishReason: "stop" });
+    expect(retried.outputs).toEqual({ again: false, blocked: false, finishReason: "stop" });
     expect(model.requests).toHaveLength(1);
     expect(readConversationMessages(database.connection(), conversationId)).toHaveLength(2);
     expect(() =>
       database.connection().prepare(`UPDATE ${AGENT_STEPS_TABLE} SET kind = 'tools'`).run(),
     ).toThrow(/append-only/u);
+  });
+
+  it("tells the graph when every unfinished goal of the project is blocked", async () => {
+    const { database, projectId, run } = await setup([reply("Everything is waiting on someone.")]);
+    const connection = database.connection();
+    const ids = new SortableIdGenerator({ now: () => 2_000 });
+    const goal = createGoal(connection, { goalId: ids.next(), projectId, title: "Ship", nowMs: 5 });
+    const todo = createTodo(connection, {
+      todoId: ids.next(),
+      goalId: goal.goalId,
+      title: "Get sign-off",
+      nowMs: 5,
+    });
+    setTodoStatus(connection, todo.todoId, { status: "blocked", reason: "Legal review", nowMs: 6 });
+    expect(reconcileGoalProgress(connection, goal.goalId, 7)).toMatchObject({
+      change: "blocked",
+      goal: { status: "blocked", blockedBy: "todos" },
+    });
+
+    const { runId, report } = await run(2);
+
+    expect(report.status).toBe("completed");
+    const row = connection
+      .prepare(`SELECT outputs_json FROM ${AGENT_STEPS_TABLE} WHERE run_id = ? AND kind = 'model'`)
+      .get(runId) as { readonly outputs_json: string } | undefined;
+    expect(JSON.parse(row?.outputs_json ?? "null")).toEqual({
+      again: false,
+      blocked: true,
+      finishReason: "stop",
+    });
   });
 });

@@ -57,6 +57,7 @@ export function createAgentPlugin(): HarnessPlugin {
           outputs: {
             again: { schema: { type: "boolean" } },
             finishReason: { schema: { type: "string" } },
+            blocked: { schema: { type: "boolean" } },
           },
           configSchema: {
             type: "object",

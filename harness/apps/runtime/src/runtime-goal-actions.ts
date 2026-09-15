@@ -12,6 +12,7 @@ import {
   readGoal,
   readGoalActionEffect,
   readTodo,
+  reconcileGoalProgress,
   recordGoalActionEffect,
   selectNextRunnableTodo,
   setGoalStatus,
@@ -262,6 +263,12 @@ export function createGoalActionTools(options: GoalActionToolOptions): readonly 
     return todo;
   };
 
+  /** 8.13: after a todo changes, its goal may complete, block or reopen. The model sees the result. */
+  const progressOf = (connection: GoalStatementRunner, goalId: string): JsonObject => {
+    const progress = reconcileGoalProgress(connection, goalId, now());
+    return progress === undefined ? {} : { goal: json(progress.goal), goalChange: progress.change };
+  };
+
   const read = (
     context: AdapterInvocationContext,
     perform: (connection: GoalStatementRunner) => JsonObject,
@@ -452,7 +459,7 @@ export function createGoalActionTools(options: GoalActionToolOptions): readonly 
             ...(dependsOn === undefined ? {} : { dependsOn }),
             nowMs: now(),
           });
-          return { todo: json(todo) };
+          return { todo: json(todo), ...progressOf(connection, todo.goalId) };
         }),
     ),
     tool(
@@ -488,7 +495,7 @@ export function createGoalActionTools(options: GoalActionToolOptions): readonly 
             ...(dependsOn === undefined ? {} : { dependsOn }),
             nowMs: now(),
           });
-          return { todo: json(updated) };
+          return { todo: json(updated), ...progressOf(connection, todo.goalId) };
         }),
     ),
     tool(
@@ -515,7 +522,7 @@ export function createGoalActionTools(options: GoalActionToolOptions): readonly 
             ...(reason === undefined ? {} : { reason }),
             nowMs: now(),
           });
-          return { todo: json(updated) };
+          return { todo: json(updated), ...progressOf(connection, todo.goalId) };
         }),
     ),
     tool(

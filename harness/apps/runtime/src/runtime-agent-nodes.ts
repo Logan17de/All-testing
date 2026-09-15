@@ -265,6 +265,14 @@ export function createAgentNodeExecutor(
     return { role: "developer", parts: [{ kind: "text", text: lines.join("\n") }] };
   };
 
+  /** 8.13: the project has unfinished goals and every one of them is blocked. */
+  const projectBlocked = (projectId: string): boolean => {
+    const goals = listGoals(database.connection(), projectId).filter(
+      (goal) => goal.status === "open" || goal.status === "blocked",
+    );
+    return goals.length > 0 && goals.every((goal) => goal.status === "blocked");
+  };
+
   const runModelStep = async (
     execution: RuntimeNodeExecution,
   ): Promise<RuntimeNodeExecutionResult> => {
@@ -344,6 +352,7 @@ export function createAgentNodeExecutor(
 
     const outputs = {
       again: result.finishReason === "tool-calls",
+      blocked: projectBlocked(conversation.projectId),
       finishReason: result.finishReason,
     };
     const usage = {
