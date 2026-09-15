@@ -562,7 +562,11 @@ export function createNativeFileSystemTools(
 
       // Write to a sibling temp file and rename, so a crash mid-write cannot
       // leave a half-written file where the durable record claims a full one.
-      const temporaryPath = `${target.absolutePath}.${context.logicalEffectId}.tmp`;
+      // The name comes from a hash of the effect id: effect ids contain ':', which
+      // Windows does not allow in file names.
+      const temporaryPath = `${target.absolutePath}.${sha256(
+        Buffer.from(context.logicalEffectId, "utf8"),
+      ).slice(0, 16)}.tmp`;
       try {
         context.signal.throwIfAborted();
         const handle = await open(temporaryPath, "wx");

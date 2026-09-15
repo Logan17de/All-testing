@@ -541,7 +541,37 @@ branch and error reasons), and the web build, which type-checks every page and r
 Not yet in the UI: editing or retrying a message as a new branch, starting an agent run from a
 conversation, and reordering todos or editing dependencies.
 
+## Slice 19 — a multi-step coding run on the scripted provider (8.15)
+
+`scripts/agent-coding-integration.test.ts` runs a real coding task end to end. Only the model is
+scripted; everything else is the production path.
+
+- **Setup.** A project with a temporary workspace folder, a conversation, a goal and two todos, the
+  second depending on the first, and a user request. The scripted provider gets a declared context
+  window, and the native file-system tools are rooted at the workspace with `fs:read` and `fs:write`
+  granted.
+- **The run.** The agent graph (start → Loop → agent model step → agent tools step → finish) is
+  compiled, stored and dispatched by the durable dispatcher. Over six model turns the agent starts
+  the first todo and writes `src/greet.ts`, reads it back, rewrites it with `overwrite`, finishes the
+  todo, starts the dependent todo and writes `src/greet.check.ts`, finishes it, and replies in text,
+  which ends the loop.
+- **What it proves.** The files on disk hold exactly the final contents. Both todos are done, and the
+  goal completed on its own through the 8.13 reconcile inside the todo action. The conversation holds
+  the user message, five assistant/tool pairs and the final reply, all linked to the run. None of the
+  eight tool results is an error. The third model request had the first draft's contents in its
+  context, so each turn really sees the previous turn's results. The model was offered the file and
+  goal tools under their provider-safe names.
+
+- **A bug it found.** The first run showed every file write failing on Windows. The write tool named its
+  temp file after the logical effect id, and effect ids contain `:`, which Windows does not allow in
+  file names; the failed open was reported as "does not exist". The temp name now comes from a hash of
+  the effect id, which stays deterministic and is valid on every filesystem. The test also resolves its
+  temporary workspace to its real path, because a Windows 8.3 short path would fail the tools'
+  containment check.
+
+It runs in `npm test` with every other integration script.
+
 ## Next
 
-The multi-step coding integration test on the scripted provider (8.15), a golden trace for a
-complete deterministic goal run (8.16) and the per-project run lock (8.17).
+A golden trace assertion for a complete deterministic goal run (8.16) and the per-project run lock
+(8.17).
