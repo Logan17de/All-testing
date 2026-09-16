@@ -76,9 +76,25 @@ second node runs and every row of the parent is unchanged; retrying a failed run
 loop over to finish its iterations; asking a waiting approval again in the fork; and the refusals)
 and `runtime-fork-http.test.ts`, which forks a run through the API and replays the fork.
 
-Not yet: a fork button and a parent link in the run inspector, which come with 9.3.
+## Slice 3 — lineage in the run view and the inspector (9.3)
+
+Forks are now visible, and one can be made from the browser.
+
+- **In the run view.** A run reports `forkedFrom` (the parent run, the event it was cut after, the
+  parent checkpoint it was rebuilt from and its own starting checkpoint) and `forks`, the runs made
+  from it. A run's own `parent_run_id` is authoritative; the fork point comes from its metadata, and
+  a run whose metadata cannot be read still reports its parent. The run list reports each run's
+  parent too.
+- **In the inspector.** A forked run says where it came from and links to that run, the panel lists
+  the forks made from a run, and the run list marks a fork. A **Fork run** button starts a new run
+  from where this one has got to and opens it; the run it came from is not changed.
+- **HTTP.** The editor proxies the fork through `POST /api/editor/runs/:id/fork`, with the same
+  loopback, same-origin and JSON checks as every other editor mutation.
+
+Covered by a run-view test for a fork's parent, a run's forks and the parent in the run list, and by
+driving the browser: forking a finished run from the inspector and following the new run.
 
 ## Next
 
-9.3: show a run's parent, fork point and forks in the run view and the run inspector, then refuse
-to resume a run against an edited graph (9.4).
+9.4: refuse to resume a run against an edited graph, so a changed plan cannot silently continue an
+old run.

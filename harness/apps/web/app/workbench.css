@@ -632,6 +632,15 @@ button.diagItem:disabled {
   font-size: 0.84rem;
 }
 
+.forkList {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+}
+
 .timeline {
   display: grid;
   gap: 2px;

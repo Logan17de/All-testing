@@ -56,6 +56,12 @@ export default async function RunsPage() {
                     <Link href={`/runs/${encodeURIComponent(run.runId)}`}>
                       <code>{run.runId.slice(0, 16)}</code>
                     </Link>
+                    {run.parentRunId === null || run.parentRunId === undefined ? null : (
+                      <span className="muted small">
+                        {" "}
+                        forked from <code>{run.parentRunId.slice(0, 16)}</code>
+                      </span>
+                    )}
                   </td>
                   <td>{run.graphId}</td>
                   <td>

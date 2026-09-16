@@ -6,6 +6,7 @@ import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "@zet-harness/graph";
 import type { HarnessPlugin, NodeDefinition } from "@zet-harness/plugin-api";
 
 import { RUNTIME_DATABASE_MIGRATIONS } from "./runtime-daemon.js";
+import { forkRun } from "./runtime-fork.js";
 import {
   RuntimeGraphError,
   compileEditorGraph,
@@ -290,6 +291,31 @@ describe("storing runs", () => {
     const error = await createRunFromCompiledGraph(db, changed).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(RuntimeGraphError);
     expect((error as RuntimeGraphError).code).toBe("GRAPH_REVISION_CONFLICT");
+  });
+
+  it("shows a fork's parent and lists the forks made from a run", async () => {
+    const host = await hostWithNodes();
+    const db = database();
+    const { runId } = await createRunFromCompiledGraph(db, await compile(host));
+    const fork = await forkRun(db, runId);
+
+    const forkView = readRunView(db, fork.runId, (value) => value);
+    expect(forkView.forkedFrom).toEqual({
+      parentRunId: runId,
+      throughEventId: fork.throughEventId,
+      parentCheckpointId: null,
+      checkpointId: fork.checkpointId,
+    });
+    expect(forkView.forks).toEqual([]);
+
+    const parentView = readRunView(db, runId, (value) => value);
+    expect(parentView.forkedFrom).toBeNull();
+    expect(parentView.forks).toMatchObject([
+      { runId: fork.runId, status: "pending", throughEventId: fork.throughEventId },
+    ]);
+    expect(listRecentRuns(db).find((summary) => summary.runId === fork.runId)?.parentRunId).toBe(
+      runId,
+    );
   });
 
   it("reports a missing run as not found", () => {

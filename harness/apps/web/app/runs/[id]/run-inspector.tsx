@@ -12,6 +12,7 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -54,6 +55,20 @@ interface RunEvent {
   readonly occurredAtMs: number;
 }
 
+interface RunLineage {
+  readonly parentRunId: string;
+  readonly throughEventId: number | null;
+  readonly parentCheckpointId: number | null;
+  readonly checkpointId: number | null;
+}
+
+interface RunFork {
+  readonly runId: string;
+  readonly status: string;
+  readonly throughEventId: number | null;
+  readonly createdAtMs: number;
+}
+
 interface RunView {
   readonly runId: string;
   readonly status: string;
@@ -62,6 +77,9 @@ interface RunView {
   readonly createdAtMs: number;
   readonly startedAtMs: number | null;
   readonly finishedAtMs: number | null;
+  /** Lineage is absent from older daemons, so both fields are optional here. */
+  readonly forkedFrom?: RunLineage | null;
+  readonly forks?: readonly RunFork[];
   readonly graph: unknown;
   readonly nodes: readonly RunNodeState[];
   readonly attempts: readonly RunAttempt[];
@@ -143,6 +161,9 @@ function Inspector({ runId }: { readonly runId: string }) {
   const [measured, setMeasured] = useState<
     Readonly<Record<string, { readonly width: number; readonly height: number }>>
   >({});
+  const [forking, setForking] = useState(false);
+  const [forkError, setForkError] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     let cancelled = false;
@@ -272,6 +293,37 @@ function Inspector({ runId }: { readonly runId: string }) {
     [graph, stateByNode],
   );
 
+  /** Start a new run from where this one has got to. This run is not changed. */
+  const forkThisRun = async (): Promise<void> => {
+    setForking(true);
+    setForkError(null);
+    try {
+      const response = await fetch(`/api/editor/runs/${encodeURIComponent(runId)}/fork`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const body = (await response.json().catch(() => null)) as unknown;
+      if (!response.ok) {
+        setForkError(reasonOf(body, "The run could not be forked."));
+        return;
+      }
+      const fork =
+        typeof body === "object" && body !== null && "fork" in body
+          ? (body as { readonly fork: unknown }).fork
+          : undefined;
+      const forkId =
+        typeof fork === "object" && fork !== null && "runId" in fork
+          ? (fork as { readonly runId: unknown }).runId
+          : undefined;
+      if (typeof forkId === "string") router.push(`/runs/${encodeURIComponent(forkId)}`);
+    } catch {
+      setForkError("The runtime daemon is not reachable.");
+    } finally {
+      setForking(false);
+    }
+  };
+
   if (run === null) {
     return (
       <div className="panel">
@@ -285,6 +337,7 @@ function Inspector({ runId }: { readonly runId: string }) {
   }
 
   const active = !TERMINAL.has(run.status);
+  const lineage = run.forkedFrom ?? null;
   const firstEventAt = run.timeline[0]?.occurredAtMs ?? run.createdAtMs;
   const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId);
   const selectedState = selectedNodeId === null ? undefined : stateByNode.get(selectedNodeId);
@@ -298,10 +351,38 @@ function Inspector({ runId }: { readonly runId: string }) {
           {STATUS_TEXT[run.status] ?? run.status}
           {run.startedAtMs === null ? "" : ` · ${duration(run.startedAtMs, run.finishedAtMs)}`}
         </span>
+        <button
+          type="button"
+          className="btn"
+          disabled={forking}
+          title="Start a new run from this one's history"
+          onClick={() => {
+            void forkThisRun();
+          }}
+        >
+          {forking ? "Forking…" : "Fork run"}
+        </button>
         <Link className="btn" href="/editor">
           Open editor
         </Link>
       </header>
+      {lineage === null ? null : (
+        <p className="muted small">
+          Forked from{" "}
+          <Link href={`/runs/${encodeURIComponent(lineage.parentRunId)}`}>
+            <code>{lineage.parentRunId.slice(0, 16)}</code>
+          </Link>
+          {lineage.throughEventId === null
+            ? ""
+            : `, at event ${String(lineage.throughEventId)} of its history`}
+          . Work finished by then was reused here; everything after it ran again.
+        </p>
+      )}
+      {forkError === null ? null : (
+        <p className="warn" role="alert">
+          {forkError}
+        </p>
+      )}
       {error === null ? null : (
         <p className="warn" role="alert">
           {error}
@@ -349,12 +430,15 @@ function Inspector({ runId }: { readonly runId: string }) {
             describeOp={(opIndex) => nodeByOp.get(opIndex) ?? `op ${String(opIndex)}`}
           />
           {selectedNode === undefined ? (
-            <Timeline
-              events={run.timeline}
-              startedAt={firstEventAt}
-              nodeByOp={nodeByOp}
-              onSelect={setSelectedNodeId}
-            />
+            <>
+              <ForkList forks={run.forks ?? []} />
+              <Timeline
+                events={run.timeline}
+                startedAt={firstEventAt}
+                nodeByOp={nodeByOp}
+                onSelect={setSelectedNodeId}
+              />
+            </>
           ) : (
             <NodeDetails
               node={selectedNode}
@@ -378,6 +462,29 @@ function Inspector({ runId }: { readonly runId: string }) {
           )}
         </aside>
       </div>
+    </>
+  );
+}
+
+/** Runs forked from this one, newest last. */
+function ForkList({ forks }: { readonly forks: readonly RunFork[] }) {
+  if (forks.length === 0) return null;
+  return (
+    <>
+      <h2 className="panelTitle">Forks of this run</h2>
+      <ul className="forkList">
+        {forks.map((fork) => (
+          <li key={fork.runId}>
+            <Link href={`/runs/${encodeURIComponent(fork.runId)}`}>
+              <code>{fork.runId.slice(0, 16)}</code>
+            </Link>{" "}
+            <span className={`runStatus runStatus--${fork.status}`}>{fork.status}</span>
+            {fork.throughEventId === null ? null : (
+              <span className="muted small"> from event {String(fork.throughEventId)}</span>
+            )}
+          </li>
+        ))}
+      </ul>
     </>
   );
 }

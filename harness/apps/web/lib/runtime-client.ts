@@ -150,6 +150,8 @@ export interface RunSummary {
   readonly status: string;
   readonly graphId: string;
   readonly createdAtMs: number;
+  /** The run this one was forked from; absent from older daemons. */
+  readonly parentRunId?: string | null;
 }
 
 export function fetchRecentRuns(): Promise<RuntimeFetch<{ readonly runs: readonly RunSummary[] }>> {
