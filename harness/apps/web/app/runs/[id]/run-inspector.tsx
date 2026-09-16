@@ -23,9 +23,11 @@ import {
   type GraphNode,
   type PaletteEntry,
 } from "../../../lib/graph-document";
+import { isRunReplayView, replayNodeStatuses, type RunReplayView } from "../../../lib/replay-view";
 import { harnessNodeTypes, type HarnessFlowNode } from "../../harness-node";
 import { ApprovalCards } from "./approval-cards";
 import { GraphChanges } from "./graph-changes";
+import { ReplayPanel } from "./run-replay";
 
 interface RunNodeState {
   readonly opIndex: number;
@@ -164,6 +166,8 @@ function Inspector({ runId }: { readonly runId: string }) {
   >({});
   const [forking, setForking] = useState(false);
   const [forkError, setForkError] = useState<string | null>(null);
+  const [replay, setReplay] = useState<RunReplayView | null>(null);
+  const [replayIndex, setReplayIndex] = useState<number | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -234,11 +238,25 @@ function Inspector({ runId }: { readonly runId: string }) {
     [run],
   );
 
+  /** During a replay the canvas shows the run as it stood at that step, not as it ended. */
+  const replayStatuses = useMemo(
+    () =>
+      replay === null || replayIndex === null
+        ? undefined
+        : replayNodeStatuses(replay.steps, replayIndex),
+    [replay, replayIndex],
+  );
+  const replayNodeId =
+    replay === null || replayIndex === null ? null : (replay.steps[replayIndex]?.nodeId ?? null);
+
   const flowNodes = useMemo<HarnessFlowNode[]>(
     () =>
       (graph?.nodes ?? []).map((node, index) => {
         const entry = findManifest(palette, node.type, node.version);
-        const state = stateByNode.get(node.id);
+        const state =
+          replayStatuses === undefined
+            ? stateByNode.get(node.id)
+            : { status: replayStatuses.get(node.id) };
         const size = measured[node.id];
         return {
           id: node.id,
@@ -247,7 +265,7 @@ function Inspector({ runId }: { readonly runId: string }) {
             x: 60 + (index % 4) * 240,
             y: 60 + Math.floor(index / 4) * 170,
           },
-          selected: node.id === selectedNodeId,
+          selected: node.id === (replayStatuses === undefined ? selectedNodeId : replayNodeId),
           draggable: false,
           ...(size === undefined ? {} : { measured: size }),
           data: {
@@ -260,11 +278,11 @@ function Inspector({ runId }: { readonly runId: string }) {
             diagnostics: [],
             isolated: entry?.isolated ?? false,
             readOnly: true,
-            ...(state === undefined ? {} : { status: state.status }),
+            ...(state?.status === undefined ? {} : { status: state.status }),
           },
         };
       }),
-    [graph, palette, stateByNode, selectedNodeId, measured],
+    [graph, palette, stateByNode, selectedNodeId, measured, replayStatuses, replayNodeId],
   );
 
   const onNodesChange = useCallback((changes: NodeChange<HarnessFlowNode>[]) => {
@@ -325,6 +343,37 @@ function Inspector({ runId }: { readonly runId: string }) {
     }
   };
 
+  /** Read this run back from its own journal. Nothing is called and nothing is written. */
+  const startReplay = async (): Promise<void> => {
+    if (replay !== null) {
+      setReplayIndex(0);
+      return;
+    }
+    try {
+      const response = await fetch(`/api/editor/runs/${encodeURIComponent(runId)}/replay`, {
+        cache: "no-store",
+      });
+      const body = (await response.json().catch(() => null)) as unknown;
+      if (!response.ok) {
+        setError(reasonOf(body, "This run could not be replayed."));
+        return;
+      }
+      const value =
+        typeof body === "object" && body !== null && "replay" in body
+          ? (body as { readonly replay: unknown }).replay
+          : undefined;
+      if (!isRunReplayView(value)) {
+        setError("The runtime did not answer with a replay of this run.");
+        return;
+      }
+      setSelectedNodeId(null);
+      setReplay(value);
+      setReplayIndex(0);
+    } catch {
+      setError("The runtime daemon is not reachable.");
+    }
+  };
+
   if (run === null) {
     return (
       <div className="panel">
@@ -365,6 +414,17 @@ function Inspector({ runId }: { readonly runId: string }) {
           }}
         >
           {forking ? "Forking…" : "Fork run"}
+        </button>
+        <button
+          type="button"
+          className="btn"
+          title="Walk this run's recorded history one step at a time"
+          onClick={() => {
+            if (replayIndex === null) void startReplay();
+            else setReplayIndex(null);
+          }}
+        >
+          {replayIndex === null ? "Replay" : "Stop replay"}
         </button>
         <Link className="btn" href="/editor">
           Open editor
@@ -419,6 +479,11 @@ function Inspector({ runId }: { readonly runId: string }) {
               nodesConnectable={false}
               onNodesChange={onNodesChange}
               onNodeClick={(_event, node) => {
+                if (replay !== null && replayIndex !== null) {
+                  const position = replay.steps.findLastIndex((step) => step.nodeId === node.id);
+                  if (position >= 0) setReplayIndex(position);
+                  return;
+                }
                 setSelectedNodeId(node.id);
               }}
               onPaneClick={() => {
@@ -440,7 +505,17 @@ function Inspector({ runId }: { readonly runId: string }) {
             active={active}
             describeOp={(opIndex) => nodeByOp.get(opIndex) ?? `op ${String(opIndex)}`}
           />
-          {selectedNode === undefined ? (
+          {replay !== null && replayIndex !== null ? (
+            <ReplayPanel
+              replay={replay}
+              index={replayIndex}
+              startedAt={firstEventAt}
+              onIndex={setReplayIndex}
+              onClose={() => {
+                setReplayIndex(null);
+              }}
+            />
+          ) : selectedNode === undefined ? (
             <>
               <GraphChanges graphId={run.graphId} revisionId={run.revisionId} />
               <ForkList forks={run.forks ?? []} />

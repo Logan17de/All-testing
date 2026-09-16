@@ -301,6 +301,11 @@ outright and nothing keeps a copy, so it stays a person's act. The same `maxMemo
 that decides what a step is told also decides whether it may write, and the goal and memory
 actions now share one at-most-once write path.
 
+**Replay in the inspector:** a run page can now walk 9.1's recorded replay one step at a time,
+with each step in plain words, its derived inputs and recorded outputs, and the canvas showing
+the state the graph was in at that point. Nothing runs: it is the run's own journal read back,
+and a journal that disagrees with the stored records says so.
+
 - [x] 9.1 Add read-only recorded trace replay with no external/model/tool/human invocation.
 - [x] 9.2 Add execution fork from a checkpoint; keep historical run immutable.
 - [x] 9.3 Record parent run + fork checkpoint metadata.

@@ -700,6 +700,15 @@ button.timeline__row:focus-visible {
   background: #1a1a1a;
 }
 
+.timeline__row--current {
+  background: #1f1f1f;
+  box-shadow: inset 2px 0 0 #6ee7a0;
+}
+
+.replayIssues {
+  margin-bottom: 10px;
+}
+
 .timeline__time {
   color: #8f8f8f;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

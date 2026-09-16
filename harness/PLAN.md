@@ -60,8 +60,10 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
 - **Also just finished:** an agent writing memories of its own, the other half of 9.6. A step
   can list, write and correct what its project remembers, marked as the agent's and naming the
   run; forgetting stays a person's act.
-- **Next:** the optional items 11.4 and 11.6-11.9, each gated on a need the plan names, and the
-  last thing Phase 9 left: a step-by-step replay view in the run inspector.
+- **Also just finished:** the step-by-step replay view in the run inspector, the last thing
+  Phase 9 left for later. Nothing of Phase 9 is now outstanding except SQLite full-text search
+  and webhook payloads, both deliberately deferred with their conditions written down.
+- **Next:** the optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),
   11.4 and 11.6-11.9, which the plan gates on a need that has not arrived.
 - **Where the detail lives:** `TODO.md` is the item-by-item checklist, and each `PHASE-*.md` explains

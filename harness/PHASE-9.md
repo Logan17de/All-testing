@@ -332,8 +332,8 @@ Phase 9 is complete.
 
 ## What Phase 9 left for later
 
-- Showing a replay step by step in the run inspector. The memory panel has since been built;
-  it is described below.
+- ~~Showing a replay step by step in the run inspector~~, and ~~a memory panel in the web app~~:
+  both have since been built, and are described below.
 - ~~An agent writing memories of its own~~; it does now, see the last section of this file.
 - SQLite full-text search, deliberately deferred with the conditions written down in Slice 8.
 - Firing a webhook trigger with a payload the graph can read: today a firing starts the plan as it
@@ -405,3 +405,27 @@ model writes a decision and is told it again on its next step, it corrects a mem
 and is refused one from another project, a step with `maxMemories: 0` is offered no memory actions
 at all, and a retried write with the same logical effect id produces one memory, not two. The
 existing goal action tests cover the shared path from the other side.
+
+## Since then — walking a run, step by step
+
+9.1 could already replay a run from its own records; the inspector only ever showed the raw event
+timeline. A run page now has a **Replay** button, and pressing it reads the run back one step at a
+time.
+
+- **Nothing runs.** The panel calls `/api/runs/:id/replay`, which walks the journal and the attempt
+  records: no node executor, model, tool or person is invoked and nothing is written. What it shows
+  is what happened, not what would happen now.
+- **Each step in plain words.** "check completed on attempt 1", "route chose left", "loop went round
+  again", "A person rejected the write", "The run completed" — with the step's derived inputs,
+  recorded outputs and usage, or its error, exactly as 9.1 reconstructs them.
+- **The canvas follows.** Each node takes the state it had as of that step, so walking forward fills
+  the graph in the order the run filled it in, and the step's own node is the selected one. Clicking
+  a node while replaying jumps to the last thing that happened to it.
+- **Disagreements are shown, not hidden.** If the journal and the stored records do not tell one
+  consistent story, the panel says so and lists the issues 9.1 found, because a damaged run is
+  exactly the run someone needs to look at.
+
+Covered by `replay-view.test.ts`: the state of a graph as of any step, including a loop that is
+running until it leaves and a node waiting for a person, and the sentence each kind of step reads
+as. Checked in the browser against a real daemon: stepping through a completed run, the canvas
+filling in as the steps advance, and stopping the replay returning the run to its timeline.
