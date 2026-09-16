@@ -26,6 +26,11 @@ import {
   type RuntimeGoalHttpServices,
 } from "./runtime-goal-http.js";
 import {
+  handleMemoryHttp,
+  isMemoryHttpPath,
+  type RuntimeMemoryHttpServices,
+} from "./runtime-memory-http.js";
+import {
   RuntimeEventCursorError,
   RuntimeEventStream,
   type RuntimeEventStreamUnsubscribe,
@@ -101,6 +106,7 @@ export class RuntimeHttpServer {
   private readonly projectServices: RuntimeProjectHttpServices | undefined;
   private readonly conversationServices: RuntimeConversationHttpServices | undefined;
   private readonly goalServices: RuntimeGoalHttpServices | undefined;
+  private readonly memoryServices: RuntimeMemoryHttpServices | undefined;
   private readonly eventClients = new Map<ServerResponse, () => void>();
   private readonly security: RuntimeApiSecurity;
   private readonly redaction: RuntimeRedactionRegistry;
@@ -127,6 +133,8 @@ export class RuntimeHttpServer {
       readonly conversations?: RuntimeConversationHttpServices;
       /** Goal and todo endpoints, with status transitions and todo dependencies. */
       readonly goals?: RuntimeGoalHttpServices;
+      /** What a project remembers across conversations and runs. */
+      readonly memories?: RuntimeMemoryHttpServices;
     } = {},
   ) {
     this.host = options.host ?? DEFAULT_RUNTIME_HOST;
@@ -138,6 +146,7 @@ export class RuntimeHttpServer {
     this.projectServices = services.projects;
     this.conversationServices = services.conversations;
     this.goalServices = services.goals;
+    this.memoryServices = services.memories;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
     this.approvals = services.approvals;
     this.security = new RuntimeApiSecurity(options.allowedOrigins);
@@ -278,6 +287,20 @@ export class RuntimeHttpServer {
           return;
         }
         void handleGoalHttp(request, response, url, this.security, goals).catch(
+          (error: unknown) => {
+            writeRuntimeApiError(response, error);
+          },
+        );
+        return;
+      }
+      // Before project paths: /api/projects/:id/memories belongs to memories.
+      if (isMemoryHttpPath(url.pathname)) {
+        const memories = this.memoryServices;
+        if (memories === undefined) {
+          writeJson(response, 503, { error: { code: "MEMORY_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void handleMemoryHttp(request, response, url, this.security, memories).catch(
           (error: unknown) => {
             writeRuntimeApiError(response, error);
           },

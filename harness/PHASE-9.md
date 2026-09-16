@@ -121,8 +121,31 @@ Covered by `runtime-plan-identity.test.ts`: an edited plan row, a node whose plu
 a node that no longer resolves, the entry being journaled once however often the run is woken, and
 an unchanged run still completing.
 
+## Slice 5 — what a project remembers (9.5)
+
+A project can now keep small pieces of written text that outlive any one conversation or run.
+
+- **A memory** is a title and a body, of one kind: a `fact`, a `preference`, a `decision` or a plain
+  `note`. It records who wrote it, a person or an agent, and an agent's memory names the run it came
+  from. It is deliberately not a transcript: conversations keep those, and a run keeps its journal.
+- **Pinning.** A pinned memory is always offered first. Listing is ordered for recall — pinned
+  first, then most recently changed — so a reader with a budget can stop at any point and still hold
+  what matters most. That ordering is the one 9.6 will retrieve with.
+- **Forgetting.** A memory can be removed outright rather than archived. Everything else durable in
+  the harness is kept, but keeping a "forgotten" copy would defeat the point of being asked to
+  forget something.
+- **Storage.** Migration 15 adds `project_memories`, a STRICT table bound to its project and,
+  optionally, the run that wrote it, with the usual identity trigger: a memory keeps its id,
+  project, source and creation time.
+- **HTTP.** `GET`/`POST /api/projects/:id/memories` (with `pinned=true`, `kind` and `limit`
+  filters), and `GET`/`PATCH`/`DELETE /api/memories/:id`, refusing unknown fields, unknown kinds,
+  empty or oversized text, and writes to an archived project.
+
+Covered by `durable-memory-records.test.ts` and `runtime-memory-http.test.ts`.
+
+Not yet: an agent reading or writing memories, which is 9.6, and a memory panel in the web app.
+
 ## Next
 
-9.5-9.8: project memory — CRUD and pinned memory, recent/pinned retrieval with context-budget
-accounting, summarizing a conversation only when needed, and SQLite FTS only if simple retrieval
-proves insufficient.
+9.6: offer pinned and recent memories to an agent within a context budget, and let it remember
+something itself.

@@ -32,15 +32,15 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
 
 ### You are here (updated 2026-09-15)
 
-- **Branch:** `zet-harness-v1` on GitHub holds all local work; the latest slice is 9.4 (plan identity checks).
+- **Branch:** `zet-harness-v1` on GitHub holds all local work; the latest slice is 9.5 (project memory).
 - **Just finished — Phase 8:** structured bounded loops, subgraphs, projects, conversations with
   branching messages, goals and todos with dependencies and automatic completion, the budgeted
   context builder, the durable model→tool→model agent loop with run-wide model, tool, token and cost
   limits, the per-project run lock, and the web workspace (projects, goals, todos, chat). 141 test
   files and 1394 tests, typecheck, lint, format, startup smoke and the web build all pass.
-- **Working on now — Phase 9:** 9.1 (recorded replay), 9.2 (forking a run), 9.3 (lineage in the
-  run view and inspector) and 9.4 (refusing to resume a run whose plan or plugin code changed)
-  are done, see `PHASE-9.md`; **9.5-9.8, project memory**, are next.
+- **Working on now — Phase 9:** 9.1 (recorded replay), 9.2 (forking a run), 9.3 (lineage),
+  9.4 (refusing to resume changed work) and 9.5 (what a project remembers) are done, see
+  `PHASE-9.md`; **9.6, offering that memory to an agent within a context budget**, is next.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins), 10.11
   (install plugins from npm or Git), 11.2–11.9 (packaging and optional scale-out).
 - **Where the detail lives:** `TODO.md` is the item-by-item checklist, and each `PHASE-*.md` explains
@@ -182,8 +182,8 @@ Phase 9  Replay + memory + triggers        🚧 IN PROGRESS
            ├─ 9.2 fork from a checkpoint, historical run stays immutable        ✅
            ├─ 9.3 parent run + fork checkpoint metadata                         ✅
            ├─ 9.4 graph/run identity checks before resuming                     ✅
-           ├─ 9.5 project memory CRUD + pinned memory                           ⏳
-           ├─ 9.6 recent/pinned retrieval + context-budget accounting           ⏳
+           ├─ 9.5 project memory CRUD + pinned memory                           ✅
+           ├─ 9.6 recent/pinned retrieval + context-budget accounting           ▶ CURRENT
            ├─ 9.7 conversation summarization only when needed                   ⏳
            ├─ 9.8 SQLite FTS only if simple retrieval is not enough             ⏳
            ├─ 9.9 manual/cron/webhook/API triggers, one run-creation path       ⏳
@@ -207,7 +207,7 @@ Phase 11 Packaging + optional scale-out    🚧 1/9
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ✅ Complete except 6.12 (needs a real local model endpoint) |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ✅ Complete — **v0.1 boundary reached** |
 | **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | ✅ Complete — bounded loops, subgraphs, projects, conversations, goals/todos, context builder, agent loop with run-wide budgets, workspace UI and run lock (see `PHASE-8.md`) |
-| **9 — Replay/Fork + Memory + Triggers + External clients** | recorded replay, checkpoint forks, lightweight memory, cron/webhook/API triggers, Copycat/client bridge | 🚧 In progress — 9.1-9.4 replay, fork, lineage, identity done; memory next (see `PHASE-9.md`) |
+| **9 — Replay/Fork + Memory + Triggers + External clients** | recorded replay, checkpoint forks, lightweight memory, cron/webhook/API triggers, Copycat/client bridge | 🚧 In progress — 9.1-9.5 replay, fork, lineage, identity, memory done; retrieval next (see `PHASE-9.md`) |
 | **10 — MCP + Custom-node SDK + Trust tiers** | MCP through normal tool registry, local plugin loading, SDK/package manifests, process/WASI isolation options | ✅ Complete except 10.10 (WASI) and 10.11 (npm/Git install) |
 | **11 — Packaging + Optional scale-out** | Windows setup, config wizard, backup/import/export, optional desktop shell, optional Postgres/remote workers | 🚧 11.1 done; 11.2–11.9 pending |
 

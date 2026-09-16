@@ -110,7 +110,7 @@ Phase 5  Effects + permissions + humans     ✅
 Phase 6  Model + tool adapters              ✅ 20/21 (6.12 needs a real local model endpoint)
 Phase 7  Visual graph + inspector           ✅ ← Harness v0.1 boundary
 Phase 8  Loops + projects + agent mode      ✅ complete
-Phase 9  Replay + memory + triggers         🚧 in progress (9.1-9.4 replay, fork, lineage, identity done)
+Phase 9  Replay + memory + triggers         🚧 in progress (9.1-9.5 replay, fork, lineage, identity, memory done)
 Phase 10 MCP + custom-node SDK + trust      ✅ 9/11 (10.10 WASI, 10.11 npm/Git install)
 Phase 11 Packaging + optional scale-out     🚧 1/9
 ```
