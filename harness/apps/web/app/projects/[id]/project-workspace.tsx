@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { workspaceRequest } from "../../../lib/workspace-client";
+import { MemoryPanel } from "./memory-panel";
 import {
   BLOCKABLE_TODO_STATUSES,
   GOAL_QUICK_ACTIONS,
@@ -407,6 +408,8 @@ export function ProjectWorkspace({ projectId }: { readonly projectId: string }) 
             </form>
           )}
         </section>
+
+        <MemoryPanel projectId={projectId} archived={archived} />
       </div>
     </>
   );

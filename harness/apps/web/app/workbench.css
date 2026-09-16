@@ -793,6 +793,26 @@ button.timeline__row:focus-visible {
   margin-right: 2rem;
 }
 
+/* 9.5 — what a project remembers */
+.memoryFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+  margin: 0.75rem 0;
+}
+
+.memoryFilters .field {
+  margin: 0;
+}
+
+.memoryText {
+  margin: 0.15rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
 .chatText {
   margin: 0;
   white-space: pre-wrap;

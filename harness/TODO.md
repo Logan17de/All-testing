@@ -288,6 +288,13 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 
 ## Phase 9 — Replay/fork, memory, triggers, external clients
 
+**Memory in the editor:** 9.5 and 9.6 stored a project's memories and offered them to an agent;
+a project's workspace now shows them too, in the same recall order — pinned first, then most
+recently changed — with a search box, a kind filter, pinning, editing and forgetting. Forgetting
+asks first and then removes the memory, because a kept copy would defeat the point of being asked
+to forget it. The browser reaches memories through the same guarded editor proxy as everything
+else, which now carries `PATCH` and `DELETE` as well as `POST`.
+
 - [x] 9.1 Add read-only recorded trace replay with no external/model/tool/human invocation.
 - [x] 9.2 Add execution fork from a checkpoint; keep historical run immutable.
 - [x] 9.3 Record parent run + fork checkpoint metadata.

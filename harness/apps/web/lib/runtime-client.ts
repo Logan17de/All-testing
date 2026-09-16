@@ -122,14 +122,24 @@ export function getFromRuntime(path: string): Promise<RuntimeResponse> {
   return sendToRuntime(path, { method: "GET" });
 }
 
+/** The methods a proxy route may use to change something in the runtime. */
+export type RuntimeMutationMethod = "POST" | "PATCH" | "DELETE";
+
 /**
- * POST to the daemon on the user's behalf.
+ * Change something in the daemon on the user's behalf.
  *
  * The CSRF token is fetched here, on the server, and never sent to the browser:
  * a page cannot leak a token it never held. Callers must have passed
  * `guardLocalRequest` first, or this would authorize a cross-site request.
+ *
+ * A delete carries no body, but still declares the JSON content type, because
+ * that declaration is what a plain cross-site form cannot make.
  */
-export async function postToRuntime(path: string, body: unknown): Promise<RuntimeResponse> {
+export async function mutateRuntime(
+  path: string,
+  method: RuntimeMutationMethod,
+  body?: unknown,
+): Promise<RuntimeResponse> {
   const session = await getFromRuntime("/api/session");
   const token =
     typeof session.body === "object" && session.body !== null && "csrfToken" in session.body
@@ -139,10 +149,14 @@ export async function postToRuntime(path: string, body: unknown): Promise<Runtim
     return session.status === 200 ? RUNTIME_UNREACHABLE : session;
   }
   return sendToRuntime(path, {
-    method: "POST",
+    method,
     headers: { "content-type": "application/json", "x-zet-csrf": token },
-    body: JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
+}
+
+export function postToRuntime(path: string, body: unknown): Promise<RuntimeResponse> {
+  return mutateRuntime(path, "POST", body);
 }
 
 export interface RunSummary {

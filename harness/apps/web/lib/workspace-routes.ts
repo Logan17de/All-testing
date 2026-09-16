@@ -6,7 +6,7 @@
  * the runtime's sortable format, and only these query parameters pass.
  */
 
-const ID = "[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+import { SORTABLE_ID_SOURCE as ID } from "./ids";
 
 const ALLOWED_PATHS: readonly RegExp[] = [
   /^projects$/u,

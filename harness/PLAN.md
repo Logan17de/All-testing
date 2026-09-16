@@ -54,7 +54,11 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
   environment, then file, then default.
   11.5 compares two stored revisions and says what changed, separating a move on the canvas
   from a change to what runs; the run inspector shows it against the revision a run used.
-- **Next:** the optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
+- **Also just finished:** the memory panel Phase 9 recorded as left for later. A project's
+  workspace now shows what it remembers, in the order an agent is offered it, with search, a
+  kind filter, pinning, editing and forgetting through the guarded editor proxy.
+- **Next:** the optional items 11.4 and 11.6-11.9, each gated on a need the plan names, and the
+  rest of what Phase 9 left: a step-by-step replay view, and an agent writing memories itself.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),
   11.4 and 11.6-11.9, which the plan gates on a need that has not arrived.
 - **Where the detail lives:** `TODO.md` is the item-by-item checklist, and each `PHASE-*.md` explains

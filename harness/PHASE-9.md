@@ -143,7 +143,8 @@ A project can now keep small pieces of written text that outlive any one convers
 
 Covered by `durable-memory-records.test.ts` and `runtime-memory-http.test.ts`.
 
-Not yet: an agent reading or writing memories, which is 9.6, and a memory panel in the web app.
+Not yet: an agent reading or writing memories, which is 9.6. The panel a person manages
+memories with came later, and is described at the end of this file.
 
 ## Slice 6 — telling an agent what the project remembers (9.6)
 
@@ -166,7 +167,7 @@ Covered by `runtime-agent-memory.test.ts`: the order and formatting an agent see
 there is nothing to remember, memories dropped first under a tight byte cap while the conversation
 and goals survive, and both `maxMemories` bounds.
 
-Not yet: an agent writing memories of its own, and a memory panel in the web app.
+Not yet: an agent writing memories of its own.
 
 ## Slice 7 — summarizing a conversation only when it no longer fits (9.7)
 
@@ -330,8 +331,46 @@ Phase 9 is complete.
 
 ## What Phase 9 left for later
 
-- Showing a replay step by step in the run inspector, and a memory panel in the web app.
+- Showing a replay step by step in the run inspector. The memory panel has since been built;
+  it is described below.
 - An agent writing memories of its own; today it is offered them and a person writes them.
 - SQLite full-text search, deliberately deferred with the conditions written down in Slice 8.
 - Firing a webhook trigger with a payload the graph can read: today a firing starts the plan as it
   was compiled.
+
+## Since then — a memory panel in the editor
+
+A project's workspace page now has a third panel, beside its conversations and goals, for what the
+project remembers. It is the person's side of 9.5 and 9.6: until now a memory could only be written
+through the runtime's HTTP API, while an agent step was already being offered them.
+
+- **The same order an agent sees.** The panel lists memories in recall order — pinned first, then
+  most recently changed — because that is the order a step is offered them in, and the order a
+  context under pressure trims from the bottom of. What a reader sees at the top is what a step is
+  most likely to be told.
+- **Reading back.** A search box filters on any word in a memory, a kind selector narrows to facts,
+  preferences, decisions or notes, and a checkbox shows only pinned ones. An empty search asks for
+  everything rather than sending an empty `q`, which the runtime refuses: asking for everything is
+  not the same as asking for nothing.
+- **Writing, changing, forgetting.** A person can write a memory, edit its text or its kind, pin and
+  unpin it, and forget it. Forgetting asks first and then removes the memory outright, because a
+  quiet copy would defeat the point of being asked to forget something.
+- **Who wrote it.** Each memory says whether a person or a run wrote it, so an agent's own memories
+  are distinguishable the day the other half of 9.6 arrives.
+- **Through the guarded proxy.** `/api/editor/projects/:id/memories` and `/api/editor/memories/:id`
+  join the existing editor routes: the browser never holds the runtime's CSRF token, only a
+  well-formed id passes, and only the four list parameters the runtime understands are forwarded,
+  taken once each so a repeated parameter cannot smuggle a second value past it. `PATCH` and
+  `DELETE` needed the proxy's server-side helper to carry any change method rather than only `POST`;
+  a delete sends no body but still declares the JSON content type, because that declaration is what
+  a plain cross-site form cannot make.
+- **An archived project** keeps its memories and still shows them, but writes no new ones: the
+  runtime refuses, so the panel does not offer.
+
+Covered by `memory-routes.test.ts` (what the proxy forwards, what it refuses, and a repeated
+parameter taken once) and `memory-client.test.ts` (the URL a filtered recall produces, the method
+and content type each change sends, and a runtime refusal reported in the runtime's own words), and
+checked in the browser against a real daemon: writing two memories, pinning one and seeing it move
+to the top, filtering to pinned only, searching a word that appears in one body, editing a memory's
+text and kind, and forgetting one — after which the runtime answers 404 for it and lists only the
+memory that was kept.
