@@ -98,7 +98,7 @@ function countLabel(count: number, noun: string): string {
   return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-function validationText(validation: Validation, problems: number): string {
+function validationText(validation: Validation, problems: number, shown: boolean): string {
   switch (validation) {
     case "idle":
       return "Add a node to start.";
@@ -107,6 +107,9 @@ function validationText(validation: Validation, problems: number): string {
     case "valid":
       return "Ready to run.";
     case "invalid":
+      // Until someone tries to run, a half-drawn graph is not a graph with mistakes
+      // in it: it is a graph that is not finished. Saying so beats marking it wrong.
+      if (!shown) return "Not ready to run yet.";
       return problems === 1 ? "1 problem to fix." : `${String(problems)} problems to fix.`;
     case "unreachable":
       return "Can't reach the runtime to check this graph.";
@@ -144,6 +147,8 @@ function EditorWorkspace() {
     Readonly<Record<string, { readonly width: number; readonly height: number }>>
   >({});
   const [diagnostics, setDiagnostics] = useState<readonly EditorDiagnostic[]>([]);
+  // Problems are held back until someone asks to run; see `problemsShown` below.
+  const [problemsRequested, setProblemsRequested] = useState(false);
   const [validation, setValidation] = useState<Validation>("idle");
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -223,6 +228,9 @@ function EditorWorkspace() {
             (body as { readonly valid?: unknown }).valid === true;
           setDiagnostics(diagnosticsOf(body));
           setValidation(valid ? "valid" : "invalid");
+          // A graph that has become runnable has nothing to mark, and the next thing
+          // built after it starts quiet again.
+          if (valid) setProblemsRequested(false);
         })
         .catch((error: unknown) => {
           if (error instanceof DOMException && error.name === "AbortError") return;
@@ -236,8 +244,22 @@ function EditorWorkspace() {
   }, [validationBody]);
 
   const empty = graph.nodes.length === 0;
-  const shownDiagnostics = useMemo(() => (empty ? [] : diagnostics), [empty, diagnostics]);
   const shownValidation: Validation = empty ? "idle" : validation;
+
+  /**
+   * Problems appear when someone tries to run, not while they are still drawing.
+   *
+   * A node dropped on the canvas has nothing wired to it yet, and a graph halfway
+   * through being built is not a graph with mistakes in it. So the compiler keeps
+   * checking in the background and the status line says whether the graph is ready,
+   * but nothing is marked wrong until **Run graph** is pressed — and once a graph
+   * becomes runnable again the marks clear, so the next thing built is quiet too.
+   */
+  const problemsShown = problemsRequested && !empty;
+  const shownDiagnostics = useMemo(
+    () => (problemsShown ? diagnostics : []),
+    [problemsShown, diagnostics],
+  );
 
   const nodeProblems = useMemo(() => {
     const problems = new Map<string, EditorDiagnostic[]>();
@@ -483,8 +505,18 @@ function EditorWorkspace() {
 
   const runGraph = async (): Promise<void> => {
     if (palette === null) return;
-    setRunning(true);
     setRunError(null);
+    if (validation === "invalid") {
+      // This is the answer to "why won't it run?", so it arrives with the reasons.
+      setProblemsRequested(true);
+      setRunError(
+        diagnostics.length === 1
+          ? "This graph cannot run yet: one problem is marked below."
+          : `This graph cannot run yet: ${String(diagnostics.length)} problems are marked below.`,
+      );
+      return;
+    }
+    setRunning(true);
     try {
       // Every run stores a new revision, so an edited graph never collides with
       // the revision an earlier run recorded.
@@ -509,6 +541,7 @@ function EditorWorkspace() {
       if (response.status === 422) {
         setDiagnostics(diagnosticsOf(body));
         setValidation("invalid");
+        setProblemsRequested(true);
       }
       setRunError(errorReason(body, "The run could not be started."));
     } catch {
@@ -666,7 +699,7 @@ function EditorWorkspace() {
                 }`}
                 aria-hidden="true"
               />
-              {validationText(shownValidation, shownDiagnostics.length)}
+              {validationText(shownValidation, shownDiagnostics.length, problemsShown)}
             </p>
             <p className="muted small">
               {countLabel(graph.nodes.length, "node")} ·{" "}
@@ -677,7 +710,7 @@ function EditorWorkspace() {
               <button
                 type="button"
                 className="btn btn--primary"
-                disabled={palette === null || empty || running || shownValidation === "invalid"}
+                disabled={palette === null || empty || running}
                 onClick={() => {
                   void runGraph();
                 }}
