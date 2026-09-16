@@ -87,6 +87,11 @@ describe("memory endpoints", () => {
     expect(pinned.body["memories"]).toHaveLength(1);
     const byKind = await send("GET", `/api/projects/${projectId}/memories?kind=fact`);
     expect(byKind.body["memories"]).toHaveLength(1);
+    const found = await send("GET", `/api/projects/${projectId}/memories?q=thursday`);
+    expect(
+      (found.body["memories"] as { readonly title: string }[]).map((entry) => entry.title),
+    ).toEqual(["Deploys happen on Thursdays"]);
+    expect((await send("GET", `/api/projects/${projectId}/memories?q=%20`)).status).toBe(400);
 
     const changed = await send("PATCH", `/api/memories/${memory.memoryId}`, {
       body: "Thursday afternoons, never Fridays.",

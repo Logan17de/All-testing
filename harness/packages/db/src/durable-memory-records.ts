@@ -126,8 +126,20 @@ export interface ListMemoriesOptions {
   /** Only pinned memories. */
   readonly pinnedOnly?: boolean;
   readonly kind?: DurableMemoryKind;
+  /**
+   * Only memories whose title or body contains this text, ignoring case.
+   *
+   * Plain containment, not a query language: a project's memories are few and
+   * already ordered for recall, so nothing here needs a search index yet.
+   */
+  readonly search?: string;
   /** Defaults to and is capped at 500. */
   readonly limit?: number;
+}
+
+/** Escape the wildcards so a search for "100%" means those characters. */
+function likePattern(search: string): string {
+  return `%${search.replace(/[\\%_]/gu, (character) => `\\${character}`)}%`;
 }
 
 function fail(code: DurableMemoryErrorCode, message: string, field?: string): never {
@@ -278,6 +290,11 @@ export function listMemories(
   if (options.kind !== undefined) {
     conditions.push("kind = ?");
     parameters.push(checkKind(options.kind));
+  }
+  const search = options.search?.trim() ?? "";
+  if (search.length > 0) {
+    conditions.push("(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')");
+    parameters.push(likePattern(search), likePattern(search));
   }
   const rows = connection
     .prepare(

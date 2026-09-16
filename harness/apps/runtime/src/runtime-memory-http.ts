@@ -144,7 +144,12 @@ function optionalPinned(body: Record<string, unknown>): boolean | undefined {
 }
 
 function listOptions(url: URL): ListMemoriesOptions {
-  const options: { pinnedOnly?: boolean; kind?: DurableMemoryKind; limit?: number } = {};
+  const options: {
+    pinnedOnly?: boolean;
+    kind?: DurableMemoryKind;
+    search?: string;
+    limit?: number;
+  } = {};
   if (url.searchParams.get("pinned") === "true") options.pinnedOnly = true;
   const kind = url.searchParams.get("kind");
   if (kind !== null) {
@@ -152,6 +157,11 @@ function listOptions(url: URL): ListMemoriesOptions {
       throw invalidRequest(`kind must be one of: ${MEMORY_KINDS.join(", ")}.`, "kind");
     }
     options.kind = kind as DurableMemoryKind;
+  }
+  const search = url.searchParams.get("q");
+  if (search !== null) {
+    if (search.trim().length === 0) throw invalidRequest("q must not be empty.", "q");
+    options.search = search;
   }
   const limit = url.searchParams.get("limit");
   if (limit !== null) {

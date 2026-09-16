@@ -194,7 +194,34 @@ Covered by `runtime-agent-summary.test.ts`: a conversation that fits is left alo
 is folded into a stored summary the step then uses, the next step reuses that summary instead of
 writing another, and a summary's tokens push a run over its token budget.
 
+## Slice 8 — search, and why there is no full-text index (9.8)
+
+The plan made full-text search conditional: add it *only if* pinned and recent retrieval proves
+insufficient. It has not, so this slice adds the smallest thing that was actually missing and
+records the decision rather than the machinery.
+
+- **What was added.** Listing a project's memories takes `q` (`search` in the record API): plain
+  containment of the text in a memory's title or body, ignoring case, with `%` and `_` escaped so
+  they are characters to look for rather than a query language. Results keep the recall order,
+  pinned first and then most recently changed.
+- **Why that is enough today.** A memory is at most 8 KB and a project's list is capped at 500, so
+  a scan is a few hundred kilobytes at worst; an agent is offered a bounded number of memories in
+  recall order, not a ranked search; and conversations are already compressed by 9.7 instead of
+  being searched.
+- **What FTS would cost now.** A shadow `fts5` table and triggers to keep it in step with every
+  write, a tokenizer choice that decides what "matching" means, ranking that has to be explained in
+  the UI, and a migration that cannot be undone. That is a real contract to keep for a gain nobody
+  has asked for yet.
+- **When to add it.** When a project's memories outgrow a scan (say, thousands), when messages
+  themselves need searching rather than summarizing, or when containment demonstrably misses what
+  people look for — ranking by relevance, stemming, or phrase queries. Then `fts5` goes in as its
+  own migration behind the same `listMemories` and `q` interfaces, which is why search lives there
+  rather than in the callers.
+
+Covered by `durable-memory-records.test.ts` (containment across title and body, case-insensitive,
+wildcards escaped, recall order kept, blank search ignored) and `runtime-memory-http.test.ts`.
+
 ## Next
 
-9.8: SQLite full-text search over memories and conversations, only if pinned and recent retrieval
-proves insufficient.
+9.9 and 9.10: triggers — manual, cron, webhook and API, all through one durable run-creation path,
+with dedupe receipts and durable `not_before` scheduling instead of long-lived timers.

@@ -94,6 +94,28 @@ describe("project memories", () => {
     expect(listMemories(connection, projectId, { limit: 1 })).toHaveLength(1);
   });
 
+  it("finds memories by plain containment of title or body", () => {
+    const { connection, ids, projectId } = fixture();
+    const write = (title: string, body: string, nowMs: number) =>
+      createMemory(connection, { memoryId: ids.next(), projectId, title, body, nowMs });
+    write("Deploy window", "Thursdays only, never Fridays.", 2_000);
+    write("Discount policy", "Staff get 100% off the first month.", 3_000);
+    write("Naming", "Use snake_case in the database.", 4_000);
+
+    const titles = (search: string) =>
+      listMemories(connection, projectId, { search }).map((memory) => memory.title);
+    expect(titles("thursday")).toEqual(["Deploy window"]);
+    expect(titles("DEPLOY")).toEqual(["Deploy window"]);
+    // Still in recall order: most recently changed first.
+    expect(titles("y")).toEqual(["Discount policy", "Deploy window"]);
+    expect(titles("nothing here")).toEqual([]);
+    // Wildcards are characters to search for, not a query language.
+    expect(titles("100%")).toEqual(["Discount policy"]);
+    expect(titles("snake_case")).toEqual(["Naming"]);
+    expect(titles("snakexcase")).toEqual([]);
+    expect(titles("   ")).toHaveLength(3);
+  });
+
   it("changes what a memory says, pins it, and forgets it outright", () => {
     const { connection, ids, projectId } = fixture();
     const memory = createMemory(connection, {
