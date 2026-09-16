@@ -80,6 +80,20 @@ SQLite journal + blob store
 
 The visual/editor representation is source code, not runtime state. The scheduler executes immutable compiled semantics, and SQLite records what actually happened.
 
+## Backups
+
+Everything a harness knows lives in one SQLite database and the blob store beside it. Copy both
+into one directory, and put them back somewhere new:
+
+```bash
+npm run backup backup --to ../harness-backup
+npm run backup restore --from ../harness-backup \
+  --database ./restored/zet-harness.sqlite --blobs ./restored/blobs
+```
+
+A restore writes into paths that do not exist yet. It never overwrites or merges: deciding which of
+two histories really happened is not a choice a restore should make quietly.
+
 ## Documentation
 
 - [`PLAN.md`](./PLAN.md) — **authoritative master architecture and milestone roadmap**, including completed and remaining work.
@@ -111,8 +125,8 @@ Phase 6  Model + tool adapters              ✅ 20/21 (6.12 needs a real local m
 Phase 7  Visual graph + inspector           ✅ ← Harness v0.1 boundary
 Phase 8  Loops + projects + agent mode      ✅ complete
 Phase 9  Replay + memory + triggers         ✅ complete
-Phase 10 MCP + custom-node SDK + trust      ✅ 9/11 (10.10 WASI, 10.11 npm/Git install)
-Phase 11 Packaging + optional scale-out     🚧 1/9
+Phase 10 MCP + custom-node SDK + trust      ✅ 10/11 (10.10 WASI stays open by design)
+Phase 11 Packaging + optional scale-out     🚧 2/9 (start flow, backup and restore)
 ```
 
 To try it, follow [Running the harness](./PLUGINS.md#running-the-harness) and

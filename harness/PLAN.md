@@ -45,12 +45,14 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
   search (full-text search deliberately deferred), triggers of all four kinds through one
   durable run-creation path, firing receipts and a durable cron schedule, authenticated
   external clients with safe wake and resume, and a client package proved by a bridge test.
-- **Working on now — Phase 10:** 10.11 installs plugins from npm or an https Git repository,
+- **Just finished — Phase 10:** 10.11 installs plugins from npm or an https Git repository,
   with no shell, no install hooks, the loader's own checks, and the package left disabled.
   10.10 (WASI) stays open by design, as does 6.12, which needs a real local model endpoint.
-- **Next:** Phase 11 — config wizard, backup and export, and the rest of packaging.
+- **Working on now — Phase 11:** 11.3 adds `npm run backup`, which copies the database and
+  blob store into one directory and restores one into empty destinations, never merging.
+- **Next:** 11.2 (config wizard) and the rest of packaging.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),
-  11.2–11.9 (packaging and optional scale-out).
+  11.2 and 11.4-11.9 (packaging and optional scale-out).
 - **Where the detail lives:** `TODO.md` is the item-by-item checklist, and each `PHASE-*.md` explains
   what its slices built and how they are tested.
 
@@ -199,7 +201,7 @@ Phase 9  Replay + memory + triggers        🚧 IN PROGRESS
            ├─ 9.11 authenticated external client ingress + safe wake/resume     ✅
            └─ 9.12 Copycat/client bridge                                        ✅
 Phase 10 MCP + custom-node SDK + trust     ✅ 10/11 — 10.10 WASI pending
-Phase 11 Packaging + optional scale-out    🚧 1/9
+Phase 11 Packaging + optional scale-out    🚧 2/9
 ```
 
 ### Phase map
@@ -217,7 +219,7 @@ Phase 11 Packaging + optional scale-out    🚧 1/9
 | **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | ✅ Complete — bounded loops, subgraphs, projects, conversations, goals/todos, context builder, agent loop with run-wide budgets, workspace UI and run lock (see `PHASE-8.md`) |
 | **9 — Replay/Fork + Memory + Triggers + External clients** | recorded replay, checkpoint forks, lightweight memory, cron/webhook/API triggers, Copycat/client bridge | ✅ Done — replay, fork, memory, triggers and external clients (see `PHASE-9.md`) |
 | **10 — MCP + Custom-node SDK + Trust tiers** | MCP through normal tool registry, local plugin loading, SDK/package manifests, process/WASI isolation options | ✅ Complete except 10.10 (WASI), which stays open by design |
-| **11 — Packaging + Optional scale-out** | Windows setup, config wizard, backup/import/export, optional desktop shell, optional Postgres/remote workers | 🚧 11.1 done; 11.2–11.9 pending |
+| **11 — Packaging + Optional scale-out** | Windows setup, config wizard, backup/import/export, optional desktop shell, optional Postgres/remote workers | 🚧 11.1 and 11.3 done; 11.2, 11.4–11.9 pending |
 
 ### What “done enough to use” means
 

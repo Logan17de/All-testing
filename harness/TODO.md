@@ -357,9 +357,15 @@ first experience — and spawns npm's JavaScript entry through the current Node 
 rather than leaving a half-started system that looks healthy.
 
 
+**Backup:** 11.3 adds `npm run backup`, which copies the database and the blob store into one
+directory with a manifest, and restores one into destinations that do not exist yet. Restoring
+never overwrites or merges: deciding which of two histories really happened is not something a
+restore should do quietly, so it refuses and says why.
+
 - [x] 11.1 Add Windows-friendly install/start flow.
 - [ ] 11.2 Add config wizard.
-- [ ] 11.3 Add backup/export/import UI/CLI.
+- [x] 11.3 Add backup/export/import UI/CLI. The CLI is done; a UI button that writes to a
+      path of the daemon's choosing is deliberately not added yet.
 - [ ] 11.4 Add optional desktop shell only if it improves distribution.
 - [ ] 11.5 Add graph/node semantic versioning and diff UX.
 - [ ] 11.6 Add optional Postgres `RunStore` only when single-host limits are measured.
