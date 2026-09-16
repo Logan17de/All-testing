@@ -35,6 +35,8 @@ export interface PluginView {
 
 export interface PluginReport {
   readonly directory: string;
+  /** Whether this harness installs plugins at all, and from where; absent on older daemons. */
+  readonly install?: { readonly npm: boolean; readonly git: boolean };
   readonly installed: readonly PluginView[];
   readonly activated: readonly string[];
   readonly failures: readonly {

@@ -137,6 +137,20 @@ describe("installing a plugin over HTTP (10.11)", () => {
     expect(listed.body["activated"]).toEqual([]);
   });
 
+  it("says whether this harness installs at all, and from where", async () => {
+    const closed = await startDaemon();
+    expect((await closed.send("GET", "/api/plugins")).body["install"]).toEqual({
+      npm: false,
+      git: false,
+    });
+
+    const open = await startDaemon({ git: true });
+    expect((await open.send("GET", "/api/plugins")).body["install"]).toEqual({
+      npm: false,
+      git: true,
+    });
+  });
+
   it("answers 405 for anything but POST", async () => {
     const { send } = await startDaemon({ npm: true });
     expect((await send("GET", "/api/plugins/install")).status).toBe(405);

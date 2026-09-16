@@ -166,7 +166,11 @@ example-plugin integration tests.
 - MCP client, discovery and schema translation (10.3–10.5)
 - Execution trust tiers and WASI isolation (10.9–10.10): every plugin currently runs in-process and
   fully trusted once enabled, so capability grants are the only boundary
-- npm/Git installation (10.11), which the plan gates behind solid local loading
+- ~~npm/Git installation (10.11)~~, delivered later: a package is fetched with no shell and no
+  install hooks, checked by the loader's own discovery, and left disabled. The Plugins page
+  offers it wherever the host turned it on, and `/api/plugins` now reports whether this harness
+  installs at all and from where, so the page can explain how to allow it instead of showing a
+  button that always refuses. Enabling and granting stay file-based decisions.
 - A UI for browsing and enabling plugins; the view model and `/api/plugins` exist, but rendering
   belongs to Phase 7
 - Editing plugin configuration through the API; enabling and granting stay file-based decisions

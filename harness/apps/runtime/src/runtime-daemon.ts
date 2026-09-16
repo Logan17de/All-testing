@@ -219,7 +219,7 @@ export class RuntimeDaemon {
       {
         approvals: this.approvals,
         redaction: this.redaction,
-        plugins: () => this.pluginReport,
+        plugins: () => this.servedPluginReport(),
         ...(options.plugins?.install === undefined
           ? {}
           : {
@@ -354,6 +354,23 @@ export class RuntimeDaemon {
     // can refresh now, because reading manifests runs no plugin code.
     await this.rescanPlugins();
     return installed;
+  }
+
+  /**
+   * What a UI is told about plugins.
+   *
+   * The loaded report, plus whether this harness installs at all and from where, so a
+   * page can offer installing only where the host turned it on rather than offering a
+   * button that always refuses. Installing still enables nothing.
+   */
+  private servedPluginReport(): RuntimePluginReport & {
+    readonly install: { readonly npm: boolean; readonly git: boolean };
+  } {
+    const install = this.pluginOptions?.install;
+    return Object.freeze({
+      ...this.pluginReport,
+      install: Object.freeze({ npm: install?.npm === true, git: install?.git === true }),
+    });
   }
 
   /**

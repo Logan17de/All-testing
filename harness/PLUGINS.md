@@ -71,7 +71,9 @@ one you reviewed, and cannot start at all unless you enable it.
 ## Installing a plugin
 
 A plugin is a directory containing a `zet-plugin.json` manifest and an entry module. Copy it into
-the harness plugins directory, then enable it in `plugins.json` in that same directory:
+the harness plugins directory — or, if this harness is allowed to fetch one, use **Add a plugin** on
+the Plugins page to install it from npm or an https Git repository. Either way, enable it in
+`plugins.json` in that same directory:
 
 ```json
 {
@@ -97,6 +99,25 @@ Two rules are worth stating plainly, because they are enforced rather than advis
 
 The daemon loads enabled plugins at startup. A plugin that fails to load is reported on the
 Plugins page and never prevents the harness from starting.
+
+### Installing from npm or Git
+
+Fetching a package runs a package manager, so a harness does none of it until you say so:
+
+```json
+{ "plugins": { "install": { "npm": true, "git": true } } }
+```
+
+in `harness.config.json`, or `ZET_RUNTIME_ALLOW_NPM_INSTALL=1` and `ZET_RUNTIME_ALLOW_GIT_INSTALL=1`
+in the environment. With one of them on, the Plugins page offers **Add a plugin**: an npm package
+name (optionally `@version`), or an https repository URL with an optional branch, tag or commit.
+Only https is used, so no ssh key or agent is involved, and a URL carrying credentials is refused.
+
+The install runs with no shell and with `--ignore-scripts`, so nothing in a package name is
+interpreted and no install hook of the package runs. What arrives is then read by the same checks
+the loader uses at startup — manifests only, no plugin code imported — and removed again if it is
+not a plugin. The package lands **disabled**, with nothing granted, and runs from the next start of
+the runtime: installing is still not enabling, and enabling is still a file you edit.
 
 ## Building and running a graph
 

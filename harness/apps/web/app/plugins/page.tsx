@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { fetchPluginReport, runtimeOrigin, type PluginView } from "../../lib/runtime-client";
+import { InstallPlugin } from "./install-plugin";
 
 export const dynamic = "force-dynamic";
 
@@ -166,6 +167,22 @@ export default async function PluginsPage() {
               </ul>
             </div>
           ) : null}
+
+          {report.data.install?.npm === true || report.data.install?.git === true ? (
+            <InstallPlugin
+              npm={report.data.install.npm}
+              git={report.data.install.git}
+              directory={report.data.directory}
+            />
+          ) : (
+            <p className="muted">
+              This harness does not install plugins. Turn it on with{" "}
+              <code>{'{ "plugins": { "install": { "npm": true, "git": true } } }'}</code> in{" "}
+              <code>harness.config.json</code>, or with <code>ZET_RUNTIME_ALLOW_NPM_INSTALL=1</code>{" "}
+              and <code>ZET_RUNTIME_ALLOW_GIT_INSTALL=1</code>, and restart it. Installing runs a
+              package manager, so it is off until you say otherwise.
+            </p>
+          )}
 
           {report.data.installed.length === 0 ? (
             <div className="panel">

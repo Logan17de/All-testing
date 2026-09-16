@@ -145,7 +145,11 @@ Phase 11 Packaging + optional scale-out     🚧 4/9 (start, setup, backup, grap
 ```
 
 To try it, follow [Running the harness](./PLUGINS.md#running-the-harness) and
-[Building and running a graph](./PLUGINS.md#building-and-running-a-graph).
+[Building and running a graph](./PLUGINS.md#building-and-running-a-graph). Plugins can be
+copied into the plugins directory or, where the host allows it, installed from npm or an https
+Git repository on the Plugins page — see
+[Installing a plugin](./PLUGINS.md#installing-a-plugin). A plugin arrives disabled and is
+granted nothing until you say so.
 
 The Graph JSON v1 freeze now includes:
 

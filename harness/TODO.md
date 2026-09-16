@@ -338,7 +338,9 @@ conservatively as an external write with manual recovery. A server's `readOnlyHi
 a guarantee, so it relaxes nothing unless a host explicitly opts in. See `PHASE-10-MCP.md`.
 
 **Installing:** 10.11 installs a package from npm or an https Git repository into the plugins
-directory. Tools run through an argument list with no shell and with `--ignore-scripts`, so nothing
+directory, and the Plugins page now offers it wherever the host turned it on — the report says
+whether this harness installs at all, so the page explains how to allow it rather than showing a
+button that always refuses. Tools run through an argument list with no shell and with `--ignore-scripts`, so nothing
 in a spec is interpreted and no package hook runs on the way in. The result is checked by the same
 discovery the loader uses at startup — manifests only, no plugin code imported — and removed again
 if it is not a plugin. Installing is allowed only where the host turns it on, and an installed

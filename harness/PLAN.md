@@ -63,6 +63,8 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
 - **Also just finished:** the step-by-step replay view in the run inspector, the last thing
   Phase 9 left for later. Nothing of Phase 9 is now outstanding except SQLite full-text search
   and webhook payloads, both deliberately deferred with their conditions written down.
+- **Also just finished:** adding a plugin from the app. The Plugins page installs from npm or an
+  https Git repository wherever the host allows it, and says how to allow it where it does not.
 - **Next:** the optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),
   11.4 and 11.6-11.9, which the plan gates on a need that has not arrived.
