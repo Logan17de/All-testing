@@ -305,7 +305,33 @@ Covered by `runtime-client-http.test.ts`: a token issued once and never read bac
 missing token refused, scopes enforced, a revoked client stopped, waking that creates nothing,
 approvals answered once and repeated safely, and messages appended to the real conversation.
 
-## Next
+## Slice 12 — the bridge a client crosses (9.12)
 
-9.12: the Copycat/client bridge path — a worked client over this ingress, so the shape is proved by
-something that uses it.
+The ingress from 9.11 is a set of endpoints; this slice is the thing that uses them, so the shape is
+proved by a client rather than asserted.
+
+- **`@zet-harness/client`.** A dependency-free package: `fetch` and web streams are Node's own, and
+  the client holds nothing but an origin and a token. It covers what a bridge actually needs —
+  `whoami`, `run`, `wake`, `pendingApprovals`, `answerApproval`, `sendMessage` — and turns a refusal
+  into a `HarnessClientError` carrying the harness's own code, so a client can tell a missing scope
+  from a revoked token without parsing prose.
+- **Following along.** `events()` is an async iterator over the harness's stream, parsing
+  `text/event-stream` frames into an id, an event name and parsed data. Reconnecting takes one
+  argument: the last id seen. That is the only state a bridge has to keep, and it is the same cursor
+  the editor uses.
+- **Proved by use.** `scripts/harness-client-bridge.test.ts` drives a real daemon the way a bridge
+  would: a person issues a token in the editor, then the client alone watches a run that is waiting
+  for a person, wakes it, answers the approval, sees the run finish, finds the repeat answer
+  reported as a duplicate and the finished run reported as nothing to wake. It also adds a message
+  to a conversation, and checks that an unknown token, a revoked one and a missing scope each come
+  back as the right refusal, and that the event stream delivers and resumes from an id.
+
+Phase 9 is complete.
+
+## What Phase 9 left for later
+
+- Showing a replay step by step in the run inspector, and a memory panel in the web app.
+- An agent writing memories of its own; today it is offered them and a person writes them.
+- SQLite full-text search, deliberately deferred with the conditions written down in Slice 8.
+- Firing a webhook trigger with a payload the graph can read: today a firing starts the plan as it
+  was compiled.

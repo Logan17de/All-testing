@@ -300,7 +300,7 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 - [x] 9.9 Add manual/cron/webhook/API triggers using one durable run-creation path.
 - [x] 9.10 Add trigger dedupe receipts and durable future `not_before` scheduling instead of long-lived timers.
 - [x] 9.11 Add authenticated external client/session ingress and safe wake/resume behavior.
-- [ ] 9.12 Add Copycat/client bridge path.
+- [x] 9.12 Add Copycat/client bridge path.
 
 ---
 
