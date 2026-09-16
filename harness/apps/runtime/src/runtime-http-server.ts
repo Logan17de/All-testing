@@ -46,7 +46,11 @@ import {
   type RuntimeEventStreamUnsubscribe,
   type RuntimeStreamEvent,
 } from "./runtime-event-stream.js";
-import { RuntimeApiSecurity, assertLoopbackHost } from "./runtime-api-security.js";
+import {
+  RuntimeApiSecurity,
+  RuntimeApiSecurityError,
+  assertLoopbackHost,
+} from "./runtime-api-security.js";
 import {
   handleApprovalHttp,
   writeRuntimeApiError,
@@ -106,12 +110,49 @@ const defaultRuntimeHealthProvider: RuntimeHealthProvider = () =>
   Object.freeze({ status: "ok", service: RUNTIME_HEALTH_SERVICE });
 
 /** Loopback API; browser origin/CSRF protection is distinct from OS process isolation. */
+/** The few mutations this server answers itself take a small JSON object. */
+const MAX_SERVER_BODY_BYTES = 8_192;
+
+async function readJsonBody(
+  request: IncomingMessage,
+): Promise<Record<string, unknown> | undefined> {
+  const parts: Buffer[] = [];
+  let size = 0;
+  for await (const part of request.iterator({ destroyOnReturn: false })) {
+    const buffer = Buffer.isBuffer(part) ? part : Buffer.from(part as string);
+    size += buffer.length;
+    if (size > MAX_SERVER_BODY_BYTES) {
+      request.resume();
+      throw new RuntimeApiSecurityError("LOCAL_API_BODY_TOO_LARGE", "Request exceeds 8 KiB.", 413);
+    }
+    parts.push(buffer);
+  }
+  if (size === 0) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(Buffer.concat(parts).toString("utf8")) as unknown;
+  } catch {
+    return undefined;
+  }
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 export class RuntimeHttpServer {
   private readonly host: string;
   private readonly requestedPort: number;
   private readonly eventStream: RuntimeEventStream;
   private readonly healthProvider: RuntimeHealthProvider;
   private readonly pluginsProvider: (() => unknown) | undefined;
+  private readonly installPlugin:
+    | ((source: {
+        readonly kind: "npm" | "git";
+        readonly spec?: string;
+        readonly url?: string;
+        readonly ref?: string;
+      }) => Promise<unknown>)
+    | undefined;
   private readonly graphServices: RuntimeGraphHttpServices | undefined;
   private readonly projectServices: RuntimeProjectHttpServices | undefined;
   private readonly conversationServices: RuntimeConversationHttpServices | undefined;
@@ -137,6 +178,18 @@ export class RuntimeHttpServer {
       readonly redaction?: RuntimeRedactionRegistry;
       /** Read-only view of installed plugins for the local UI. */
       readonly plugins?: () => unknown;
+      /**
+       * Install a plugin package from npm or a Git repository.
+       *
+       * Supplied only when the host allows it. Installing never enables a plugin or
+       * grants it anything, so this stays a separate decision from the config.
+       */
+      readonly installPlugin?: (source: {
+        readonly kind: "npm" | "git";
+        readonly spec?: string;
+        readonly url?: string;
+        readonly ref?: string;
+      }) => Promise<unknown>;
       /** Editor endpoints: node palette, graph validation, runs. */
       readonly graphs?: RuntimeGraphHttpServices;
       /** Project endpoints: list, create, change, archive and restore. */
@@ -158,6 +211,7 @@ export class RuntimeHttpServer {
     this.eventStream = eventStream;
     this.healthProvider = healthProvider;
     this.pluginsProvider = services.plugins;
+    this.installPlugin = services.installPlugin;
     this.graphServices = services.graphs;
     this.projectServices = services.projects;
     this.conversationServices = services.conversations;
@@ -378,6 +432,15 @@ export class RuntimeHttpServer {
         );
         return;
       }
+      if (url.pathname === "/api/plugins/install") {
+        if (request.method !== "POST") {
+          response.setHeader("allow", "POST");
+          writeJson(response, 405, { error: "method_not_allowed", allowed: ["POST"] });
+          return;
+        }
+        void this.handlePluginInstall(request, response);
+        return;
+      }
       if (url.pathname === "/api/plugins") {
         if (request.method !== "GET") {
           response.setHeader("allow", "GET");
@@ -400,6 +463,96 @@ export class RuntimeHttpServer {
       }
       writeJson(response, 404, { error: "not_found" });
     } catch (error) {
+      writeRuntimeApiError(response, error);
+    }
+  }
+
+  /**
+   * Install a plugin package.
+   *
+   * A local mutation like any other, so it passes the same CSRF check. The install
+   * itself refuses anything the host has not allowed, and an installed package is
+   * still disabled until a person enables it.
+   */
+  private async handlePluginInstall(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    try {
+      this.security.checkMutation(request);
+      const install = this.installPlugin;
+      if (install === undefined) {
+        writeJson(response, 403, {
+          error: {
+            code: "INSTALL_NOT_ALLOWED",
+            reason: "This harness does not install plugins.",
+          },
+        });
+        return;
+      }
+      const body = await readJsonBody(request);
+      if (body === undefined) {
+        writeJson(response, 400, {
+          error: { code: "INSTALL_SOURCE_INVALID", reason: "Request body must be a JSON object." },
+        });
+        return;
+      }
+      const kind = body["kind"];
+      if (kind !== "npm" && kind !== "git") {
+        writeJson(response, 400, {
+          error: { code: "INSTALL_SOURCE_INVALID", reason: "kind must be 'npm' or 'git'." },
+        });
+        return;
+      }
+      const spec = body["spec"];
+      const repository = body["url"];
+      const ref = body["ref"];
+      if (
+        (kind === "npm" && typeof spec !== "string") ||
+        (kind === "git" && typeof repository !== "string") ||
+        (ref !== undefined && typeof ref !== "string")
+      ) {
+        writeJson(response, 400, {
+          error: {
+            code: "INSTALL_SOURCE_INVALID",
+            reason:
+              kind === "npm"
+                ? "An npm install needs a package spec."
+                : "A git install needs a repository url.",
+          },
+        });
+        return;
+      }
+      const installed = await install({
+        kind,
+        ...(typeof spec === "string" ? { spec } : {}),
+        ...(typeof repository === "string" ? { url: repository } : {}),
+        ...(typeof ref === "string" ? { ref } : {}),
+      });
+      writeJson(response, 201, {
+        plugin: installed,
+        // Installing is not enabling: the plugin waits for a person.
+        enabled: false,
+        activated: false,
+      });
+    } catch (error: unknown) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? (error as { readonly code: unknown }).code
+          : undefined;
+      if (typeof code === "string" && code.startsWith("INSTALL_")) {
+        const status = code === "INSTALL_NOT_ALLOWED" ? 403 : 400;
+        writeJson(response, status, {
+          error: {
+            code,
+            reason: error instanceof Error ? error.message : "The plugin was not installed.",
+            ...(typeof (error as { readonly detail?: unknown }).detail === "string"
+              ? { detail: (error as { readonly detail: string }).detail }
+              : {}),
+          },
+        });
+        return;
+      }
       writeRuntimeApiError(response, error);
     }
   }

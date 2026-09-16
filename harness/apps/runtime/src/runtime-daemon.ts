@@ -65,10 +65,17 @@ import { RuntimeTriggerScheduler } from "./runtime-trigger-scheduler.js";
 import {
   DEFAULT_PLUGINS_DIRECTORY,
   emptyPluginReport,
+  listInstalledPlugins,
   loadRuntimePlugins,
   type RuntimePluginOptions,
   type RuntimePluginReport,
 } from "./runtime-plugins.js";
+import {
+  installPluginPackage,
+  PluginInstallError,
+  type InstalledPluginPackage,
+  type PluginInstallSource,
+} from "@zet-harness/plugin-loader";
 import { RuntimeRedactionRegistry } from "./runtime-redaction.js";
 
 export const DEFAULT_RUNTIME_DATABASE_PATH = resolve("data", "zet-harness.sqlite");
@@ -213,6 +220,25 @@ export class RuntimeDaemon {
         approvals: this.approvals,
         redaction: this.redaction,
         plugins: () => this.pluginReport,
+        ...(options.plugins?.install === undefined
+          ? {}
+          : {
+              installPlugin: (source: {
+                readonly kind: "npm" | "git";
+                readonly spec?: string;
+                readonly url?: string;
+                readonly ref?: string;
+              }) =>
+                this.installPlugin(
+                  source.kind === "npm"
+                    ? { kind: "npm", spec: source.spec ?? "" }
+                    : {
+                        kind: "git",
+                        url: source.url ?? "",
+                        ...(source.ref === undefined ? {} : { ref: source.ref }),
+                      },
+                ),
+            }),
         projects: { database: this.database },
         memories: { database: this.database },
         clients: {
@@ -295,6 +321,56 @@ export class RuntimeDaemon {
       throw new TypeError("Runtime daemon must be running before publishing stream events.");
     }
     return this.eventStream.publish(type, this.redaction.redact(data));
+  }
+
+  /**
+   * Install a plugin package from npm or a Git repository.
+   *
+   * Nothing of the package is imported and nothing is enabled: it lands in the
+   * plugins directory, is read by the same discovery the loader uses at startup, and
+   * waits for a person to enable it and grant what it asks for. The installed list
+   * refreshes straight away, because reading manifests runs no plugin code; the new
+   * plugin itself is activated at the next start.
+   */
+  async installPlugin(source: PluginInstallSource): Promise<InstalledPluginPackage> {
+    if (this.state !== "running" || this.stopPromise !== undefined) {
+      throw new TypeError("Runtime daemon must be running before installing a plugin.");
+    }
+    const options = this.pluginOptions;
+    if (options === undefined) {
+      throw new PluginInstallError(
+        "INSTALL_NOT_ALLOWED",
+        "This runtime has no plugins directory, so there is nowhere to install one.",
+      );
+    }
+    const pluginsDirectory = options.directory ?? DEFAULT_PLUGINS_DIRECTORY;
+    const installed = await installPluginPackage({
+      pluginsDirectory,
+      source,
+      ...(options.install === undefined ? {} : { allow: options.install }),
+      ...(options.harnessVersion === undefined ? {} : { harnessVersion: options.harnessVersion }),
+    });
+    // The new plugin is only activated at the next start, but what is installed
+    // can refresh now, because reading manifests runs no plugin code.
+    await this.rescanPlugins();
+    return installed;
+  }
+
+  /**
+   * Re-read the plugins directory.
+   *
+   * Manifests only: nothing a package ships is imported, so this is safe while runs
+   * are in flight. It refreshes what is installed and what each package asks for;
+   * enabling, granting and activating remain start-time decisions.
+   */
+  async rescanPlugins(): Promise<RuntimePluginReport> {
+    const options = this.pluginOptions;
+    if (options === undefined) return this.pluginReport;
+    this.pluginReport = Object.freeze({
+      ...this.pluginReport,
+      installed: await listInstalledPlugins(options),
+    });
+    return this.pluginReport;
   }
 
   /** Host dispatch boundary. Never expose this method to a model as approval authority. */

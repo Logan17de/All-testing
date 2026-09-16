@@ -319,6 +319,13 @@ Each server gets its own `mcp:<id>` capability, and an unknown remote tool is cl
 conservatively as an external write with manual recovery. A server's `readOnlyHint` is a claim, not
 a guarantee, so it relaxes nothing unless a host explicitly opts in. See `PHASE-10-MCP.md`.
 
+**Installing:** 10.11 installs a package from npm or an https Git repository into the plugins
+directory. Tools run through an argument list with no shell and with `--ignore-scripts`, so nothing
+in a spec is interpreted and no package hook runs on the way in. The result is checked by the same
+discovery the loader uses at startup — manifests only, no plugin code imported — and removed again
+if it is not a plugin. Installing is allowed only where the host turns it on, and an installed
+plugin arrives disabled with nothing granted.
+
 **Third-party plugin scope:** 10.1, 10.2, 10.6, 10.7 and 10.8 make the harness externally
 extensible. A package is described by an inert `zet-plugin.json` that is read before any of its
 code is imported, integrity digests are verified before the entry module loads, a plugin may only
@@ -337,7 +344,7 @@ location by a test so a broken example fails CI. See `PHASE-10.md`. MCP (10.3–
 - [x] 10.8 Keep installation separate from capability granting.
 - [x] 10.9 Add execution trust tiers: trusted in-process, process-isolated, optional WASI for untrusted portable compute.
 - [ ] 10.10 Add WASI sandbox only after the capability broker is mature.
-- [ ] 10.11 Add npm/Git plugin installation only after local loading is solid.
+- [x] 10.11 Add npm/Git plugin installation only after local loading is solid.
 
 ---
 

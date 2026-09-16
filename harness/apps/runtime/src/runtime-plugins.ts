@@ -35,6 +35,13 @@ export interface RuntimePluginOptions {
   readonly harnessVersion?: string;
   /** Project root an isolated plugin may reach when granted filesystem access. */
   readonly workspaceRoot?: string;
+  /**
+   * Which sources a plugin may be installed from at runtime.
+   *
+   * Installing runs a package manager, so neither is on unless the host says so.
+   * Allowing it still grants an installed plugin nothing: it arrives disabled.
+   */
+  readonly install?: { readonly npm?: boolean; readonly git?: boolean };
 }
 
 export interface RuntimePluginReport {
@@ -93,6 +100,33 @@ async function readConfigDocument(path: string): Promise<{
       defects: Object.freeze([`${DEFAULT_PLUGIN_CONFIG_FILENAME} is not valid JSON.`]),
     };
   }
+}
+
+/**
+ * What is installed right now, with each package's enabled state and grants.
+ *
+ * Manifests only: nothing a package ships is imported, so this is safe to call at
+ * any time — after installing one, for instance, without touching what is running.
+ */
+export async function listInstalledPlugins(
+  options: RuntimePluginOptions = {},
+): Promise<readonly PluginInstallationView[]> {
+  const directory = options.directory ?? DEFAULT_PLUGINS_DIRECTORY;
+  if (!isAbsolute(directory)) {
+    throw new TypeError("Plugins directory must be an absolute path.");
+  }
+  const configPath = options.configPath ?? join(directory, DEFAULT_PLUGIN_CONFIG_FILENAME);
+  const { document } = await readConfigDocument(configPath);
+  const config = validatePluginConfig(document);
+  const discovery = await discoverPluginPackages({
+    pluginsDirectory: directory,
+    ...(options.harnessVersion === undefined ? {} : { harnessVersion: options.harnessVersion }),
+  });
+  return Object.freeze(
+    discovery.packages.map((discovered) =>
+      describeInstallation(discovered, findPluginConfig(config.entries, discovered.manifest.id)),
+    ),
+  );
 }
 
 /**

@@ -15,6 +15,19 @@ export {
   type PluginLoadFailureCode,
 } from "./plugin-loader.js";
 export {
+  defaultPluginProcessRunner,
+  installPluginPackage,
+  parseGitSource,
+  parseNpmSpec,
+  PluginInstallError,
+  type InstalledPluginPackage,
+  type PluginInstallErrorCode,
+  type PluginInstallOptions,
+  type PluginInstallSource,
+  type PluginProcessResult,
+  type PluginProcessRunner,
+} from "./plugin-install.js";
+export {
   PluginIsolationError,
   deriveSandboxFlags,
   isPluginIsolationError,
