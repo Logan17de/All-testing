@@ -145,7 +145,29 @@ Covered by `durable-memory-records.test.ts` and `runtime-memory-http.test.ts`.
 
 Not yet: an agent reading or writing memories, which is 9.6, and a memory panel in the web app.
 
+## Slice 6 — telling an agent what the project remembers (9.6)
+
+An agent step now sees the project's memories, inside the same context budget as everything else.
+
+- **What it sees.** One `memory` section, listing memories in recall order — pinned first, then most
+  recently changed — as `- [kind, pinned] title: body`, introduced as background rather than
+  instructions. Long bodies are trimmed to 400 characters in the summary; the full text stays in the
+  store. A project that remembers nothing adds no section at all.
+- **Inside the budget.** The section is optional, so a context under pressure drops the memories
+  before the conversation or the required system and goal sections, exactly as the context builder
+  already does for optional sections.
+- **Accounted for.** The step's usage records `memory: { offered, included }` beside the existing
+  per-section token and byte report, so it is visible whether memories were offered and whether they
+  fitted.
+- **Per step.** `maxMemories` on an agent model node bounds how many are offered (20 by default,
+  100 at most); `0` offers none, for a step that should not see project memory.
+
+Covered by `runtime-agent-memory.test.ts`: the order and formatting an agent sees, silence when
+there is nothing to remember, memories dropped first under a tight byte cap while the conversation
+and goals survive, and both `maxMemories` bounds.
+
+Not yet: an agent writing memories of its own, and a memory panel in the web app.
+
 ## Next
 
-9.6: offer pinned and recent memories to an agent within a context budget, and let it remember
-something itself.
+9.7: summarize a conversation only when it no longer fits, rather than on a fixed schedule.

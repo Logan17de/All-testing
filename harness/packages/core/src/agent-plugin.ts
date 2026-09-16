@@ -67,6 +67,7 @@ export function createAgentPlugin(): HarnessPlugin {
               reserveOutputTokens: { type: "integer", minimum: 1 },
               maxOutputTokens: { type: "integer", minimum: 1 },
               maxContextBytes: { type: "integer", minimum: 1 },
+              maxMemories: { type: "integer", minimum: 0, maximum: 100 },
               modelId: { type: "string", minLength: 1 },
               modelVersion: { type: "string", minLength: 1 },
               maxModelCalls: { type: "integer", minimum: 1 },
