@@ -57,8 +57,11 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
 - **Also just finished:** the memory panel Phase 9 recorded as left for later. A project's
   workspace now shows what it remembers, in the order an agent is offered it, with search, a
   kind filter, pinning, editing and forgetting through the guarded editor proxy.
+- **Also just finished:** an agent writing memories of its own, the other half of 9.6. A step
+  can list, write and correct what its project remembers, marked as the agent's and naming the
+  run; forgetting stays a person's act.
 - **Next:** the optional items 11.4 and 11.6-11.9, each gated on a need the plan names, and the
-  rest of what Phase 9 left: a step-by-step replay view, and an agent writing memories itself.
+  last thing Phase 9 left: a step-by-step replay view in the run inspector.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),
   11.4 and 11.6-11.9, which the plan gates on a need that has not arrived.
 - **Where the detail lives:** `TODO.md` is the item-by-item checklist, and each `PHASE-*.md` explains

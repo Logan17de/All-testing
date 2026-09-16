@@ -167,7 +167,8 @@ Covered by `runtime-agent-memory.test.ts`: the order and formatting an agent see
 there is nothing to remember, memories dropped first under a tight byte cap while the conversation
 and goals survive, and both `maxMemories` bounds.
 
-Not yet: an agent writing memories of its own.
+Not yet: an agent writing memories of its own. It does now; the last section of this file
+records how.
 
 ## Slice 7 — summarizing a conversation only when it no longer fits (9.7)
 
@@ -333,7 +334,7 @@ Phase 9 is complete.
 
 - Showing a replay step by step in the run inspector. The memory panel has since been built;
   it is described below.
-- An agent writing memories of its own; today it is offered them and a person writes them.
+- ~~An agent writing memories of its own~~; it does now, see the last section of this file.
 - SQLite full-text search, deliberately deferred with the conditions written down in Slice 8.
 - Firing a webhook trigger with a payload the graph can read: today a firing starts the plan as it
   was compiled.
@@ -374,3 +375,33 @@ checked in the browser against a real daemon: writing two memories, pinning one 
 to the top, filtering to pinned only, searching a word that appears in one body, editing a memory's
 text and kind, and forgetting one — after which the runtime answers 404 for it and lists only the
 memory that was kept.
+
+## Since then — an agent writing memories of its own
+
+The other half of 9.6. A step was already told what its project remembers; now it can write
+something down, look further than its context budget carried, and correct what is there.
+
+- **Three actions, no fourth.** `harness.memory.list` reads past the few memories a step was
+  offered, `harness.memory.remember` writes one down, and `harness.memory.update` corrects a
+  memory's text or kind, or pins and unpins it. There is deliberately no forgetting: forgetting
+  removes a memory outright and nothing keeps a copy, so it stays a person's act. An agent that
+  could delete what a project remembers could quietly erase the reason it was told to stop.
+- **Marked as the agent's.** A memory a step writes is stored with `source: "agent"` and the run
+  that wrote it, so the editor can say "Written by a run" and link straight to it. Correcting a
+  person's memory does not make it the agent's; a memory keeps who wrote it, which the store's
+  identity trigger has enforced since 9.5.
+- **One knob.** The memory actions follow the same `maxMemories` setting the memory section does.
+  A step configured to see none of a project's memories writes none either, and a tool call it
+  makes anyway comes back as `TOOL_NOT_AVAILABLE`, so one setting decides whether a step has
+  anything to do with project memory at all.
+- **The same at-most-once path as goals.** Reads, writes, refusals and the effect ledger now live
+  in `runtime-action-tools.ts`, which the goal and memory actions share: a write runs in one
+  serialized commit recorded against the invocation's logical effect id, so a retried attempt
+  returns the recorded result instead of writing a second memory, and anything the model could
+  correct comes back as `{ ok: false, error }` rather than failing the step.
+
+Covered by `runtime-agent-memory-writes.test.ts`, which drives a real model→tool→model loop: the
+model writes a decision and is told it again on its next step, it corrects a memory a person wrote
+and is refused one from another project, a step with `maxMemories: 0` is offered no memory actions
+at all, and a retried write with the same logical effect id produces one memory, not two. The
+existing goal action tests cover the shared path from the other side.

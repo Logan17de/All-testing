@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
@@ -26,6 +27,16 @@ function filtering(filter: MemoryFilter): boolean {
 
 function writtenBy(memory: MemoryView): string {
   return memory.source === "agent" ? "Written by a run" : "Written by a person";
+}
+
+/** A memory an agent wrote names the run it came from, so the reason is one click away. */
+function Origin({ memory }: { readonly memory: MemoryView }) {
+  if (memory.sourceRunId === null) return <>{writtenBy(memory)}</>;
+  return (
+    <>
+      {writtenBy(memory)} (<Link href={`/runs/${memory.sourceRunId}`}>see the run</Link>)
+    </>
+  );
 }
 
 /**
@@ -197,7 +208,7 @@ export function MemoryPanel({
               </div>
               <p className="memoryText">{memory.body}</p>
               <span className="muted small">
-                {writtenBy(memory)} · updated {new Date(memory.updatedAtMs).toLocaleString()}
+                <Origin memory={memory} /> · updated {new Date(memory.updatedAtMs).toLocaleString()}
               </span>
 
               {archived || editing?.memoryId === memory.memoryId ? null : (

@@ -126,7 +126,7 @@ The Harness v0.1 boundary is reached: you can draw a graph, have the compiler ch
 through your own plugins, pause for a person, resume, and inspect durable execution. Phase 8 is
 complete: routers, joins, bounded loops and subgraphs run durably, projects, their
 conversations, goals and todos are stored and served by the runtime, and a bounded agent loop can plan and track
-work through them. Phase 9 is complete: replay, forking, project memory — now managed from the project workspace as well — conversation summarization, triggers and external clients. [`PLAN.md`](./PLAN.md) holds the
+work through them. Phase 9 is complete: replay, forking, project memory — managed from the project workspace, and written by agents themselves — conversation summarization, triggers and external clients. [`PLAN.md`](./PLAN.md) holds the
 detailed progress tree.
 
 ```text

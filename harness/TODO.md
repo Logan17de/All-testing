@@ -295,6 +295,12 @@ asks first and then removes the memory, because a kept copy would defeat the poi
 to forget it. The browser reaches memories through the same guarded editor proxy as everything
 else, which now carries `PATCH` and `DELETE` as well as `POST`.
 
+**An agent's own memories:** a step can now list, write and correct what its project
+remembers, marked as the agent's and naming the run. It cannot forget: that removes a memory
+outright and nothing keeps a copy, so it stays a person's act. The same `maxMemories` setting
+that decides what a step is told also decides whether it may write, and the goal and memory
+actions now share one at-most-once write path.
+
 - [x] 9.1 Add read-only recorded trace replay with no external/model/tool/human invocation.
 - [x] 9.2 Add execution fork from a checkpoint; keep historical run immutable.
 - [x] 9.3 Record parent run + fork checkpoint metadata.

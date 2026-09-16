@@ -39,11 +39,9 @@ import type {
   ToolAdapter,
 } from "@zet-harness/plugin-api";
 
-import {
-  createGoalActionTools,
-  goalActionToolSpecifications,
-  modelToolName,
-} from "./runtime-goal-actions.js";
+import { actionToolSpecifications, modelToolName } from "./runtime-action-tools.js";
+import { createGoalActionTools } from "./runtime-goal-actions.js";
+import { createMemoryActionTools } from "./runtime-memory-actions.js";
 import type { RuntimeNodeExecution, RuntimeNodeExecutionResult } from "./runtime-run-dispatcher.js";
 
 /** Tokens kept free for a reply when a model step does not say. */
@@ -416,8 +414,21 @@ export function createAgentNodeExecutor(
     }
   };
 
-  const offeredTools = (projectId: string): readonly ToolAdapter[] => [
+  /**
+   * The actions this step may call.
+   *
+   * Goal and todo actions are always offered. The memory actions follow the same
+   * `maxMemories` knob the memory section does: a step told to see none of a
+   * project's memories writes none either, so one setting decides whether a step
+   * has anything to do with project memory at all.
+   */
+  const offeredTools = (
+    projectId: string,
+    runId: string,
+    memories: boolean,
+  ): readonly ToolAdapter[] => [
     ...createGoalActionTools({ database, projectId, now, createId }),
+    ...(memories ? createMemoryActionTools({ database, projectId, runId, now, createId }) : []),
     ...(options.tools ?? []).filter((tool) => granted(tool.manifest.behavior.requiredCapabilities)),
   ];
 
@@ -583,7 +594,7 @@ export function createAgentNodeExecutor(
     }
     await holdProject(execution, conversation.projectId);
     enforceModelBudgets(execution.runId, config);
-    const tools = offeredTools(conversation.projectId);
+    const tools = offeredTools(conversation.projectId, execution.runId, maxMemories > 0);
     const decision = routeModel({
       manifests: options.models
         .listManifests()
@@ -673,7 +684,7 @@ export function createAgentNodeExecutor(
     const result = await adapter.generate(
       {
         messages: context.messages,
-        ...(tools.length > 0 ? { tools: goalActionToolSpecifications(tools) } : {}),
+        ...(tools.length > 0 ? { tools: actionToolSpecifications(tools) } : {}),
         ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
       },
       invocationContext(execution),
@@ -763,7 +774,8 @@ export function createAgentNodeExecutor(
         ? head.parts.filter((part): part is DurableToolCallPart => part.kind === "tool-call")
         : [];
     enforceToolBudget(execution.runId, config, calls.length);
-    const tools = offeredTools(conversation.projectId).filter(
+    const maxMemories = countConfig(config, "maxMemories") ?? MEMORY_LIMIT;
+    const tools = offeredTools(conversation.projectId, execution.runId, maxMemories > 0).filter(
       (tool) =>
         allowedTools === undefined || allowedTools.includes(modelToolName(tool.manifest.id)),
     );

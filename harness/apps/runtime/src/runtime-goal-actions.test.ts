@@ -8,11 +8,8 @@ import type { AdapterInvocationContext, JsonObject } from "@zet-harness/plugin-a
 import { checkNodeBehaviorPolicy } from "@zet-harness/plugin-api/node-behavior-policy";
 
 import { RUNTIME_DATABASE_MIGRATIONS } from "./runtime-daemon.js";
-import {
-  GOAL_ACTION_TOOL_IDS,
-  createGoalActionTools,
-  goalActionToolSpecifications,
-} from "./runtime-goal-actions.js";
+import { actionToolSpecifications } from "./runtime-action-tools.js";
+import { GOAL_ACTION_TOOL_IDS, createGoalActionTools } from "./runtime-goal-actions.js";
 
 const databases: SqliteDatabase[] = [];
 
@@ -80,7 +77,7 @@ const idOf = (reply: Record<string, unknown>, key: string, field: string): strin
 describe("model-visible goal and todo actions", () => {
   it("offers every action to models under a provider-safe name with a strict schema", () => {
     const { tools } = setup();
-    const specifications = goalActionToolSpecifications(tools);
+    const specifications = actionToolSpecifications(tools);
 
     expect(specifications.map((specification) => specification.name)).toEqual([
       "harness_goals_list",
