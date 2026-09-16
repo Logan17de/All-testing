@@ -119,6 +119,17 @@ describe("trigger endpoints (9.9)", () => {
 
     const read = await send("GET", `/api/triggers/${trigger.triggerId}`);
     expect(read.body["trigger"]).toMatchObject({ lastRunId: runId });
+
+    // A client that retries with its own key gets the run it already started.
+    const keyed = await send("POST", `/api/triggers/${trigger.triggerId}/fire`, {
+      body: { dedupeKey: "nightly-2026-09-16" },
+    });
+    expect(keyed.status).toBe(201);
+    const retried = await send("POST", `/api/triggers/${trigger.triggerId}/fire`, {
+      body: { dedupeKey: "nightly-2026-09-16" },
+    });
+    expect(retried.status).toBe(200);
+    expect(retried.body).toMatchObject({ duplicate: true, runId: keyed.body["runId"] });
     const listed = await send("GET", "/api/triggers");
     expect((listed.body["triggers"] as unknown[]).length).toBe(1);
   });
@@ -145,10 +156,24 @@ describe("trigger endpoints (9.9)", () => {
     expect((await send("POST", `/api/hooks/${triggerId}`)).status).toBe(401);
 
     const fired = await send("POST", `/api/hooks/${triggerId}`, {
-      headers: { "x-zet-trigger-token": token },
+      headers: { "x-zet-trigger-token": token, "idempotency-key": "delivery-1" },
     });
     expect(fired.status).toBe(201);
-    await until(fired.body["runId"] as string, "completed");
+    expect(fired.body["duplicate"]).toBe(false);
+    const runId = fired.body["runId"] as string;
+    await until(runId, "completed");
+
+    // The same delivery again returns the same run rather than starting another.
+    const again = await send("POST", `/api/hooks/${triggerId}`, {
+      headers: { "x-zet-trigger-token": token, "idempotency-key": "delivery-1" },
+    });
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ duplicate: true, runId });
+
+    const fires = await send("GET", `/api/triggers/${triggerId}/fires`);
+    expect(fires.body["fires"]).toMatchObject([
+      { reason: "webhook", dedupeKey: "delivery-1", runId },
+    ]);
   });
 
   it("keeps a cron trigger's schedule and refuses one that is not a schedule", async () => {

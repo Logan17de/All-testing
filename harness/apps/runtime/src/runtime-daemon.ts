@@ -24,6 +24,7 @@ import {
 } from "@zet-harness/db/durable-goal-records";
 import { DURABLE_PROJECT_MEMORIES_MIGRATION } from "@zet-harness/db/durable-memory-records";
 import { DURABLE_CONVERSATION_SUMMARIES_MIGRATION } from "@zet-harness/db/durable-summary-records";
+import { DURABLE_TRIGGER_FIRES_MIGRATION } from "@zet-harness/db/durable-trigger-fire-records";
 import { DURABLE_TRIGGERS_MIGRATION } from "@zet-harness/db/durable-trigger-records";
 import { DURABLE_PROJECTS_MIGRATION } from "@zet-harness/db/durable-project-records";
 
@@ -59,6 +60,7 @@ import {
   type RuntimeNodeExecutionResult,
 } from "./runtime-run-dispatcher.js";
 import { probeRuntimePathLimits, type RuntimePathLimitReport } from "./runtime-path-limits.js";
+import { RuntimeTriggerScheduler } from "./runtime-trigger-scheduler.js";
 import {
   DEFAULT_PLUGINS_DIRECTORY,
   emptyPluginReport,
@@ -87,6 +89,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_PROJECT_MEMORIES_MIGRATION,
   DURABLE_CONVERSATION_SUMMARIES_MIGRATION,
   DURABLE_TRIGGERS_MIGRATION,
+  DURABLE_TRIGGER_FIRES_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
@@ -134,6 +137,7 @@ export class RuntimeDaemon {
   private readonly redaction: RuntimeRedactionRegistry;
   private readonly approvals: RuntimeHumanApprovals;
   private readonly dispatcher: RuntimeRunDispatcher | undefined;
+  private readonly triggerSchedule: RuntimeTriggerScheduler;
   private readonly stoppedPromise: Promise<void>;
   private readonly resolveStopped: () => void;
   private stopPromise: Promise<boolean> | undefined;
@@ -182,6 +186,18 @@ export class RuntimeDaemon {
             this.redaction,
             authority,
           );
+    // Cron triggers are due at times kept in the database, so the schedule survives
+    // a restart and the process only ever holds a short timer to the next check.
+    this.triggerSchedule = new RuntimeTriggerScheduler({
+      database: this.database,
+      ...(execution === undefined
+        ? {}
+        : {
+            dispatch: (runId: string) => {
+              this.dispatcher?.wake(runId);
+            },
+          }),
+    });
     this.httpServer = new RuntimeHttpServer(
       options.api,
       this.eventStream,
@@ -332,6 +348,8 @@ export class RuntimeDaemon {
     this.state = "running";
     try {
       this.dispatcher?.start();
+      // After the dispatcher, so a trigger that fires immediately has somewhere to run.
+      this.triggerSchedule.start();
     } catch (error) {
       // A dispatch bootstrap failure after HTTP binding must not leave a live
       // listener claiming readiness. This instance is stopped; use a fresh daemon.
@@ -409,6 +427,7 @@ export class RuntimeDaemon {
   }
 
   private async stopOnce(): Promise<boolean> {
+    const schedule = this.triggerSchedule.stop();
     const draining = this.dispatcher?.stop();
     const pluginCleanup = Promise.all([
       this.pluginHost?.dispose().catch(() => undefined),
@@ -419,6 +438,7 @@ export class RuntimeDaemon {
     try {
       await this.httpServer.stop();
     } finally {
+      await schedule;
       await draining;
       await pluginCleanup;
       await this.database.drainWrites();

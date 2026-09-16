@@ -350,6 +350,26 @@ export function recordTriggerFired(
     );
 }
 
+/**
+ * Move a trigger's next due time without claiming a firing.
+ *
+ * A tick that turned out to be a duplicate still has to move the trigger on, or it
+ * would stay due and be reconsidered on every pass.
+ */
+export function rescheduleTrigger(
+  connection: TriggerStatementRunner,
+  triggerId: string,
+  nextFireAtMs: number | null,
+  nowMs: number,
+): void {
+  checkTime(nowMs);
+  connection
+    .prepare(
+      `UPDATE ${TRIGGERS_TABLE} SET next_fire_at_ms = ?, updated_at_ms = ? WHERE trigger_id = ?`,
+    )
+    .run(nextFireAtMs === null ? null : checkTime(nextFireAtMs, "nextFireAtMs"), nowMs, triggerId);
+}
+
 export function deleteTrigger(connection: TriggerStatementRunner, triggerId: string): boolean {
   if (readTrigger(connection, triggerId) === undefined) return false;
   connection.prepare(`DELETE FROM ${TRIGGERS_TABLE} WHERE trigger_id = ?`).run(triggerId);

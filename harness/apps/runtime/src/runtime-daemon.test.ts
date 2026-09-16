@@ -52,6 +52,7 @@ describe("RuntimeDaemon", () => {
       { version: 15, name: "durable_project_memories" },
       { version: 16, name: "durable_conversation_summaries" },
       { version: 17, name: "durable_triggers" },
+      { version: 18, name: "durable_trigger_fires" },
     ]);
   });
 
@@ -103,10 +104,10 @@ describe("RuntimeDaemon", () => {
           query: "ok",
           migrations: {
             status: "ok",
-            appliedCount: 17,
-            expectedCount: 17,
-            appliedVersion: 17,
-            expectedVersion: 17,
+            appliedCount: 18,
+            expectedCount: 18,
+            appliedVersion: 18,
+            expectedVersion: 18,
           },
         },
       },

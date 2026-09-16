@@ -250,7 +250,33 @@ token taken once and checked, cron schedules kept and refused, disabled triggers
 
 Not yet: firing cron triggers when they come due, and dedupe receipts — both 9.10.
 
+## Slice 10 — firing on time, exactly once (9.10)
+
+- **Receipts.** Migration 18 adds `trigger_fires`, unique per trigger and dedupe key. The receipt is
+  claimed *before* any run exists, so two callers racing the same key cannot both start one: the
+  loser is told it is a duplicate and given the run the winner started. A webhook delivered twice, a
+  client that retries after a lost response, and a scheduler pass that repeats a tick all land on
+  the same receipt.
+- **Keys.** A webhook or api caller sends its own key as `Idempotency-Key` (or
+  `x-zet-trigger-dedupe`, or `dedupeKey` in the body). Without one, each call is its own firing.
+  A cron tick's key is the time it was due, so a tick is fired once whatever happens to the process.
+  `GET /api/triggers/:id/fires` lists a trigger's receipts and the runs they started.
+- **Scheduling.** `RuntimeTriggerScheduler` fires cron triggers when they come due. No timer carries
+  a schedule: the due time is durable state on the trigger, and the process holds one short timer to
+  the next check, bounded at a minute and unreferenced so it never keeps the daemon alive. After a
+  pass, the next wake is the earliest due time.
+- **After downtime.** A daemon that was down finds its overdue triggers and fires each **once**, not
+  once per missed tick, then carries on from the current time. A schedule is a standing intention,
+  not a queue of missed ticks, and re-running an hourly job twenty times because a laptop was shut
+  for a day is never what someone wanted.
+- **Lifecycle.** The schedule starts after the dispatcher, so a trigger that is due immediately has
+  somewhere to run, and stops with the daemon.
+
+Covered by `runtime-trigger-scheduler.test.ts` (nothing before its time, one run and a moved-on
+schedule when due, catch-up after downtime, a repeated tick starting nothing, disabled triggers
+ignored, and earliest-first ordering) and the dedupe assertions in `runtime-trigger-http.test.ts`.
+
 ## Next
 
-9.10: fire due triggers from durable `not_before` state rather than long-lived timers, and give
-every fire a dedupe receipt so one webhook delivery starts one run.
+9.11 and 9.12: authenticated external clients — safe wake and resume behaviour for a client that
+connects from outside the editor, and the Copycat/client bridge path.

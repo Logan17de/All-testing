@@ -32,6 +32,10 @@
       "types": "./src/durable-conversation-records.ts",
       "default": "./dist/durable-conversation-records.js"
     },
+    "./durable-trigger-fire-records": {
+      "types": "./src/durable-trigger-fire-records.ts",
+      "default": "./dist/durable-trigger-fire-records.js"
+    },
     "./durable-trigger-records": {
       "types": "./src/durable-trigger-records.ts",
       "default": "./dist/durable-trigger-records.js"
