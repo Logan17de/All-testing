@@ -36,6 +36,11 @@ import {
   type RuntimeTriggerHttpServices,
 } from "./runtime-trigger-http.js";
 import {
+  handleClientHttp,
+  isClientHttpPath,
+  type RuntimeClientHttpServices,
+} from "./runtime-client-http.js";
+import {
   RuntimeEventCursorError,
   RuntimeEventStream,
   type RuntimeEventStreamUnsubscribe,
@@ -113,6 +118,7 @@ export class RuntimeHttpServer {
   private readonly goalServices: RuntimeGoalHttpServices | undefined;
   private readonly memoryServices: RuntimeMemoryHttpServices | undefined;
   private readonly triggerServices: RuntimeTriggerHttpServices | undefined;
+  private readonly clientServices: RuntimeClientHttpServices | undefined;
   private readonly eventClients = new Map<ServerResponse, () => void>();
   private readonly security: RuntimeApiSecurity;
   private readonly redaction: RuntimeRedactionRegistry;
@@ -143,6 +149,8 @@ export class RuntimeHttpServer {
       readonly memories?: RuntimeMemoryHttpServices;
       /** Standing reasons to start a run: manual, cron, webhook and api triggers. */
       readonly triggers?: RuntimeTriggerHttpServices;
+      /** External clients: tokens issued locally, then used instead of a browser session. */
+      readonly clients?: RuntimeClientHttpServices;
     } = {},
   ) {
     this.host = options.host ?? DEFAULT_RUNTIME_HOST;
@@ -156,6 +164,7 @@ export class RuntimeHttpServer {
     this.goalServices = services.goals;
     this.memoryServices = services.memories;
     this.triggerServices = services.triggers;
+    this.clientServices = services.clients;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
     this.approvals = services.approvals;
     this.security = new RuntimeApiSecurity(options.allowedOrigins);
@@ -296,6 +305,19 @@ export class RuntimeHttpServer {
           return;
         }
         void handleGoalHttp(request, response, url, this.security, goals).catch(
+          (error: unknown) => {
+            writeRuntimeApiError(response, error);
+          },
+        );
+        return;
+      }
+      if (isClientHttpPath(url.pathname)) {
+        const clients = this.clientServices;
+        if (clients === undefined) {
+          writeJson(response, 503, { error: { code: "CLIENT_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void handleClientHttp(request, response, url, this.security, clients).catch(
           (error: unknown) => {
             writeRuntimeApiError(response, error);
           },

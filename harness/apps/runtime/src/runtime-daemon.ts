@@ -24,6 +24,7 @@ import {
 } from "@zet-harness/db/durable-goal-records";
 import { DURABLE_PROJECT_MEMORIES_MIGRATION } from "@zet-harness/db/durable-memory-records";
 import { DURABLE_CONVERSATION_SUMMARIES_MIGRATION } from "@zet-harness/db/durable-summary-records";
+import { DURABLE_CLIENT_SESSIONS_MIGRATION } from "@zet-harness/db/durable-client-records";
 import { DURABLE_TRIGGER_FIRES_MIGRATION } from "@zet-harness/db/durable-trigger-fire-records";
 import { DURABLE_TRIGGERS_MIGRATION } from "@zet-harness/db/durable-trigger-records";
 import { DURABLE_PROJECTS_MIGRATION } from "@zet-harness/db/durable-project-records";
@@ -90,6 +91,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_CONVERSATION_SUMMARIES_MIGRATION,
   DURABLE_TRIGGERS_MIGRATION,
   DURABLE_TRIGGER_FIRES_MIGRATION,
+  DURABLE_CLIENT_SESSIONS_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
@@ -213,6 +215,20 @@ export class RuntimeDaemon {
         plugins: () => this.pluginReport,
         projects: { database: this.database },
         memories: { database: this.database },
+        clients: {
+          database: this.database,
+          approvals: this.approvals,
+          redact: (value) => this.redaction.redact(value),
+          registerSecret: (secret) => {
+            this.redaction.registerSecret(secret);
+          },
+          dispatch:
+            execution === undefined
+              ? undefined
+              : (runId) => {
+                  this.dispatcher?.wake(runId);
+                },
+        },
         triggers: {
           database: this.database,
           sources: () => ({

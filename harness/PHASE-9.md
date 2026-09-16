@@ -276,7 +276,36 @@ Covered by `runtime-trigger-scheduler.test.ts` (nothing before its time, one run
 schedule when due, catch-up after downtime, a repeated tick starting nothing, disabled triggers
 ignored, and earliest-first ordering) and the dedupe assertions in `runtime-trigger-http.test.ts`.
 
+## Slice 11 — clients from outside the editor (9.11)
+
+Something other than the editor — a phone, a bridge, another program — can now watch a run, add to
+a conversation and answer a human gate, without a browser session.
+
+- **Tokens.** A client is created from the editor (`POST /api/clients`), which is the only place a
+  token is issued; only its hash is stored, so it is shown once and a lost token can be revoked but
+  never recovered. Migration 19 keeps client sessions, which are revoked rather than deleted, so the
+  record of what once had access survives.
+- **Why no CSRF.** A browser never sends an `Authorization` header by itself, so the attack CSRF
+  exists to stop cannot happen on these routes. Everything else still applies: the daemon answers
+  only on loopback, and the editor's own routes keep their CSRF check.
+- **Scopes.** `read` sees runs, conversations and pending approvals; `messages` adds to a
+  conversation and wakes a run; `approvals` answers a gate. They are separate so a client that only
+  watches cannot answer for a person.
+- **Safe waking.** `POST /api/client/runs/:id/wake` asks the dispatcher to look at a run that
+  already exists. It never creates work, so a client that retries, reconnects, or wakes a finished
+  run changes nothing — the answer just says `woken: false` and the run's status.
+- **Safe resuming.** Answering an approval goes through the same durable path the editor uses, with
+  the single-use resume token issued and spent inside the daemon. An approval that is already
+  answered the same way comes back as `duplicate: true`; a different answer is a `409`, never an
+  overwrite.
+- **Adding to a conversation.** `POST /api/client/conversations/:id/messages` appends a user message
+  to the conversation's latest branch and optionally wakes a named run in the same call.
+
+Covered by `runtime-client-http.test.ts`: a token issued once and never read back, an unknown or
+missing token refused, scopes enforced, a revoked client stopped, waking that creates nothing,
+approvals answered once and repeated safely, and messages appended to the real conversation.
+
 ## Next
 
-9.11 and 9.12: authenticated external clients — safe wake and resume behaviour for a client that
-connects from outside the editor, and the Copycat/client bridge path.
+9.12: the Copycat/client bridge path — a worked client over this ingress, so the shape is proved by
+something that uses it.
