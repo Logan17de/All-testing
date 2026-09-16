@@ -16,6 +16,7 @@ import {
   GRAPH_JSON_VERSION,
   canonicalizeGraphJsonV1Semantics,
   checkGraphJsonV1Diagnostics,
+  hashExecutionIrContentV1,
   lowerCanonicalGraphJsonV1ToExecutionIr,
   normalizeGraphJsonV1,
   stripGraphJsonV1UiMetadata,
@@ -49,7 +50,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function seed(ir: ExecutionIrV1, path = ":memory:"): SqliteDatabase {
+async function seed(ir: ExecutionIrV1, path = ":memory:"): Promise<SqliteDatabase> {
   const database = new SqliteDatabase({ path });
   database.open();
   databases.push(database);
@@ -60,12 +61,15 @@ function seed(ir: ExecutionIrV1, path = ":memory:"): SqliteDatabase {
     revision_id, normalized_document_json, canonical_semantics_json, created_at_ms)
     VALUES ('doc', 'sem', 'sha256', 'graph', 'rev', '{}', '{}', 1)`,
   ).run();
+  // A stored plan records the hash of its own content, which the dispatcher checks
+  // before it resumes a run.
+  const irHash = await hashExecutionIrContentV1(ir);
   c.prepare(
     `INSERT INTO compiled_plans (compiled_plan_id, semantic_hash, registry_hash,
     compiler_version, hash_algorithm, ir_hash, execution_ir_json, node_pins_json,
     plugin_pins_json, created_at_ms) VALUES (1, 'sem', 'registry', 'harness.compiler/v1',
-    'sha256', 'ir', ?, '[]', '[]', 1)`,
-  ).run(JSON.stringify(ir));
+    'sha256', ?, ?, '[]', '[]', 1)`,
+  ).run(irHash, JSON.stringify(ir));
   c.prepare(
     `INSERT INTO graph_compilations (document_hash, compiled_plan_id, semantic_hash,
     created_at_ms) VALUES ('doc', 1, 'sem', 1)`,
@@ -227,7 +231,7 @@ describe("automatic durable scheduler dispatch", () => {
     roots.push(root);
     const path = join(root, "runtime.sqlite");
     const log = join(root, "calls.txt");
-    seed(await compiledGraph(), path).close();
+    (await seed(await compiledGraph(), path)).close();
     const spawn = () =>
       fork(
         fileURLToPath(new URL("./runtime-dispatch-crash-child.mjs", import.meta.url)),
@@ -292,7 +296,7 @@ describe("automatic durable scheduler dispatch", () => {
     const root = mkdtempSync(join(tmpdir(), "zet-dispatch-"));
     roots.push(root);
     const path = join(root, "runtime.sqlite");
-    const database = seed(ir, path);
+    const database = await seed(ir, path);
     database.close();
     const calls: string[] = [];
     const execute: RuntimeExecutionOptions["execute"] = (context) => {
@@ -334,7 +338,7 @@ describe("automatic durable scheduler dispatch", () => {
   });
 
   it("never turns human approval into a grant for the downstream effect", async () => {
-    const database = seed(await compiledGraph());
+    const database = await seed(await compiledGraph());
     const execute = vi.fn(() => ({ outputs: { value: "prepared" } }));
     const { dispatcher, approvals } = attach(database, { execute });
     expect(await dispatcher.waitForIdle("run-1")).toMatchObject({ status: "waiting" });
@@ -358,7 +362,7 @@ describe("automatic durable scheduler dispatch", () => {
     const ir = createMockExecutionIr([
       createMockExecutionOp("retry", [], { behavior: { retry: { maxAttempts: 3 } } }),
     ]);
-    const database = seed(ir);
+    const database = await seed(ir);
     const ids: string[] = [];
     const { dispatcher } = attach(database, {
       execute(context) {
@@ -383,7 +387,7 @@ describe("automatic durable scheduler dispatch", () => {
         behavior: { effect: "external-write", idempotency: "unknown", recovery: "manual" },
       }),
     ]);
-    const database = seed(ir);
+    const database = await seed(ir);
     const c = database.connection();
     c.prepare("UPDATE runs SET status = 'running', started_at_ms = 1").run();
     c.prepare("INSERT INTO node_invocations VALUES ('run-1', 0, 0, 'persisted-effect', 1)").run();
@@ -404,7 +408,7 @@ describe("automatic durable scheduler dispatch", () => {
       createMockExecutionOp("first", []),
       createMockExecutionOp("second", [0]),
     ]);
-    const database = seed(ir);
+    const database = await seed(ir);
     database.connection().exec(`CREATE TRIGGER fail_completion BEFORE INSERT ON durable_events
       WHEN NEW.event_type = 'harness.attempt.completed' BEGIN SELECT RAISE(ABORT, 'injected'); END;`);
     const execute = vi.fn(() => ({ outputs: { value: 1 } }));
@@ -426,7 +430,7 @@ describe("automatic durable scheduler dispatch", () => {
       createMockExecutionOp("first", []),
       createMockExecutionOp("second", [0]),
     ]);
-    const database = seed(ir);
+    const database = await seed(ir);
     const started = deferred();
     const finish = deferred();
     const execute = vi.fn(async () => {
@@ -451,7 +455,7 @@ describe("automatic durable scheduler dispatch", () => {
   });
 
   it("persists combined internal plus outer retry accounting", async () => {
-    const database = seed(
+    const database = await seed(
       createMockExecutionIr([
         createMockExecutionOp("budget", [], { behavior: { retry: { maxAttempts: 3 } } }),
       ]),
@@ -473,7 +477,7 @@ describe("automatic durable scheduler dispatch", () => {
 
 describe("dispatcher security and retry boundaries", () => {
   it("honors revocation between retries without spending another durable attempt", async () => {
-    const database = seed(
+    const database = await seed(
       createMockExecutionIr([
         createMockExecutionOp("restricted", [], {
           behavior: { requiredCapabilities: ["fs:read"], retry: { maxAttempts: 3 } },
@@ -505,7 +509,7 @@ describe("dispatcher security and retry boundaries", () => {
   });
 
   it("does not dispatch rejected or duplicate-rejected approvals", async () => {
-    const database = seed(await compiledGraph());
+    const database = await seed(await compiledGraph());
     const execute = vi.fn(() => ({ outputs: { value: "prepared" } }));
     const { dispatcher, approvals } = attach(
       database,
@@ -521,7 +525,7 @@ describe("dispatcher security and retry boundaries", () => {
   });
 
   it("rejects secret-bearing outputs without logging provider failure material", async () => {
-    const database = seed(createMockExecutionIr([createMockExecutionOp("secret", [])]));
+    const database = await seed(createMockExecutionIr([createMockExecutionOp("secret", [])]));
     const { dispatcher, redaction } = attach(database, {
       execute: () => ({ outputs: { value: "do-not-persist-this" } }),
     });
@@ -536,7 +540,7 @@ describe("dispatcher security and retry boundaries", () => {
   });
 
   it("drains parallel attempt failures rather than leaving phantom running attempts", async () => {
-    const database = seed(
+    const database = await seed(
       createMockExecutionIr([createMockExecutionOp("a", []), createMockExecutionOp("b", [])], 2),
     );
     const bothStarted = deferred();

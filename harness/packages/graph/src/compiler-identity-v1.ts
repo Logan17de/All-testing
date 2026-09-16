@@ -68,6 +68,15 @@ async function hashCanonicalJsonV1(
   return `${GRAPH_HASH_ALGORITHM}:${toHex(new Uint8Array(digest))}`;
 }
 
+/**
+ * The Execution IR content hash on its own, over the same domain and bytes as the
+ * `irHash` recorded at compile time. A stored plan can therefore be checked against
+ * the content it was compiled from without recompiling anything.
+ */
+export function hashExecutionIrContentV1(ir: ExecutionIrV1): Promise<GraphContentHashV1> {
+  return hashCanonicalJsonV1(IR_HASH_DOMAIN, stringifyCanonicalJsonV1(ir as unknown as JsonValue));
+}
+
 function cloneNodePins(pins: readonly GraphResolvedNodePinV1[]): readonly GraphResolvedNodePinV1[] {
   return Object.freeze(pins.map((pin) => Object.freeze({ ...pin })));
 }
@@ -100,13 +109,11 @@ export async function recordGraphCompilerIdentityV1(
     nodePins: input.canonical.nodePins,
     pluginPins: input.canonical.pluginPins,
   } as unknown as JsonValue);
-  const irJson = stringifyCanonicalJsonV1(input.ir as unknown as JsonValue);
-
   const [documentHash, semanticHash, registryHash, irHash] = await Promise.all([
     hashCanonicalJsonV1(DOCUMENT_HASH_DOMAIN, documentJson),
     hashCanonicalJsonV1(SEMANTIC_HASH_DOMAIN, input.canonical.canonicalSemanticsJson),
     hashCanonicalJsonV1(REGISTRY_HASH_DOMAIN, registryJson),
-    hashCanonicalJsonV1(IR_HASH_DOMAIN, irJson),
+    hashExecutionIrContentV1(input.ir),
   ]);
 
   const identity: GraphCompilerIdentityV1 = {

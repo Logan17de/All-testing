@@ -338,6 +338,9 @@ function Inspector({ runId }: { readonly runId: string }) {
 
   const active = !TERMINAL.has(run.status);
   const lineage = run.forkedFrom ?? null;
+  const identityChanged = run.timeline.some(
+    (event) => event.eventType === "harness.run.identity-mismatch",
+  );
   const firstEventAt = run.timeline[0]?.occurredAtMs ?? run.createdAtMs;
   const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId);
   const selectedState = selectedNodeId === null ? undefined : stateByNode.get(selectedNodeId);
@@ -388,6 +391,13 @@ function Inspector({ runId }: { readonly runId: string }) {
           {error}
         </p>
       )}
+      {identityChanged ? (
+        <p className="warn" role="alert">
+          This run was not continued: the plan it started from, or the plugin code behind one of its
+          nodes, has changed since it was created. Run the current graph instead, or reinstall the
+          plugin version it was compiled against.
+        </p>
+      ) : null}
       {run.status === "pending" ? (
         <p className="muted small">
           A run that stays pending has no executor: start the runtime with a plugins directory so

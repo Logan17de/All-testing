@@ -27,6 +27,11 @@ import {
   nextReadyOrder,
 } from "./runtime-iteration-frontier.js";
 import {
+  RUN_IDENTITY_MISMATCH_EVENT_TYPE,
+  verifyCompiledPlanIdentity,
+  type RuntimeNodeResolver,
+} from "./runtime-plan-identity.js";
+import {
   DURABLE_CONTROL_EDGE_FRONTIER_EVENT_TYPE,
   DURABLE_ROUTER_SELECTION_EVENT_TYPE,
   reconstructExecutionFrontier,
@@ -56,6 +61,11 @@ export interface RuntimeExecutionOptions {
   readonly execute: (
     execution: RuntimeNodeExecution,
   ) => RuntimeNodeExecutionResult | Promise<RuntimeNodeExecutionResult>;
+  /**
+   * How the host resolves a node type today. Given one, a run is refused rather
+   * than resumed when its plan's nodes would now run on different code.
+   */
+  readonly resolveNode?: RuntimeNodeResolver;
   readonly concurrency?: number;
   readonly retry?: PlainDagRunOptions["retry"];
   readonly effectRetry?: PlainDagRunOptions["effectRetry"];
@@ -70,6 +80,7 @@ export interface RuntimeDispatchReport {
     | "RUNTIME_DURABILITY_FAILED"
     | "RUNTIME_EXECUTION_FAILED"
     | "RUNTIME_BUDGET_EXCEEDED"
+    | "RUNTIME_PLAN_IDENTITY_CHANGED"
     | "PERMISSION_DENIED";
 }
 
@@ -211,6 +222,7 @@ export class RuntimeRunDispatcher {
   readonly #reports = new Map<string, RuntimeDispatchReport>();
   readonly #dirty = new Set<string>();
   readonly #executors = new Set<Promise<void>>();
+  readonly #verifiedPlans = new Set<number>();
   #started = false;
   #stopping = false;
 
@@ -304,12 +316,48 @@ export class RuntimeRunDispatcher {
     await this.#database.drainWrites();
   }
 
+  /**
+   * Refuse to resume a run whose plan, or the code behind it, is no longer what it
+   * was admitted against.
+   *
+   * A compiled plan is immutable, so one check per plan per process is enough. The
+   * refusal leaves the run untouched: nothing is silently continued, and the reason
+   * is journaled once so the inspector can show it.
+   */
+  private async checkPlanIdentity(
+    runId: string,
+    compiledPlanId: number,
+  ): Promise<RuntimeDispatchReport | undefined> {
+    if (this.#verifiedPlans.has(compiledPlanId)) return undefined;
+    const report = await verifyCompiledPlanIdentity(
+      this.#database.connection(),
+      compiledPlanId,
+      this.#options.resolveNode,
+    );
+    if (report.ok) {
+      this.#verifiedPlans.add(compiledPlanId);
+      return undefined;
+    }
+    await this.#database.commit((connection) => {
+      const last = connection
+        .prepare(
+          "SELECT event_type AS type FROM durable_events WHERE run_id = ? ORDER BY event_id DESC LIMIT 1",
+        )
+        .get(runId) as { readonly type: string } | undefined;
+      if (last?.type === RUN_IDENTITY_MISMATCH_EVENT_TYPE) return;
+      event(connection, runId, RUN_IDENTITY_MISMATCH_EVENT_TYPE, { issues: report.issues });
+    });
+    return { runId, status: "recovery-required", code: "RUNTIME_PLAN_IDENTITY_CHANGED" };
+  }
+
   private async execute(runId: string): Promise<RuntimeDispatchReport> {
     if (this.#stopping) return { runId, status: "paused" };
     let frontier = reconstructExecutionFrontier(this.#database.connection(), runId);
     if (["completed", "failed", "cancelled"].includes(frontier.runStatus)) {
       return { runId, status: frontier.runStatus as "completed" | "failed" | "cancelled" };
     }
+    const changed = await this.checkPlanIdentity(runId, frontier.compiledPlanId);
+    if (changed !== undefined) return changed;
     const loopOps = new Set(
       (frontier.executionIr as unknown as ExecutionIrV1).ops.flatMap((op, index) =>
         op.control?.kind === "loop" ? [index] : [],

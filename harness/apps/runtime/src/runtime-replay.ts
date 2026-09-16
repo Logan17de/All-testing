@@ -344,6 +344,9 @@ export function replayRecordedRun(
         push(event, "recovery", typeof outcome === "string" ? outcome : "recorded", payload);
         break;
       }
+      case "harness.run.identity-mismatch":
+        push(event, "run", "identity-mismatch", payload ?? {});
+        break;
       case "harness.run.forked":
         push(event, "run", "forked", payload ?? {});
         break;

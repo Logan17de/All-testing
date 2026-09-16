@@ -46,6 +46,7 @@ import {
   type SuspendForApprovalInput,
 } from "./runtime-human-approvals.js";
 import { createAgentNodeExecutor } from "./runtime-agent-nodes.js";
+import { createCompositeNodeResolver } from "./runtime-graphs.js";
 import { createPluginNodeExecutor } from "./runtime-plugin-executor.js";
 import {
   RuntimeRunDispatcher,
@@ -154,7 +155,10 @@ export class RuntimeDaemon {
       options.execution ??
       (options.plugins === undefined
         ? undefined
-        : { execute: (request) => this.executePluginNode(request) });
+        : {
+            execute: (request) => this.executePluginNode(request),
+            resolveNode: (type, version) => this.resolveNodePin(type, version),
+          });
     this.approvals = new RuntimeHumanApprovals(this.database, {
       redaction: this.redaction,
       onResolved: (runId) => {
@@ -337,6 +341,20 @@ export class RuntimeDaemon {
       if (policy.allows(capability)) return { decision: "allow" };
     }
     return { decision: "deny" };
+  }
+
+  /** How this daemon would resolve a node type now, for the dispatcher's plan checks. */
+  private resolveNodePin(
+    type: string,
+    version: string,
+  ): { readonly pluginId: string; readonly pluginVersion: string } | undefined {
+    const resolution = createCompositeNodeResolver({
+      ...(this.pluginHost === undefined ? {} : { host: this.pluginHost }),
+      sandboxes: this.pluginSandboxes,
+    }).getResolution(type, version);
+    return resolution === undefined
+      ? undefined
+      : { pluginId: resolution.plugin.id, pluginVersion: resolution.plugin.version };
   }
 
   private executePluginNode(request: RuntimeNodeExecution): Promise<RuntimeNodeExecutionResult> {

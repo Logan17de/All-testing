@@ -94,7 +94,35 @@ Forks are now visible, and one can be made from the browser.
 Covered by a run-view test for a fork's parent, a run's forks and the parent in the run list, and by
 driving the browser: forking a finished run from the inspector and following the new run.
 
+## Slice 4 — refuse to resume against changed work (9.4)
+
+A run is admitted against one compiled plan and the exact node versions the compiler resolved. Both
+can change under it between one wake-up and the next: the stored plan could be edited, and the
+plugins behind its nodes can be upgraded, disabled or removed. Either way, resuming would run work
+the run never started.
+
+- **The plan's own content.** The Execution IR is content-hashed at compile time, so the stored plan
+  is re-hashed and compared before a run is admitted. No recompilation is involved, and the
+  authoring document is not re-checked because execution never reads it.
+- **The code behind it.** A plan pins each node to a `type@version` and the plugin id and version it
+  resolved to. The daemon reports how it would resolve those nodes now, so a node that no longer
+  exists (`PLAN_NODE_UNAVAILABLE`) or now comes from a different plugin version
+  (`PLAN_PLUGIN_CHANGED`) is caught without running anything.
+- **What refusal means.** The run is left exactly as it is: no attempt starts, no status changes,
+  nothing is silently continued. The dispatcher reports `RUNTIME_PLAN_IDENTITY_CHANGED`, and the
+  reason is journaled once as `harness.run.identity-mismatch` with the issues it found, so a replay
+  shows it and the inspector explains it instead of leaving a run mysteriously stuck.
+- **Cost.** A compiled plan is immutable, so each plan is verified once per process.
+- **Already covered elsewhere.** Running an edited graph under a revision id that already names
+  different content is refused at creation (`GRAPH_REVISION_CONFLICT`), and a fork always re-runs
+  the same compiled plan its parent used.
+
+Covered by `runtime-plan-identity.test.ts`: an edited plan row, a node whose plugin version moved,
+a node that no longer resolves, the entry being journaled once however often the run is woken, and
+an unchanged run still completing.
+
 ## Next
 
-9.4: refuse to resume a run against an edited graph, so a changed plan cannot silently continue an
-old run.
+9.5-9.8: project memory — CRUD and pinned memory, recent/pinned retrieval with context-budget
+accounting, summarizing a conversation only when needed, and SQLite FTS only if simple retrieval
+proves insufficient.
