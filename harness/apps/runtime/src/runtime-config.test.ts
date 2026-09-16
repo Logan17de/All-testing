@@ -117,6 +117,16 @@ describe("settling where settings come from (11.2)", () => {
     expect(settings.sources["install.git"]).toBe("environment");
   });
 
+  it("lets the environment ask for any free port", () => {
+    const settings = resolveRuntimeSettings(
+      { runtime: { port: 4000 } },
+      { ZET_RUNTIME_PORT: "0" },
+      "/harness",
+    );
+    expect(settings.port).toBe(0);
+    expect(settings.sources["port"]).toBe("environment");
+  });
+
   it("makes every path absolute, and ignores an environment value it cannot read", () => {
     const settings = resolveRuntimeSettings({}, { ZET_RUNTIME_PORT: "not-a-port" }, "/harness");
     expect(settings.port).toBe(3211);

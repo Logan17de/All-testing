@@ -149,10 +149,14 @@ export async function readHarnessConfig(filePath: string): Promise<HarnessConfig
   return Object.freeze({ config, present: true, defects });
 }
 
-function numberFrom(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
+/**
+ * A port from the environment. `0` asks the system for any free port, which is how
+ * the startup smoke runs beside a harness that is already listening on the default.
+ */
+function portFrom(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim().length === 0) return undefined;
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 65_535 ? parsed : undefined;
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 65_535 ? parsed : undefined;
 }
 
 function booleanFrom(value: string | undefined): boolean | undefined {
@@ -191,7 +195,7 @@ export function resolveRuntimeSettings(
 
   const port = pick(
     "port",
-    numberFrom(environment["ZET_RUNTIME_PORT"]),
+    portFrom(environment["ZET_RUNTIME_PORT"]),
     config.runtime?.port,
     DEFAULT_RUNTIME_PORT,
   );
