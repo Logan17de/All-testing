@@ -297,7 +297,7 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 - [x] 9.7 Add conversation summarization only when needed.
 - [x] 9.8 Add SQLite FTS only if simple retrieval is insufficient. Decided against for now:
       memories take a plain containment filter instead; `PHASE-9.md` records when to revisit.
-- [ ] 9.9 Add manual/cron/webhook/API triggers using one durable run-creation path.
+- [x] 9.9 Add manual/cron/webhook/API triggers using one durable run-creation path.
 - [ ] 9.10 Add trigger dedupe receipts and durable future `not_before` scheduling instead of long-lived timers.
 - [ ] 9.11 Add authenticated external client/session ingress and safe wake/resume behavior.
 - [ ] 9.12 Add Copycat/client bridge path.

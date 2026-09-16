@@ -32,6 +32,10 @@
       "types": "./src/durable-conversation-records.ts",
       "default": "./dist/durable-conversation-records.js"
     },
+    "./durable-trigger-records": {
+      "types": "./src/durable-trigger-records.ts",
+      "default": "./dist/durable-trigger-records.js"
+    },
     "./durable-summary-records": {
       "types": "./src/durable-summary-records.ts",
       "default": "./dist/durable-summary-records.js"

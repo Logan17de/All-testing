@@ -221,7 +221,36 @@ records the decision rather than the machinery.
 Covered by `durable-memory-records.test.ts` (containment across title and body, case-insensitive,
 wildcards escaped, recall order kept, blank search ignored) and `runtime-memory-http.test.ts`.
 
+## Slice 9 — standing reasons to start a run (9.9)
+
+A trigger is a stored reason to run one graph: by hand, on a schedule, from a webhook, or from an
+API client.
+
+- **One run-creation path.** Storing a compiled graph and starting a run are now separate:
+  `storeCompiledGraph` keeps the document and its plan, and `createRunFromStoredPlan` is the only
+  thing that inserts a run. The editor calls both; a trigger compiles once at creation and then
+  fires through the second alone, so firing never recompiles and every run begins the same way —
+  `pending`, bound to a stored plan, admitted by the dispatcher like any other.
+- **Kinds.** `manual` and `api` fire through `POST /api/triggers/:id/fire`; `webhook` fires through
+  `POST /api/hooks/:id`; `cron` carries a five-field UTC schedule. A trigger can be turned off, and
+  a disabled one refuses to start work (`TRIGGER_DISABLED`).
+- **Tokens.** A webhook or api trigger is given a token at creation and only its hash is stored, so
+  it is shown once and can never be read back. The hook compares hashes in constant time.
+- **Cron.** A small UTC evaluator: `*`, numbers, lists, ranges and steps, with the usual rule that a
+  restricted day-of-month and day-of-week both match. UTC only, deliberately: a local schedule would
+  need a rule for the hours that repeat or vanish at a daylight-saving change, and a trigger that
+  fires twice or not at all is worse than one that fires at a predictable time. A trigger records
+  when it is next due, which is what 9.10's scheduler watches.
+- **Storage.** Migration 17 adds `triggers`, bound to the same document-and-plan pair a run uses,
+  with the usual identity trigger and an index on what is due.
+
+Covered by `runtime-cron.test.ts` (fields, refusals, next fire times across months, leap days and
+both day rules) and `runtime-trigger-http.test.ts` (manual firing into a completed run, a webhook
+token taken once and checked, cron schedules kept and refused, disabled triggers, and deletion).
+
+Not yet: firing cron triggers when they come due, and dedupe receipts — both 9.10.
+
 ## Next
 
-9.9 and 9.10: triggers — manual, cron, webhook and API, all through one durable run-creation path,
-with dedupe receipts and durable `not_before` scheduling instead of long-lived timers.
+9.10: fire due triggers from durable `not_before` state rather than long-lived timers, and give
+every fire a dedupe receipt so one webhook delivery starts one run.

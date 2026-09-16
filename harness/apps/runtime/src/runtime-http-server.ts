@@ -31,6 +31,11 @@ import {
   type RuntimeMemoryHttpServices,
 } from "./runtime-memory-http.js";
 import {
+  handleTriggerHttp,
+  isTriggerHttpPath,
+  type RuntimeTriggerHttpServices,
+} from "./runtime-trigger-http.js";
+import {
   RuntimeEventCursorError,
   RuntimeEventStream,
   type RuntimeEventStreamUnsubscribe,
@@ -107,6 +112,7 @@ export class RuntimeHttpServer {
   private readonly conversationServices: RuntimeConversationHttpServices | undefined;
   private readonly goalServices: RuntimeGoalHttpServices | undefined;
   private readonly memoryServices: RuntimeMemoryHttpServices | undefined;
+  private readonly triggerServices: RuntimeTriggerHttpServices | undefined;
   private readonly eventClients = new Map<ServerResponse, () => void>();
   private readonly security: RuntimeApiSecurity;
   private readonly redaction: RuntimeRedactionRegistry;
@@ -135,6 +141,8 @@ export class RuntimeHttpServer {
       readonly goals?: RuntimeGoalHttpServices;
       /** What a project remembers across conversations and runs. */
       readonly memories?: RuntimeMemoryHttpServices;
+      /** Standing reasons to start a run: manual, cron, webhook and api triggers. */
+      readonly triggers?: RuntimeTriggerHttpServices;
     } = {},
   ) {
     this.host = options.host ?? DEFAULT_RUNTIME_HOST;
@@ -147,6 +155,7 @@ export class RuntimeHttpServer {
     this.conversationServices = services.conversations;
     this.goalServices = services.goals;
     this.memoryServices = services.memories;
+    this.triggerServices = services.triggers;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
     this.approvals = services.approvals;
     this.security = new RuntimeApiSecurity(options.allowedOrigins);
@@ -287,6 +296,19 @@ export class RuntimeHttpServer {
           return;
         }
         void handleGoalHttp(request, response, url, this.security, goals).catch(
+          (error: unknown) => {
+            writeRuntimeApiError(response, error);
+          },
+        );
+        return;
+      }
+      if (isTriggerHttpPath(url.pathname)) {
+        const triggers = this.triggerServices;
+        if (triggers === undefined) {
+          writeJson(response, 503, { error: { code: "TRIGGER_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void handleTriggerHttp(request, response, url, this.security, triggers).catch(
           (error: unknown) => {
             writeRuntimeApiError(response, error);
           },

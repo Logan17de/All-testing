@@ -32,7 +32,7 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
 
 ### You are here (updated 2026-09-15)
 
-- **Branch:** `zet-harness-v1` on GitHub holds all local work; the latest slice is 9.8 (memory search; no full-text index yet).
+- **Branch:** `zet-harness-v1` on GitHub holds all local work; the latest slice is 9.9 (triggers).
 - **Just finished — Phase 8:** structured bounded loops, subgraphs, projects, conversations with
   branching messages, goals and todos with dependencies and automatic completion, the budgeted
   context builder, the durable model→tool→model agent loop with run-wide model, tool, token and cost
@@ -42,7 +42,8 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
   run, lineage, refusing to resume changed work, project memory, offering it to an agent
   within a context budget, and summarizing a conversation only when it no longer fits.
   9.8 settled search: memories take a plain `q` filter, and SQLite FTS stays out until the
-  recorded conditions are met. **9.9 and 9.10, triggers**, are next.
+  recorded conditions are met. 9.9 added triggers — manual, cron, webhook and api — through
+  one durable run-creation path. **9.10, firing due triggers and dedupe receipts**, is next.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins), 10.11
   (install plugins from npm or Git), 11.2–11.9 (packaging and optional scale-out).
 - **Where the detail lives:** `TODO.md` is the item-by-item checklist, and each `PHASE-*.md` explains
@@ -188,7 +189,7 @@ Phase 9  Replay + memory + triggers        🚧 IN PROGRESS
            ├─ 9.6 recent/pinned retrieval + context-budget accounting           ✅
            ├─ 9.7 conversation summarization only when needed                   ✅
            ├─ 9.8 SQLite FTS only if simple retrieval is not enough             ✅
-           ├─ 9.9 manual/cron/webhook/API triggers, one run-creation path       ⏳
+           ├─ 9.9 manual/cron/webhook/API triggers, one run-creation path       ✅
            ├─ 9.10 trigger dedupe receipts + durable not_before scheduling       ⏳
            ├─ 9.11 authenticated external client ingress + safe wake/resume     ⏳
            └─ 9.12 Copycat/client bridge                                        ⏳
@@ -209,7 +210,7 @@ Phase 11 Packaging + optional scale-out    🚧 1/9
 | **6 — Model + Tool adapters** | mock provider, generic OpenAI-compatible model plugin, local endpoints, filesystem/shell/Git tools, routing and usage metadata | ✅ Complete except 6.12 (needs a real local model endpoint) |
 | **7 — Visual graph editor + Run inspector** | React Flow editor only, plugin node palette, compiler diagnostics, live graph status, detailed run inspector | ✅ Complete — **v0.1 boundary reached** |
 | **8 — Structured loops + Projects/Goals/Todos + Agent mode** | bounded loops/subgraphs, projects, conversations, goals/todos, context builder, autonomous model→tool→model loop | ✅ Complete — bounded loops, subgraphs, projects, conversations, goals/todos, context builder, agent loop with run-wide budgets, workspace UI and run lock (see `PHASE-8.md`) |
-| **9 — Replay/Fork + Memory + Triggers + External clients** | recorded replay, checkpoint forks, lightweight memory, cron/webhook/API triggers, Copycat/client bridge | 🚧 In progress — 9.1-9.8 done through memory search; triggers next (see `PHASE-9.md`) |
+| **9 — Replay/Fork + Memory + Triggers + External clients** | recorded replay, checkpoint forks, lightweight memory, cron/webhook/API triggers, Copycat/client bridge | 🚧 In progress — 9.1-9.9 done through triggers; due-firing and dedupe next (see `PHASE-9.md`) |
 | **10 — MCP + Custom-node SDK + Trust tiers** | MCP through normal tool registry, local plugin loading, SDK/package manifests, process/WASI isolation options | ✅ Complete except 10.10 (WASI) and 10.11 (npm/Git install) |
 | **11 — Packaging + Optional scale-out** | Windows setup, config wizard, backup/import/export, optional desktop shell, optional Postgres/remote workers | 🚧 11.1 done; 11.2–11.9 pending |
 
