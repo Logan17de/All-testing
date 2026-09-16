@@ -1,19 +1,28 @@
-import { resolve } from "node:path";
+import { join } from "node:path";
 
 import { RuntimeDaemon } from "./runtime-daemon.js";
-import { DEFAULT_PLUGINS_DIRECTORY } from "./runtime-plugins.js";
+import {
+  HARNESS_CONFIG_FILENAME,
+  readHarnessConfig,
+  resolveRuntimeSettings,
+} from "./runtime-config.js";
 
-const configuredPort = process.env.ZET_RUNTIME_PORT;
-const runtimePort = configuredPort === undefined ? undefined : Number(configuredPort);
-const runtimeDatabasePath = process.env.ZET_RUNTIME_DB_PATH;
-// Plugins always load from a directory: a missing directory or plugins.json simply
-// enables nothing, so a fresh install starts with the built-in nodes only.
-const pluginsDirectory = process.env.ZET_RUNTIME_PLUGINS_DIR ?? DEFAULT_PLUGINS_DIRECTORY;
+// Settings come from the environment first, then harness.config.json, then defaults.
+// A harness with no config file is a working harness.
+const root = process.cwd();
+const file = await readHarnessConfig(join(root, HARNESS_CONFIG_FILENAME));
+for (const defect of file.defects) console.warn(`ZET_RUNTIME_CONFIG_DEFECT ${defect}`);
+const settings = resolveRuntimeSettings(file.config, process.env, root);
 
 const daemon = new RuntimeDaemon({
-  ...(runtimePort === undefined ? {} : { api: { port: runtimePort } }),
-  ...(runtimeDatabasePath === undefined ? {} : { database: { path: runtimeDatabasePath } }),
-  plugins: { directory: resolve(pluginsDirectory) },
+  api: { port: settings.port },
+  database: { path: settings.databasePath },
+  // Plugins always load from a directory: a missing directory or plugins.json simply
+  // enables nothing, so a fresh install starts with the built-in nodes only.
+  plugins: {
+    directory: settings.pluginsDirectory,
+    ...(settings.install.npm || settings.install.git ? { install: settings.install } : {}),
+  },
 });
 
 let stopRequested = false;

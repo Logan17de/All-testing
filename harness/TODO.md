@@ -357,13 +357,20 @@ first experience — and spawns npm's JavaScript entry through the current Node 
 rather than leaving a half-started system that looks healthy.
 
 
+**Setup:** 11.2 adds `npm run setup`, which asks five questions with defaults and writes
+`harness.config.json`. The runtime reads it with a settled order: an environment variable wins over
+the file, which wins over the built-in default, and each setting reports which of the three it came
+from. A harness with no config file still runs, so the wizard is a convenience rather than a gate,
+and `--yes` answers everything from defaults and flags so it works with no terminal at all.
+Allowing plugin installs is one of the questions, and it says what that permits.
+
 **Backup:** 11.3 adds `npm run backup`, which copies the database and the blob store into one
 directory with a manifest, and restores one into destinations that do not exist yet. Restoring
 never overwrites or merges: deciding which of two histories really happened is not something a
 restore should do quietly, so it refuses and says why.
 
 - [x] 11.1 Add Windows-friendly install/start flow.
-- [ ] 11.2 Add config wizard.
+- [x] 11.2 Add config wizard.
 - [x] 11.3 Add backup/export/import UI/CLI. The CLI is done; a UI button that writes to a
       path of the daemon's choosing is deliberately not added yet.
 - [ ] 11.4 Add optional desktop shell only if it improves distribution.

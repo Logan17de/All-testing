@@ -80,6 +80,21 @@ SQLite journal + blob store
 
 The visual/editor representation is source code, not runtime state. The scheduler executes immutable compiled semantics, and SQLite records what actually happened.
 
+## Setting up
+
+A harness runs with no configuration at all. To settle where things live and which port it uses:
+
+```bash
+npm run setup
+```
+
+That writes `harness.config.json`. An environment variable always wins over the file, so a one-off
+run can change a setting without editing anything:
+
+```bash
+ZET_RUNTIME_PORT=4100 npm start
+```
+
 ## Backups
 
 Everything a harness knows lives in one SQLite database and the blob store beside it. Copy both
@@ -126,7 +141,7 @@ Phase 7  Visual graph + inspector           ✅ ← Harness v0.1 boundary
 Phase 8  Loops + projects + agent mode      ✅ complete
 Phase 9  Replay + memory + triggers         ✅ complete
 Phase 10 MCP + custom-node SDK + trust      ✅ 10/11 (10.10 WASI stays open by design)
-Phase 11 Packaging + optional scale-out     🚧 2/9 (start flow, backup and restore)
+Phase 11 Packaging + optional scale-out     🚧 3/9 (start flow, setup, backup and restore)
 ```
 
 To try it, follow [Running the harness](./PLUGINS.md#running-the-harness) and
