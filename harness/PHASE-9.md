@@ -168,6 +168,33 @@ and goals survive, and both `maxMemories` bounds.
 
 Not yet: an agent writing memories of its own, and a memory panel in the web app.
 
+## Slice 7 — summarizing a conversation only when it no longer fits (9.7)
+
+Nothing summarizes on a schedule. A step summarizes only when its conversation no longer fits the
+context it is allowed, and then only the messages that would otherwise have been dropped.
+
+- **When.** The step builds its context; if the conversation section had to drop its oldest
+  messages, exactly those are folded into one summary and the context is rebuilt. A conversation
+  that fits is never summarized, and no model call is made for it.
+- **What is stored.** Migration 16 adds `conversation_summaries`: the text, how many messages it
+  covers, the last message it covers, the model that wrote it, the run whose step wrote it, and the
+  tokens it cost. Summaries are append-only, and writing the same cut twice keeps the first, so a
+  retried step reuses the summary it already paid for.
+- **How it is used.** A later step takes the summary covering the most of its branch, sends it as a
+  short developer message in place of those messages, and sends the rest verbatim. A summary counts
+  only on the branch it was made from, so an edit into a different branch never inherits a summary
+  of messages it does not contain.
+- **What it costs.** One extra model call, capped by `summaryMaxOutputTokens` (400 by default). Its
+  tokens count toward the run's token budget alongside the messages, so summarizing cannot quietly
+  spend past a limit. It is not a separate agent step.
+- **Accounted for.** The step's usage records `summary: { used, wrote, throughMessageId, messages }`
+  beside the context section report.
+
+Covered by `runtime-agent-summary.test.ts`: a conversation that fits is left alone, an overlong one
+is folded into a stored summary the step then uses, the next step reuses that summary instead of
+writing another, and a summary's tokens push a run over its token budget.
+
 ## Next
 
-9.7: summarize a conversation only when it no longer fits, rather than on a fixed schedule.
+9.8: SQLite full-text search over memories and conversations, only if pinned and recent retrieval
+proves insufficient.

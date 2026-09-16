@@ -294,7 +294,7 @@ Goal: build autonomous agents on the same scheduler rather than creating a secon
 - [x] 9.4 Add graph/run identity checks so edited graphs do not silently resume old runs.
 - [x] 9.5 Add project memory CRUD and pinned memory.
 - [x] 9.6 Add recent/pinned retrieval and context-budget accounting.
-- [ ] 9.7 Add conversation summarization only when needed.
+- [x] 9.7 Add conversation summarization only when needed.
 - [ ] 9.8 Add SQLite FTS only if simple retrieval is insufficient.
 - [ ] 9.9 Add manual/cron/webhook/API triggers using one durable run-creation path.
 - [ ] 9.10 Add trigger dedupe receipts and durable future `not_before` scheduling instead of long-lived timers.

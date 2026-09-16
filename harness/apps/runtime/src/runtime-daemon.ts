@@ -23,6 +23,7 @@ import {
   DURABLE_GOALS_MIGRATION,
 } from "@zet-harness/db/durable-goal-records";
 import { DURABLE_PROJECT_MEMORIES_MIGRATION } from "@zet-harness/db/durable-memory-records";
+import { DURABLE_CONVERSATION_SUMMARIES_MIGRATION } from "@zet-harness/db/durable-summary-records";
 import { DURABLE_PROJECTS_MIGRATION } from "@zet-harness/db/durable-project-records";
 
 import {
@@ -83,6 +84,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_GOAL_BLOCKING_MIGRATION,
   DURABLE_PROJECT_RUN_LOCKS_MIGRATION,
   DURABLE_PROJECT_MEMORIES_MIGRATION,
+  DURABLE_CONVERSATION_SUMMARIES_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 

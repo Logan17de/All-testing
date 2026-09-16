@@ -32,6 +32,10 @@
       "types": "./src/durable-conversation-records.ts",
       "default": "./dist/durable-conversation-records.js"
     },
+    "./durable-summary-records": {
+      "types": "./src/durable-summary-records.ts",
+      "default": "./dist/durable-summary-records.js"
+    },
     "./durable-memory-records": {
       "types": "./src/durable-memory-records.ts",
       "default": "./dist/durable-memory-records.js"

@@ -21,10 +21,17 @@ import {
 } from "@zet-harness/db/durable-conversation-records";
 import { listGoals, selectNextRunnableTodo } from "@zet-harness/db/durable-goal-records";
 import { listMemories } from "@zet-harness/db/durable-memory-records";
+import {
+  recordConversationSummary,
+  summaryForBranch,
+  SUMMARY_MAX_LENGTH,
+  type DurableConversationSummaryRecord,
+} from "@zet-harness/db/durable-summary-records";
 import { createSortableId } from "@zet-harness/db/sortable-id";
 import type {
   AdapterInvocationContext,
   AdapterUsage,
+  ModelAdapter,
   JsonObject,
   JsonValue,
   ModelMessage,
@@ -46,6 +53,12 @@ const GOAL_SUMMARY_LIMIT = 50;
 /** How many memories an agent is offered by default, and how much of each. */
 const MEMORY_LIMIT = 20;
 const MEMORY_BODY_LIMIT = 400;
+/** Room a summary is asked to fit in when a conversation outgrows its context. */
+const DEFAULT_SUMMARY_OUTPUT_TOKENS = 400;
+const SUMMARY_SYSTEM_PROMPT =
+  "Summarize the conversation so far so that it can be continued without the original messages. " +
+  "Keep decisions, facts, open questions, and anything the user asked for. Be brief and factual, " +
+  "and write plain prose with no preamble.";
 
 export type AgentStepErrorCode =
   | "AGENT_CONFIG_INVALID"
@@ -339,10 +352,13 @@ export function createAgentNodeExecutor(
       const used = countOf(
         connection
           .prepare(
-            `SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS count
-             FROM messages WHERE run_id = ?`,
+            `SELECT
+               (SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0)
+                FROM messages WHERE run_id = ?)
+               + (SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0)
+                  FROM conversation_summaries WHERE run_id = ?) AS count`,
           )
-          .get(runId),
+          .get(runId, runId),
       );
       if (used >= maxTokens) {
         throw budgetExceeded(
@@ -436,6 +452,16 @@ export function createAgentNodeExecutor(
     return { role: "developer", parts: [{ kind: "text", text: lines.join("\n") }] };
   };
 
+  const summaryMessage = (summary: DurableConversationSummaryRecord): ModelMessage => ({
+    role: "developer",
+    parts: [
+      {
+        kind: "text",
+        text: `Summary of the ${String(summary.messageCount)} earlier messages of this conversation:\n${summary.summary.slice(0, SUMMARY_MAX_LENGTH)}`,
+      },
+    ],
+  });
+
   /**
    * What the project remembers, pinned first and then most recently changed.
    *
@@ -474,6 +500,61 @@ export function createAgentNodeExecutor(
     return goals.length > 0 && goals.every((goal) => goal.status === "blocked");
   };
 
+  /**
+   * Fold the oldest messages of a branch into one summary.
+   *
+   * This is the only extra model call an agent step makes, and it happens only when the
+   * conversation no longer fits its context. The summary is stored under the last
+   * message it covers, so the same cut is never paid for twice, and its tokens count
+   * toward the run's token budget like any other model work.
+   */
+  const summarize = async (
+    execution: RuntimeNodeExecution,
+    adapter: ModelAdapter,
+    conversationId: string,
+    previous: DurableConversationSummaryRecord | undefined,
+    folded: readonly DurableMessageRecord[],
+    maxOutputTokens: number,
+  ): Promise<DurableConversationSummaryRecord | undefined> => {
+    const last = folded[folded.length - 1];
+    if (last === undefined) return undefined;
+    const result = await adapter.generate(
+      {
+        messages: [
+          { role: "system", parts: [{ kind: "text", text: SUMMARY_SYSTEM_PROMPT }] },
+          ...(previous === undefined ? [] : [summaryMessage(previous)]),
+          ...folded
+            .map((message) => toModelMessage(message))
+            .filter((message): message is ModelMessage => message !== undefined),
+        ],
+        maxOutputTokens,
+      },
+      invocationContext(execution, `${execution.logicalEffectId}:summary`),
+    );
+    execution.signal.throwIfAborted();
+    const text = result.message.parts
+      .map((part) => (part.kind === "text" ? part.text : ""))
+      .join("")
+      .trim();
+    if (text.length === 0) return undefined;
+    const inputTokens = result.usage?.inputTokens;
+    const outputTokens = result.usage?.outputTokens;
+    return database.commit((writer) =>
+      recordConversationSummary(writer, {
+        summaryId: createId(),
+        conversationId,
+        throughMessageId: last.messageId,
+        summary: text.slice(0, SUMMARY_MAX_LENGTH),
+        messageCount: (previous?.messageCount ?? 0) + folded.length,
+        model: `${adapter.manifest.id}@${adapter.manifest.version}`,
+        runId: execution.runId,
+        ...(inputTokens === undefined ? {} : { inputTokens }),
+        ...(outputTokens === undefined ? {} : { outputTokens }),
+        nowMs: now(),
+      }),
+    );
+  };
+
   const runModelStep = async (
     execution: RuntimeNodeExecution,
   ): Promise<RuntimeNodeExecutionResult> => {
@@ -488,6 +569,8 @@ export function createAgentNodeExecutor(
     const maxOutputTokens = integerConfig(config, "maxOutputTokens");
     const maxContextBytes = integerConfig(config, "maxContextBytes");
     const maxMemories = countConfig(config, "maxMemories") ?? MEMORY_LIMIT;
+    const summaryMaxOutputTokens =
+      integerConfig(config, "summaryMaxOutputTokens") ?? DEFAULT_SUMMARY_OUTPUT_TOKENS;
     const modelId = stringConfig(config, "modelId");
     const modelVersion = stringConfig(config, "modelVersion");
 
@@ -522,29 +605,70 @@ export function createAgentNodeExecutor(
     }
 
     const latest = latestMessage(conversation.conversationId);
-    const branch =
-      latest === undefined
-        ? []
-        : readMessagePath(database.connection(), latest.messageId)
-            .map((message) => toModelMessage(message))
-            .filter((message): message is ModelMessage => message !== undefined);
+    const path =
+      latest === undefined ? [] : readMessagePath(database.connection(), latest.messageId);
     const memory = memorySummary(conversation.projectId, maxMemories);
-    const context = buildModelContext({
-      sections: [
-        {
-          id: "system",
-          required: true,
-          messages: [{ role: "system", parts: [{ kind: "text", text: systemPrompt }] }],
-        },
-        { id: "goals", required: true, messages: [goalSummary(conversation.projectId)] },
-        { id: "memory", messages: memory.message === undefined ? [] : [memory.message] },
-        { id: "conversation", messages: branch },
-      ],
-      budget: contextBudgetForModel(manifest, {
-        reserveOutputTokens,
-        ...(maxContextBytes === undefined ? {} : { maxBytes: maxContextBytes }),
-      }),
+    const budget = contextBudgetForModel(manifest, {
+      reserveOutputTokens,
+      ...(maxContextBytes === undefined ? {} : { maxBytes: maxContextBytes }),
     });
+
+    // A summary stands in for the messages it covers, so the branch starts after it.
+    let summary = summaryForBranch(
+      database.connection(),
+      conversation.conversationId,
+      path.map((message) => message.messageId),
+    );
+    let tail = path.slice((summary?.index ?? -1) + 1);
+    const build = (): ReturnType<typeof buildModelContext> =>
+      buildModelContext({
+        sections: [
+          {
+            id: "system",
+            required: true,
+            messages: [{ role: "system", parts: [{ kind: "text", text: systemPrompt }] }],
+          },
+          { id: "goals", required: true, messages: [goalSummary(conversation.projectId)] },
+          { id: "memory", messages: memory.message === undefined ? [] : [memory.message] },
+          {
+            id: "summary",
+            messages: summary === undefined ? [] : [summaryMessage(summary.summary)],
+          },
+          {
+            id: "conversation",
+            messages: tail
+              .map((message) => toModelMessage(message))
+              .filter((message): message is ModelMessage => message !== undefined),
+          },
+        ],
+        budget,
+      });
+
+    let context = build();
+    // 9.7: summarize only when the conversation no longer fits, never on a schedule.
+    const overflow =
+      context.sections.find((section) => section.id === "conversation")?.droppedMessages ?? 0;
+    let wroteSummary = false;
+    if (overflow > 0) {
+      const folded = tail.slice(0, overflow);
+      const last = folded[folded.length - 1];
+      if (last !== undefined) {
+        const written = await summarize(
+          execution,
+          adapter,
+          conversation.conversationId,
+          summary?.summary,
+          folded,
+          summaryMaxOutputTokens,
+        );
+        if (written !== undefined) {
+          summary = { summary: written, index: (summary?.index ?? -1) + folded.length };
+          tail = tail.slice(folded.length);
+          wroteSummary = true;
+          context = build();
+        }
+      }
+    }
 
     const result = await adapter.generate(
       {
@@ -569,6 +693,12 @@ export function createAgentNodeExecutor(
         totalBytes: context.totalBytes,
         usedFallbackCounting: context.usedFallbackCounting,
         sections: context.sections,
+      },
+      summary: {
+        used: summary !== undefined,
+        wrote: wroteSummary,
+        throughMessageId: summary?.summary.throughMessageId ?? null,
+        messages: summary?.summary.messageCount ?? 0,
       },
       memory: {
         offered: memory.offered,
