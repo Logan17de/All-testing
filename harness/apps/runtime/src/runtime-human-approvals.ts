@@ -9,6 +9,7 @@ import type { ExecutionIrV1 } from "@zet-harness/graph";
 import { hasStructuredControl, reduceStructuredControlFrontier } from "@zet-harness/scheduler";
 
 import { RuntimeApprovalError } from "./runtime-approval-error.js";
+import { writeFrontierCheckpoint } from "./runtime-checkpoints.js";
 import { applyControlDelta, controlFrontierOf } from "./runtime-control-frontier.js";
 import {
   RuntimeRedactionRegistry,
@@ -134,61 +135,16 @@ function checkpoint(
   ops: readonly RecoveredOpFrontier[],
   now: number,
 ): number {
-  let cursor = 0;
-  for (const state of ops) {
-    cursor = appendEvent(
-      connection,
-      frontier.runId,
-      "harness.frontier.op",
-      now,
-      state,
-      state.opIndex,
-    );
-  }
-  const header = connection
-    .prepare(
-      `INSERT INTO run_checkpoints (
-      run_id, through_event_id, checkpoint_schema_version, created_at_ms
-    ) VALUES (?, ?, 1, ?)`,
-    )
-    .run(frontier.runId, cursor, now);
-  const checkpointId = Number(header.lastInsertRowid);
-  const insertOp = connection.prepare(`INSERT INTO checkpoint_op_frontier (
-    checkpoint_id, op_index, iteration, status, remaining_dependencies, attempts_started,
-    attempt_budget_used, ready_order, retry_not_before_ms
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  for (const state of ops) {
-    insertOp.run(
-      checkpointId,
-      state.opIndex,
-      state.iteration,
-      state.status,
-      state.remainingDependencies,
-      state.attemptsStarted,
-      state.attemptBudgetUsed,
-      state.readyOrder,
-      state.retryNotBeforeMs,
-    );
-  }
-  const insertEdge = connection.prepare(`INSERT INTO checkpoint_control_edges
-    (checkpoint_id, edge_index, iteration, status) VALUES (?, ?, ?, ?)`);
-  for (const edge of frontier.controlEdges) {
-    if (edge.status !== "unresolved") {
-      insertEdge.run(checkpointId, edge.edgeIndex, edge.iteration, edge.status);
-    }
-  }
-  // Branch choices made before this cursor are only recoverable from the checkpoint.
-  const insertSelection = connection.prepare(`INSERT INTO checkpoint_router_selections
-    (checkpoint_id, router_op_index, iteration, branch) VALUES (?, ?, ?, ?)`);
-  for (const selection of frontier.routerSelections) {
-    insertSelection.run(
-      checkpointId,
-      selection.routerOpIndex,
-      selection.iteration,
-      selection.branch,
-    );
-  }
-  return checkpointId;
+  return writeFrontierCheckpoint(
+    connection,
+    {
+      runId: frontier.runId,
+      ops,
+      controlEdges: frontier.controlEdges,
+      routerSelections: frontier.routerSelections,
+    },
+    now,
+  );
 }
 
 /**

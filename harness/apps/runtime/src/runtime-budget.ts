@@ -55,7 +55,10 @@ export function assertRunBudget(
   }
 }
 
-/** When a loop op started running, from its committed entry event. */
+/**
+ * When a loop op started running, from its committed entry event. A fork that carries
+ * a running loop over gives it a fresh wall-time window starting at the fork.
+ */
 export function loopEnteredAtMs(
   connection: DatabaseSync,
   runId: string,
@@ -63,8 +66,14 @@ export function loopEnteredAtMs(
 ): number | undefined {
   const row = connection
     .prepare(
-      "SELECT MIN(occurred_at_ms) AS enteredAtMs FROM durable_events WHERE run_id = ? AND op_index = ? AND event_type = 'harness.loop.entered'",
+      `SELECT MIN(occurred_at_ms) AS enteredAtMs,
+        (SELECT MAX(occurred_at_ms) FROM durable_events
+         WHERE run_id = ? AND event_type = 'harness.run.forked') AS forkedAtMs
+       FROM durable_events
+       WHERE run_id = ? AND op_index = ? AND event_type = 'harness.loop.entered'`,
     )
-    .get(runId, op) as { readonly enteredAtMs: number | null } | undefined;
-  return row?.enteredAtMs ?? undefined;
+    .get(runId, runId, op) as
+    { readonly enteredAtMs: number | null; readonly forkedAtMs: number | null } | undefined;
+  if (row?.enteredAtMs == null) return undefined;
+  return Math.max(row.enteredAtMs, row.forkedAtMs ?? 0);
 }

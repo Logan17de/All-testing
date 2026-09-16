@@ -39,7 +39,46 @@ and writes no row, identical repeated replays, three loop iterations with each d
 
 Not yet: showing a replay step by step in the run inspector.
 
+## Slice 2 — fork a run from a point in its history (9.2)
+
+A new run can now start from any point in another run's history. The run it came from is never
+written.
+
+- **Where to fork.** `forkRun(database, runId, { throughEventId })` cuts the parent's journal after
+  one of its events, such as the event of a step in its replay, or after its latest event when none
+  is given. A commit journals its own event before the frontier changes it caused, so the cut moves
+  to the end of the commit it fell in. A fork never starts with an upstream node finished and its
+  downstream not yet released.
+- **The frontier at that point.** Recovery can now rebuild a run's frontier as it stood after any
+  event: the latest checkpoint at or before the cut, then the frontier events up to it, without
+  overlaying today's attempt rows.
+- **What the fork keeps.** Work that had finished by the cut keeps its recorded attempts, results,
+  logical effect ids and journal events, including branch choices and loop decisions. A replay of
+  the fork shows that history, and downstream nodes read the same upstream values. Reused attempts
+  are part of the fork's record, so they count toward its node-execution budget. A
+  `harness.run.forked` event marks where the fork's own history begins.
+- **What runs again.** Everything else starts again with a fresh attempt budget: a node that was
+  running or waiting to retry, a node that failed (so forking a failed run retries it), and a human
+  approval that was waiting, which is asked again with a new request while the parent's request
+  stays pending. A loop that was running carries on from its next iteration with a fresh wall-time
+  window. A loop that failed or was cancelled cannot be forked yet (`FORK_UNSUPPORTED`).
+- **Lineage.** The fork is an ordinary `pending` run on the same compiled plan, admitted by the
+  dispatcher like any other. Its `parent_run_id` names the parent, and its fork metadata records the
+  cut event, the parent checkpoint the cut was rebuilt from, and the fork's own starting checkpoint.
+- **Refusals.** An unknown run is `RUN_NOT_FOUND` (404). An event of a different run, a point that
+  is not a positive whole number, or a point inside the history a fork copied from its parent is
+  `FORK_POINT_INVALID` (422); fork the original run to go further back.
+- **HTTP.** `POST /api/runs/:id/fork` with `{}` or `{ "throughEventId": 12 }` returns `201` with the
+  fork and starts it.
+
+Covered by `runtime-fork.test.ts` (forking a finished run after its first node, where only the
+second node runs and every row of the parent is unchanged; retrying a failed run; carrying a running
+loop over to finish its iterations; asking a waiting approval again in the fork; and the refusals)
+and `runtime-fork-http.test.ts`, which forks a run through the API and replays the fork.
+
+Not yet: a fork button and a parent link in the run inspector, which come with 9.3.
+
 ## Next
 
-9.2: fork a new run from a checkpoint while the historical run stays immutable, then record the
-parent run and fork checkpoint (9.3) and refuse to resume a run against an edited graph (9.4).
+9.3: show a run's parent, fork point and forks in the run view and the run inspector, then refuse
+to resume a run against an edited graph (9.4).

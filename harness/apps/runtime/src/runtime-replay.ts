@@ -344,6 +344,9 @@ export function replayRecordedRun(
         push(event, "recovery", typeof outcome === "string" ? outcome : "recorded", payload);
         break;
       }
+      case "harness.run.forked":
+        push(event, "run", "forked", payload ?? {});
+        break;
       case "harness.run.budget-exceeded":
         push(event, "run", "budget-exceeded", payload);
         break;

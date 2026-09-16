@@ -121,6 +121,14 @@ export interface RecoveredCheckpointAnchor {
   readonly createdAtMs: number;
 }
 
+export interface ReconstructFrontierOptions {
+  /**
+   * Rebuild the frontier as it stood just after this event of the run, for forks.
+   * Attempt rows are not overlaid and no attempt is reported as running before a crash.
+   */
+  readonly throughEventId?: number;
+}
+
 export interface RecoveredExecutionFrontier {
   readonly runId: string;
   readonly runStatus: DurableRunStatus;
@@ -489,16 +497,17 @@ function loadCheckpoint(
   ops: Map<string, MutableOpFrontier>,
   controlEdges: Map<string, MutableControlEdgeFrontier>,
   routerSelections: Map<string, RecoveredRouterSelection>,
+  throughEventId: number,
 ): RecoveredCheckpointAnchor | null {
   const checkpointRow = connection
     .prepare(
       `SELECT checkpoint_id, through_event_id, checkpoint_schema_version, created_at_ms
        FROM ${RUN_CHECKPOINTS_TABLE}
-       WHERE run_id = ?
+       WHERE run_id = ? AND through_event_id <= ?
        ORDER BY through_event_id DESC, checkpoint_id DESC
        LIMIT 1`,
     )
-    .get(runId) as SqliteRow | undefined;
+    .get(runId, throughEventId) as SqliteRow | undefined;
 
   if (checkpointRow === undefined) {
     return null;
@@ -619,15 +628,16 @@ function replayFrontierEvents(
   ops: Map<string, MutableOpFrontier>,
   controlEdges: Map<string, MutableControlEdgeFrontier>,
   routerSelections: Map<string, RecoveredRouterSelection>,
+  throughEventId: number,
 ): { readonly replayedThroughEventId: number; readonly frontierEventsApplied: number } {
   const rows = connection
     .prepare(
       `SELECT event_id, event_type, event_schema_version, op_index, iteration, attempt, payload_json
        FROM ${DURABLE_EVENTS_TABLE}
-       WHERE run_id = ? AND event_id > ?
+       WHERE run_id = ? AND event_id > ? AND event_id <= ?
        ORDER BY event_id`,
     )
-    .all(runId, afterEventId) as SqliteRow[];
+    .all(runId, afterEventId, throughEventId) as SqliteRow[];
 
   let replayedThroughEventId = afterEventId;
   let frontierEventsApplied = 0;
@@ -887,10 +897,19 @@ function frozenRouterSelections(
 export function reconstructExecutionFrontier(
   connection: DatabaseSync,
   runId: string,
+  options: ReconstructFrontierOptions = {},
 ): RecoveredExecutionFrontier {
   if (runId.length === 0) {
     throw new TypeError("Recovery runId must not be empty.");
   }
+  const { throughEventId } = options;
+  if (
+    throughEventId !== undefined &&
+    (!Number.isSafeInteger(throughEventId) || throughEventId < 0)
+  ) {
+    throw new TypeError("Recovery throughEventId must be a non-negative safe integer.");
+  }
+  const bound = throughEventId ?? Number.MAX_SAFE_INTEGER;
 
   const runRow = connection
     .prepare(
@@ -922,6 +941,7 @@ export function reconstructExecutionFrontier(
     ops,
     controlEdges,
     routerSelections,
+    bound,
   );
   const replay = replayFrontierEvents(
     connection,
@@ -931,8 +951,13 @@ export function reconstructExecutionFrontier(
     ops,
     controlEdges,
     routerSelections,
+    bound,
   );
-  const preCrashRunningAttempts = reconcileDurableAttempts(connection, runId, executionIr, ops);
+  // Attempt rows describe the present, so a historical frontier comes from the journal alone.
+  const preCrashRunningAttempts =
+    throughEventId === undefined
+      ? reconcileDurableAttempts(connection, runId, executionIr, ops)
+      : Object.freeze([]);
 
   const recoveredOps = frozenOps(executionIr, ops);
   const readyQueue = buildReadyQueue(recoveredOps);

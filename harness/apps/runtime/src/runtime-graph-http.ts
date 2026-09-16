@@ -5,6 +5,7 @@ import type { GraphJsonV1DiagnosticContext } from "@zet-harness/graph";
 
 import { RuntimeApiSecurityError, type RuntimeApiSecurity } from "./runtime-api-security.js";
 import { writeRuntimeJson } from "./runtime-approval-http.js";
+import { forkRun } from "./runtime-fork.js";
 import {
   RuntimeGraphError,
   compileEditorGraph,
@@ -34,7 +35,7 @@ export interface RuntimeGraphHttpServices {
  */
 const MAX_GRAPH_BODY_BYTES = 1_048_576;
 
-async function readGraphBody(request: IncomingMessage): Promise<unknown> {
+async function readBodyText(request: IncomingMessage): Promise<string> {
   const parts: Buffer[] = [];
   let size = 0;
   for await (const part of request.iterator({ destroyOnReturn: false })) {
@@ -46,10 +47,14 @@ async function readGraphBody(request: IncomingMessage): Promise<unknown> {
     }
     parts.push(buffer);
   }
+  return Buffer.concat(parts).toString("utf8");
+}
 
+async function readGraphBody(request: IncomingMessage): Promise<unknown> {
+  const text = await readBodyText(request);
   let value: unknown;
   try {
-    value = JSON.parse(Buffer.concat(parts).toString("utf8")) as unknown;
+    value = JSON.parse(text) as unknown;
   } catch {
     throw new RuntimeGraphError("GRAPH_INVALID", "Request body is not valid JSON.", 400);
   }
@@ -57,6 +62,49 @@ async function readGraphBody(request: IncomingMessage): Promise<unknown> {
     throw new RuntimeGraphError("GRAPH_INVALID", 'Request body must be { "graph": ... }.', 400);
   }
   return (value as { readonly graph: unknown }).graph;
+}
+
+/** An empty body or `{}` forks from the run's latest event; `{ "throughEventId": 12 }` from event 12. */
+async function readForkBody(
+  request: IncomingMessage,
+): Promise<{ readonly throughEventId?: number }> {
+  const text = (await readBodyText(request)).trim();
+  if (text.length === 0) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    throw new RuntimeGraphError("FORK_POINT_INVALID", "Request body is not valid JSON.", 400);
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new RuntimeGraphError(
+      "FORK_POINT_INVALID",
+      'Request body must be an object, such as { "throughEventId": 12 }.',
+      400,
+    );
+  }
+  const throughEventId = (value as { readonly throughEventId?: unknown }).throughEventId;
+  if (throughEventId === undefined) return {};
+  if (
+    typeof throughEventId !== "number" ||
+    !Number.isSafeInteger(throughEventId) ||
+    throughEventId < 1
+  ) {
+    throw new RuntimeGraphError(
+      "FORK_POINT_INVALID",
+      "throughEventId must be a positive whole number.",
+      422,
+    );
+  }
+  return { throughEventId };
+}
+
+function decodeRunId(segment: string | undefined): string {
+  try {
+    return decodeURIComponent(segment ?? "");
+  } catch {
+    throw new RuntimeGraphError("RUN_NOT_FOUND", "No run exists with this id.", 404);
+  }
 }
 
 function writeGraphError(response: ServerResponse, error: RuntimeGraphError): void {
@@ -155,14 +203,28 @@ export async function handleGraphHttp(
     const replayMatch = /^\/api\/runs\/([^/]+)\/replay$/u.exec(url.pathname);
     if (replayMatch !== null) {
       if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
-      let replayRunId: string;
-      try {
-        replayRunId = decodeURIComponent(replayMatch[1] ?? "");
-      } catch {
-        throw new RuntimeGraphError("RUN_NOT_FOUND", "No run exists with this id.", 404);
-      }
       writeRuntimeJson(response, 200, {
-        replay: replayRecordedRun(services.database.connection(), replayRunId, services.redact),
+        replay: replayRecordedRun(
+          services.database.connection(),
+          decodeRunId(replayMatch[1]),
+          services.redact,
+        ),
+      });
+      return;
+    }
+
+    // 9.2: a new run from a point in this run's history; the parent run is never written.
+    const forkMatch = /^\/api\/runs\/([^/]+)\/fork$/u.exec(url.pathname);
+    if (forkMatch !== null) {
+      if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
+      security.checkMutation(request);
+      const parentRunId = decodeRunId(forkMatch[1]);
+      const fork = await forkRun(services.database, parentRunId, await readForkBody(request));
+      services.dispatch?.(fork.runId);
+      writeRuntimeJson(response, 201, {
+        fork,
+        // Without an executor the fork stays pending, like any new run.
+        dispatched: services.dispatch !== undefined,
       });
       return;
     }
@@ -173,14 +235,8 @@ export async function handleGraphHttp(
       return;
     }
     if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
-    let runId: string;
-    try {
-      runId = decodeURIComponent(match[1] ?? "");
-    } catch {
-      throw new RuntimeGraphError("RUN_NOT_FOUND", "No run exists with this id.", 404);
-    }
     writeRuntimeJson(response, 200, {
-      run: readRunView(services.database, runId, services.redact),
+      run: readRunView(services.database, decodeRunId(match[1]), services.redact),
     });
   } catch (error: unknown) {
     if (error instanceof RuntimeGraphError) {
