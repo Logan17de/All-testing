@@ -38,6 +38,7 @@ import type {
   ModelMessagePart,
   ToolAdapter,
 } from "@zet-harness/plugin-api";
+import type { NodeSecretAccessor } from "@zet-harness/plugin-api/secret-contract";
 
 import { actionToolSpecifications, modelToolName } from "./runtime-action-tools.js";
 import { createGoalActionTools } from "./runtime-goal-actions.js";
@@ -85,6 +86,16 @@ export interface AgentNodeExecutorOptions {
    * this does not allow is never offered; without it, only adapters demanding none are.
    */
   readonly allows?: (capability: string) => boolean;
+  /**
+   * Models a person configured in this harness, by id.
+   *
+   * Configuring one is the grant: someone typed that endpoint and, if it needs a
+   * key, that key. So a configured model is offered without a plugin's capability
+   * standing behind it, while a plugin's own model stays gated by `allows`.
+   */
+  readonly configuredModels?: () => ReadonlySet<string>;
+  /** The credential accessor for a configured model, when it has one. */
+  readonly modelSecrets?: (modelId: string) => NodeSecretAccessor | undefined;
   /** UTC epoch milliseconds. Defaults to the system clock. */
   readonly now?: () => number;
   /** Message ids. Defaults to a sortable UUIDv7. */
@@ -218,6 +229,7 @@ function toStoredUsage(usage: AdapterUsage | undefined): DurableMessageUsage | u
 function invocationContext(
   execution: RuntimeNodeExecution,
   logicalEffectId: string = execution.logicalEffectId,
+  secrets?: NodeSecretAccessor,
 ): AdapterInvocationContext {
   return {
     runId: execution.runId,
@@ -227,6 +239,9 @@ function invocationContext(
     logicalEffectId,
     signal: execution.signal,
     retryBudget: execution.retryBudget,
+    // A model's key is read here, at the request, and never enters the graph or
+    // the run's records.
+    ...(secrets === undefined ? {} : { secrets }),
   };
 }
 
@@ -526,6 +541,7 @@ export function createAgentNodeExecutor(
     previous: DurableConversationSummaryRecord | undefined,
     folded: readonly DurableMessageRecord[],
     maxOutputTokens: number,
+    secrets: NodeSecretAccessor | undefined,
   ): Promise<DurableConversationSummaryRecord | undefined> => {
     const last = folded[folded.length - 1];
     if (last === undefined) return undefined;
@@ -540,7 +556,7 @@ export function createAgentNodeExecutor(
         ],
         maxOutputTokens,
       },
-      invocationContext(execution, `${execution.logicalEffectId}:summary`),
+      invocationContext(execution, `${execution.logicalEffectId}:summary`, secrets),
     );
     execution.signal.throwIfAborted();
     const text = result.message.parts
@@ -595,10 +611,13 @@ export function createAgentNodeExecutor(
     await holdProject(execution, conversation.projectId);
     enforceModelBudgets(execution.runId, config);
     const tools = offeredTools(conversation.projectId, execution.runId, maxMemories > 0);
+    const configured = options.configuredModels?.() ?? new Set<string>();
     const decision = routeModel({
       manifests: options.models
         .listManifests()
-        .filter((manifest) => granted(manifest.requiredCapabilities)),
+        .filter(
+          (manifest) => configured.has(manifest.id) || granted(manifest.requiredCapabilities),
+        ),
       requirements: {
         ...(tools.length > 0 ? { tools: true } : {}),
         ...(modelId === undefined ? {} : { modelId }),
@@ -614,6 +633,7 @@ export function createAgentNodeExecutor(
     if (manifest === undefined || adapter === undefined) {
       throw new AgentStepError("AGENT_NO_MODEL", "No available model can take this agent step.");
     }
+    const secrets = options.modelSecrets?.(manifest.id);
 
     const latest = latestMessage(conversation.conversationId);
     const path =
@@ -671,6 +691,7 @@ export function createAgentNodeExecutor(
           summary?.summary,
           folded,
           summaryMaxOutputTokens,
+          secrets,
         );
         if (written !== undefined) {
           summary = { summary: written, index: (summary?.index ?? -1) + folded.length };
@@ -687,7 +708,7 @@ export function createAgentNodeExecutor(
         ...(tools.length > 0 ? { tools: actionToolSpecifications(tools) } : {}),
         ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
       },
-      invocationContext(execution),
+      invocationContext(execution, execution.logicalEffectId, secrets),
     );
     execution.signal.throwIfAborted();
 

@@ -186,3 +186,8 @@ export function fetchProjects(): Promise<
 > {
   return readRuntime<{ readonly projects: readonly ProjectSummary[] }>("/api/projects?status=all");
 }
+
+/** The models a person configured; keys are never part of this answer. */
+export function fetchModels(): Promise<RuntimeFetch<{ readonly models: readonly unknown[] }>> {
+  return readRuntime<{ readonly models: readonly unknown[] }>("/api/models");
+}

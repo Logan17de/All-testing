@@ -119,6 +119,34 @@ the loader uses at startup — manifests only, no plugin code imported — and r
 not a plugin. The package lands **disabled**, with nothing granted, and runs from the next start of
 the runtime: installing is still not enabling, and enabling is still a file you edit.
 
+## Connecting a model
+
+Agent steps need a model to call. Open **Models** (`http://127.0.0.1:3000/models`) and add one:
+
+- **Ollama** or **llama.cpp** running on this machine: pick it, type the model name exactly as the
+  server knows it (for example `llama3.1:8b`), and keep **No key**. The endpoint is filled in with
+  the server's usual local address.
+- **OpenAI**, or any other API that speaks the OpenAI Chat Completions format: pick it, type the
+  model name and the endpoint, and either paste the API key or name the environment variable that
+  holds it.
+
+Saving checks the model straight away with a one-token request, and says what went wrong in plain
+words — a refused key, a wrong URL, a server that is not running. **Check** repeats it at any time.
+
+- **Where a key lives.** A pasted key is kept in this harness's own database on this machine and is
+  never returned by the API or shown again; editing a model with the key field left empty keeps it.
+  Anyone who can read the database file can read the key, exactly as with a `.env` file. If you
+  would rather it never touch the database, choose the environment variable instead — the key is
+  read at the moment a request is made — and set the variable before starting the runtime.
+- **Where a key goes.** Only to that model's endpoint, only over https or to an address on this
+  machine, and it is removed from everything the harness records.
+- **Which model a step uses.** An **Agent model step** uses the model named in its **Model id**
+  setting, or otherwise any available model that can call tools. A model you add is available
+  immediately, without restarting the runtime.
+
+Signing in to a provider with an account (OAuth) is not offered: the providers above give API access
+through keys.
+
 ## Building and running a graph
 
 Open `http://127.0.0.1:3000/editor`. The palette lists every node your enabled plugins registered,
@@ -126,8 +154,10 @@ plus the built-in **Human approval** node, which any graph can use to pause for 
 
 - Drag a node onto the canvas, or click it to add it. Connect an output handle to an input handle.
   An input nothing feeds can take a typed value in the inspector.
-- The compiler checks the graph as you edit. Problems appear on the node or connection they
-  concern, and **Run graph** stays disabled until there are none.
+- The compiler checks the graph in the background while you build, and the status line says
+  whether it is ready to run. Nothing is marked wrong while you are still wiring it: press **Run
+  graph** and, if something is missing, the problems appear on the node or connection they concern
+  and in the list, and the run is not started. They clear as soon as the graph can run.
 - Handles on a node's sides carry data. Handles above and below a node are control flow: a
   control edge makes its target run only after its source finishes on that path.
 - To branch, connect a **Condition** node's `branch` output to a **Route** node's `branch` input,

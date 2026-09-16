@@ -223,6 +223,12 @@ durable journal waits on the same model-node executor wiring the rest of Phase 6
 stays open on purpose: a loopback protocol fixture is not proof that a real Ollama or llama.cpp
 model works, and this project does not mark an item proven by a mock. See `PHASE-6.6-6.11.md`.
 
+**Connecting a model:** a person can now add a model on the Models page — Ollama, llama.cpp,
+OpenAI or any compatible endpoint — with its key stored in the harness or read from an environment
+variable, check it with a one-token request, and have agent steps use it without a restart. Keys
+travel only through the adapter's credential port, are redacted from everything recorded, and are
+never returned. Proving 6.12 is now one form and one **Check** against a real local server.
+
 **Filesystem scope:** 6.13–6.16 and 6.21 add the workspace path resolver, the first-party
 native filesystem plugin, and the startup path-limit probe. Windows containment rules are enforced
 on every platform so a graph authored on Linux cannot mean something different on Windows. The

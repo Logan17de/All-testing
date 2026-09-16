@@ -31,6 +31,11 @@ import {
   type RuntimeMemoryHttpServices,
 } from "./runtime-memory-http.js";
 import {
+  handleModelHttp,
+  isModelHttpPath,
+  type RuntimeModelHttpServices,
+} from "./runtime-model-http.js";
+import {
   handleTriggerHttp,
   isTriggerHttpPath,
   type RuntimeTriggerHttpServices,
@@ -158,6 +163,7 @@ export class RuntimeHttpServer {
   private readonly conversationServices: RuntimeConversationHttpServices | undefined;
   private readonly goalServices: RuntimeGoalHttpServices | undefined;
   private readonly memoryServices: RuntimeMemoryHttpServices | undefined;
+  private readonly modelServices: RuntimeModelHttpServices | undefined;
   private readonly triggerServices: RuntimeTriggerHttpServices | undefined;
   private readonly clientServices: RuntimeClientHttpServices | undefined;
   private readonly eventClients = new Map<ServerResponse, () => void>();
@@ -200,6 +206,7 @@ export class RuntimeHttpServer {
       readonly goals?: RuntimeGoalHttpServices;
       /** What a project remembers across conversations and runs. */
       readonly memories?: RuntimeMemoryHttpServices;
+      readonly models?: RuntimeModelHttpServices;
       /** Standing reasons to start a run: manual, cron, webhook and api triggers. */
       readonly triggers?: RuntimeTriggerHttpServices;
       /** External clients: tokens issued locally, then used instead of a browser session. */
@@ -217,6 +224,7 @@ export class RuntimeHttpServer {
     this.conversationServices = services.conversations;
     this.goalServices = services.goals;
     this.memoryServices = services.memories;
+    this.modelServices = services.models;
     this.triggerServices = services.triggers;
     this.clientServices = services.clients;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
@@ -385,6 +393,19 @@ export class RuntimeHttpServer {
           return;
         }
         void handleTriggerHttp(request, response, url, this.security, triggers).catch(
+          (error: unknown) => {
+            writeRuntimeApiError(response, error);
+          },
+        );
+        return;
+      }
+      if (isModelHttpPath(url.pathname)) {
+        const models = this.modelServices;
+        if (models === undefined) {
+          writeJson(response, 503, { error: { code: "MODEL_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void handleModelHttp(request, response, url, this.security, models).catch(
           (error: unknown) => {
             writeRuntimeApiError(response, error);
           },

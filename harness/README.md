@@ -149,7 +149,8 @@ To try it, follow [Running the harness](./PLUGINS.md#running-the-harness) and
 copied into the plugins directory or, where the host allows it, installed from npm or an https
 Git repository on the Plugins page — see
 [Installing a plugin](./PLUGINS.md#installing-a-plugin). A plugin arrives disabled and is
-granted nothing until you say so.
+granted nothing until you say so. Models are connected on the Models page — see
+[Connecting a model](./PLUGINS.md#connecting-a-model).
 
 The Graph JSON v1 freeze now includes:
 

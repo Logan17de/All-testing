@@ -827,3 +827,29 @@ button.timeline__row:focus-visible {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Models — connecting the endpoints agent steps call */
+.modelAdd {
+  margin-top: 1.25rem;
+}
+
+.modelForm {
+  margin-top: 1.25rem;
+  max-width: 44rem;
+}
+
+.modelKey {
+  margin: 0.75rem 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.modelCheck {
+  font-size: 0.85rem;
+}
+
+.modelCheck--ok {
+  color: #6ee7a0;
+}

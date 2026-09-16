@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./durable-model-records": {
+      "types": "./src/durable-model-records.ts",
+      "default": "./dist/durable-model-records.js"
+    },
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/index.js"

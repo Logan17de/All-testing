@@ -31,6 +31,7 @@ export default async function HomePage() {
         <Link href="/editor">Graph editor</Link>
         <Link href="/projects">Projects</Link>
         <Link href="/runs">Runs</Link>
+        <Link href="/models">Models</Link>
         <Link href="/plugins">Plugins</Link>
       </nav>
 

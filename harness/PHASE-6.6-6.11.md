@@ -90,6 +90,44 @@ language model. Marking 6.12 complete would claim something a mock cannot establ
 open until someone runs it against a real local model. This follows the caveat `PHASE-6.5.md`
 already set.
 
+## Since then — connecting a model from the app
+
+Until now the harness could speak to any OpenAI-compatible endpoint but a person had no way to tell
+it which one: nothing registered a model unless a plugin did, and nothing handed a model its key.
+Both now exist.
+
+- **Configured models.** Migration 20 adds `model_configs`: an id, a profile (`openai`, `ollama`,
+  `llama-cpp` or `custom`), the endpoint, the model name the endpoint knows, whether it can call
+  tools, its context window, and where its key comes from — nowhere, a key stored in this database,
+  or a named environment variable. The runtime registers each one as an OpenAI-compatible adapter
+  at start, and re-registers or removes it the moment it changes, so no restart is needed.
+- **Keys on the designed path.** The adapter already asked for its key by credential port at the
+  moment it built a request; nothing supplied one. A configured model's step now gets a node-scoped
+  secret accessor bound to that single port, resolved from the database or the environment, and
+  every value it resolves is registered with the redactor before the adapter sees it. A key is
+  never part of a graph, a run record, an event or an API answer, and is never sent in the clear to
+  another machine: plain http is allowed only for a loopback endpoint when a key is involved.
+- **Authority.** A plugin's model is still offered only when the plugin was granted the network
+  capability it needs. A model a person configured is offered on its own: typing that endpoint and
+  that key is the grant.
+- **Checking.** `POST /api/models/:id/check` sends a one-token request through the same credential
+  path a run uses and answers with the transport's own code and, for an HTTP refusal, the status —
+  so a wrong key or model name is found on the Models page rather than in the middle of a run.
+- **The page.** `/models` lists configured models, adds one from a preset for each profile, edits
+  one without re-entering its key, checks, and removes.
+
+Covered by `durable-model-records.test.ts`, `runtime-model-http.test.ts` — including an agent step
+that runs against a loopback endpoint through the daemon, sends the stored key, writes the reply
+into the conversation and leaves the key out of the run — and `model-form.test.ts` and
+`model-routes.test.ts` on the web side. Checked in the browser: a wrong key reported as refused
+(HTTP 401), the corrected key answering, a rename keeping the stored key, an unreachable local
+server reported as such, and a model removed.
+
+6.12 is still unchecked for the reason above: every endpoint in those checks was a fixture. The
+difference now is that proving it takes a person with Ollama or llama.cpp one form and one **Check**.
+Signing in with a provider account (OAuth) is not offered; the providers these profiles cover give
+API access through keys.
+
 ## Verification
 
 Run from `harness/`:

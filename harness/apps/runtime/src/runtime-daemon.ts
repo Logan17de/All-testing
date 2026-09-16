@@ -25,6 +25,10 @@ import {
 import { DURABLE_PROJECT_MEMORIES_MIGRATION } from "@zet-harness/db/durable-memory-records";
 import { DURABLE_CONVERSATION_SUMMARIES_MIGRATION } from "@zet-harness/db/durable-summary-records";
 import { DURABLE_CLIENT_SESSIONS_MIGRATION } from "@zet-harness/db/durable-client-records";
+import {
+  DURABLE_MODEL_CONFIGS_MIGRATION,
+  listModelConfigs,
+} from "@zet-harness/db/durable-model-records";
 import { DURABLE_TRIGGER_FIRES_MIGRATION } from "@zet-harness/db/durable-trigger-fire-records";
 import { DURABLE_TRIGGERS_MIGRATION } from "@zet-harness/db/durable-trigger-records";
 import { DURABLE_PROJECTS_MIGRATION } from "@zet-harness/db/durable-project-records";
@@ -51,6 +55,8 @@ import {
   type SuspendForApprovalInput,
 } from "./runtime-human-approvals.js";
 import { createAgentNodeExecutor } from "./runtime-agent-nodes.js";
+import { RuntimeModels } from "./runtime-models.js";
+import type { ModelCheckResult } from "./runtime-model-http.js";
 import { createCompositeNodeResolver } from "./runtime-graphs.js";
 import { createPluginNodeExecutor } from "./runtime-plugin-executor.js";
 import {
@@ -99,6 +105,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_TRIGGERS_MIGRATION,
   DURABLE_TRIGGER_FIRES_MIGRATION,
   DURABLE_CLIENT_SESSIONS_MIGRATION,
+  DURABLE_MODEL_CONFIGS_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
@@ -156,6 +163,7 @@ export class RuntimeDaemon {
   private pluginHost: PluginHost | undefined;
   private pluginReport: RuntimePluginReport;
   private pluginSandboxes: readonly IsolatedPlugin[] = [];
+  private models: RuntimeModels | undefined;
   private pluginPolicies: ReadonlyMap<string, CapabilityPermissionPolicy> = new Map();
 
   constructor(options: RuntimeDaemonOptions = {}) {
@@ -241,6 +249,16 @@ export class RuntimeDaemon {
             }),
         projects: { database: this.database },
         memories: { database: this.database },
+        models: {
+          database: this.database,
+          refresh: (modelId: string) => {
+            this.models?.refresh(modelId);
+          },
+          remove: (modelId: string) => {
+            this.models?.remove(modelId);
+          },
+          check: (modelId: string) => this.checkModel(modelId),
+        },
         clients: {
           database: this.database,
           approvals: this.approvals,
@@ -448,6 +466,14 @@ export class RuntimeDaemon {
         this.pluginReport = loaded.report;
         this.pluginSandboxes = loaded.sandboxes;
         this.pluginPolicies = loaded.policies;
+        // Models a person configured are registered beside the plugins', and their
+        // keys are redacted out of everything this runtime records from here on.
+        this.models = new RuntimeModels({
+          database: this.database,
+          register: (adapter) => loaded.host.models.register(adapter),
+          registerSecret: (secret) => this.redaction.registerSecret(secret),
+        });
+        this.models.load();
       }
       await this.httpServer.start();
     } catch (error) {
@@ -517,7 +543,8 @@ export class RuntimeDaemon {
     });
     const host = this.pluginHost;
     if (host === undefined) return plugins(request);
-    // Agent steps get the plugins' models and tools, limited to granted capabilities.
+    // Agent steps get the plugins' models and tools, limited to granted capabilities,
+    // plus whatever models a person configured here, which carry their own authority.
     return createAgentNodeExecutor({
       database: this.database,
       models: host.models,
@@ -526,8 +553,86 @@ export class RuntimeDaemon {
         return adapter === undefined ? [] : [adapter];
       }),
       allows: (capability) => this.pluginAuthority(capability).decision === "allow",
+      configuredModels: () => this.configuredModelIds(),
+      modelSecrets: (modelId) => this.models?.secretsFor(modelId),
       fallback: plugins,
     })(request);
+  }
+
+  /** Ids of the models a person configured in this harness. */
+  private configuredModelIds(): ReadonlySet<string> {
+    return new Set(listModelConfigs(this.database.connection()).map((model) => model.modelId));
+  }
+
+  /**
+   * Ask a configured model to answer, so a wrong key or model name is found here.
+   *
+   * One request for a single token, with the same credential path a run would use.
+   * Failures come back as the transport's own code rather than an exception: this
+   * is a question a person asked, not a run going wrong.
+   */
+  private async checkModel(modelId: string): Promise<ModelCheckResult> {
+    const host = this.pluginHost;
+    const adapter = host?.models.getAdapter(modelId, "1");
+    if (adapter === undefined) {
+      return {
+        ok: false,
+        code: "MODEL_NOT_REGISTERED",
+        reason: "This model is configured but not registered; restart the runtime.",
+      };
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, 30_000);
+    const startedAt = Date.now();
+    const secrets = this.models?.secretsFor(modelId);
+    try {
+      await adapter.generate(
+        {
+          messages: [{ role: "user", parts: [{ kind: "text", text: "ping" }] }],
+          maxOutputTokens: 1,
+        },
+        {
+          runId: `model-check:${modelId}`,
+          opIndex: 0,
+          iteration: 0,
+          attempt: 1,
+          logicalEffectId: `model-check:${modelId}:${String(startedAt)}`,
+          signal: controller.signal,
+          retryBudget: {
+            maxAttempts: 1,
+            repeatAuthorized: false,
+            usedAttempts: 1,
+            remainingAttempts: 0,
+            reportInternalRetries: () => 0,
+          },
+          ...(secrets === undefined ? {} : { secrets }),
+        },
+      );
+      return { ok: true, latencyMs: Date.now() - startedAt };
+    } catch (error: unknown) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? (error as { readonly code: unknown }).code
+          : undefined;
+      const status =
+        typeof error === "object" && error !== null && "status" in error
+          ? (error as { readonly status: unknown }).status
+          : undefined;
+      return {
+        ok: false,
+        code: typeof code === "string" ? code : "MODEL_CHECK_FAILED",
+        ...(typeof status === "number" ? { status } : {}),
+        reason:
+          error instanceof Error && error.message.length > 0
+            ? error.message
+            : "The endpoint did not answer.",
+        latencyMs: Date.now() - startedAt,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Node/model/tool catalogs contributed by activated plugins. */

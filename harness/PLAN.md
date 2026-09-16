@@ -65,7 +65,13 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
   and webhook payloads, both deliberately deferred with their conditions written down.
 - **Also just finished:** adding a plugin from the app. The Plugins page installs from npm or an
   https Git repository wherever the host allows it, and says how to allow it where it does not.
-- **Next:** the optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
+- **Also just finished:** connecting a model from the app. The Models page adds Ollama,
+  llama.cpp, OpenAI or any compatible endpoint, with a key stored in the harness or read from
+  the environment, checks it, and agent steps can use it straight away (migration 20).
+- **Also just finished:** the editor no longer marks a half-drawn graph as wrong; pressing Run
+  graph on an unfinished one is how you see what is missing.
+- **Next:** 6.12 needs only a real Ollama or llama.cpp run through the Models page; then the
+  optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),
   11.4 and 11.6-11.9, which the plan gates on a need that has not arrived.
 - **Where the detail lives:** `TODO.md` is the item-by-item checklist, and each `PHASE-*.md` explains
