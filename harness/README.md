@@ -141,7 +141,7 @@ Phase 7  Visual graph + inspector           ✅ ← Harness v0.1 boundary
 Phase 8  Loops + projects + agent mode      ✅ complete
 Phase 9  Replay + memory + triggers         ✅ complete
 Phase 10 MCP + custom-node SDK + trust      ✅ 10/11 (10.10 WASI stays open by design)
-Phase 11 Packaging + optional scale-out     🚧 3/9 (start flow, setup, backup and restore)
+Phase 11 Packaging + optional scale-out     🚧 4/9 (start, setup, backup, graph diffs)
 ```
 
 To try it, follow [Running the harness](./PLUGINS.md#running-the-harness) and

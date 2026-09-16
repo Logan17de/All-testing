@@ -25,6 +25,7 @@ import {
 } from "../../../lib/graph-document";
 import { harnessNodeTypes, type HarnessFlowNode } from "../../harness-node";
 import { ApprovalCards } from "./approval-cards";
+import { GraphChanges } from "./graph-changes";
 
 interface RunNodeState {
   readonly opIndex: number;
@@ -441,6 +442,7 @@ function Inspector({ runId }: { readonly runId: string }) {
           />
           {selectedNode === undefined ? (
             <>
+              <GraphChanges graphId={run.graphId} revisionId={run.revisionId} />
               <ForkList forks={run.forks ?? []} />
               <Timeline
                 events={run.timeline}

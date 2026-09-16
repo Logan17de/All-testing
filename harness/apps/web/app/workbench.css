@@ -632,6 +632,34 @@ button.diagItem:disabled {
   font-size: 0.84rem;
 }
 
+.changePanel {
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid #262626;
+  border-radius: 8px;
+}
+
+.changeMark {
+  display: inline-block;
+  min-width: 62px;
+  padding: 1px 6px;
+  border: 1px solid #333;
+  border-radius: 999px;
+  color: #b9b9b9;
+  font-size: 0.68rem;
+  text-align: center;
+}
+
+.changeMark--added {
+  border-color: #1f4d2b;
+  color: #6ee7a0;
+}
+
+.changeMark--removed {
+  border-color: #4d1f1f;
+  color: #f2a4a4;
+}
+
 .forkList {
   display: grid;
   gap: 6px;

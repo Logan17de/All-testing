@@ -357,6 +357,14 @@ first experience — and spawns npm's JavaScript entry through the current Node 
 rather than leaving a half-started system that looks healthy.
 
 
+**Versions and diffs:** 11.5 compares two stored revisions of a graph and says what changed —
+nodes added, removed or changed (including a node whose version moved), edges added, removed or
+rewired, and which sections of the document moved. It answers separately whether the two revisions
+would run the same way, which the compiler's semantic hash already settles, so dragging a node
+across the canvas is reported as exactly that rather than as a change to the work. A run's inspector
+shows this against the revision it ran, because a run is bound to the revision it started from and
+the graph in the editor can have moved on since.
+
 **Setup:** 11.2 adds `npm run setup`, which asks five questions with defaults and writes
 `harness.config.json`. The runtime reads it with a settled order: an environment variable wins over
 the file, which wins over the built-in default, and each setting reports which of the three it came
@@ -374,7 +382,7 @@ restore should do quietly, so it refuses and says why.
 - [x] 11.3 Add backup/export/import UI/CLI. The CLI is done; a UI button that writes to a
       path of the daemon's choosing is deliberately not added yet.
 - [ ] 11.4 Add optional desktop shell only if it improves distribution.
-- [ ] 11.5 Add graph/node semantic versioning and diff UX.
+- [x] 11.5 Add graph/node semantic versioning and diff UX.
 - [ ] 11.6 Add optional Postgres `RunStore` only when single-host limits are measured.
 - [ ] 11.7 Add optional remote executor/workers without changing Graph JSON/IR.
 - [ ] 11.8 Add stronger optional Linux sandbox adapters only for workloads that need them.

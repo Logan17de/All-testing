@@ -11,8 +11,11 @@ import {
   compileEditorGraph,
   createStoredGraphResolver,
   createRunFromCompiledGraph,
+  diffGraphRevisions,
+  listGraphRevisions,
   listPaletteNodes,
   listRecentRuns,
+  readGraphRevision,
   readRunView,
   type GraphSources,
 } from "./runtime-graphs.js";
@@ -125,7 +128,8 @@ export function isGraphHttpPath(pathname: string): boolean {
     pathname === "/api/nodes" ||
     pathname === "/api/graphs/validate" ||
     pathname === "/api/runs" ||
-    pathname.startsWith("/api/runs/")
+    pathname.startsWith("/api/runs/") ||
+    pathname.startsWith("/api/graphs/")
   );
 }
 
@@ -164,6 +168,53 @@ export async function handleGraphHttp(
         valid: result.valid,
         diagnostics: result.valid ? [] : result.diagnostics,
         ...(result.valid ? { semanticHash: result.compiled.identity.semanticHash } : {}),
+      });
+      return;
+    }
+
+    // 11.5: what a graph looked like when it ran, and what changed since.
+    const revisionsMatch = /^\/api\/graphs\/([^/]+)\/revisions$/u.exec(url.pathname);
+    if (revisionsMatch !== null) {
+      if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+      const graphId = decodeURIComponent(revisionsMatch[1] ?? "");
+      writeRuntimeJson(response, 200, {
+        revisions: listGraphRevisions(services.database, graphId),
+      });
+      return;
+    }
+
+    const revisionMatch = /^\/api\/graphs\/([^/]+)\/revisions\/([^/]+)$/u.exec(url.pathname);
+    if (revisionMatch !== null) {
+      if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+      const graphId = decodeURIComponent(revisionMatch[1] ?? "");
+      const revisionId = decodeURIComponent(revisionMatch[2] ?? "");
+      const graph = readGraphRevision(services.database, graphId, revisionId);
+      if (graph === undefined) {
+        throw new RuntimeGraphError(
+          "GRAPH_REVISION_NOT_FOUND",
+          `No stored revision '${revisionId}' of '${graphId}'.`,
+          404,
+        );
+      }
+      writeRuntimeJson(response, 200, { graph: services.redact(graph) });
+      return;
+    }
+
+    const diffMatch = /^\/api\/graphs\/([^/]+)\/diff$/u.exec(url.pathname);
+    if (diffMatch !== null) {
+      if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+      const graphId = decodeURIComponent(diffMatch[1] ?? "");
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      if (from === null || to === null) {
+        throw new RuntimeGraphError(
+          "GRAPH_INVALID",
+          "A diff needs 'from' and 'to' revision ids.",
+          400,
+        );
+      }
+      writeRuntimeJson(response, 200, {
+        diff: diffGraphRevisions(services.database, graphId, from, to),
       });
       return;
     }
