@@ -405,7 +405,9 @@ function Inspector({ runId }: { readonly runId: string }) {
   return (
     <>
       <header className="runHeader">
-        <h1 className="pageTitle runTitle">{run.graphId}</h1>
+        <h1 className="pageTitle runTitle" title={run.graphId}>
+          {graph?.metadata?.title ?? run.graphId}
+        </h1>
         <span className={`runStatus runStatus--${run.status}`}>{run.status}</span>
         <span className="runHeader__meta">
           {STATUS_TEXT[run.status] ?? run.status}

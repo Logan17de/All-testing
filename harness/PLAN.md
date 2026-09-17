@@ -73,6 +73,10 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
 - **Also just finished:** `npm start` no longer leaves the runtime and Next.js running after it
   stops on Windows, says which process holds a port it needs, and `npm start -- --restart`
   replaces a harness that is already running.
+- **Also just finished:** simple workflows. A conversation is answered by **Chat** or **Chat
+  with GitHub**, chosen on the chat page; GitHub is a first-party plugin whose component hands
+  its read-only tools to the agent steps it is wired into; and the pages say what things are
+  instead of showing internal names like `harness.agent-model`.
 - **Next:** 6.12 needs only a real Ollama or llama.cpp run through the Models page; then the
   optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),

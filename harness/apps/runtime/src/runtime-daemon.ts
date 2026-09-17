@@ -54,6 +54,7 @@ import {
   type RuntimeApprovalAuthority,
   type SuspendForApprovalInput,
 } from "./runtime-human-approvals.js";
+import { GITHUB_PLUGIN_ID, createGitHubPlugin } from "@zet-harness/github";
 import { createAgentNodeExecutor } from "./runtime-agent-nodes.js";
 import { RuntimeModels } from "./runtime-models.js";
 import type { ModelCheckResult } from "./runtime-model-http.js";
@@ -461,6 +462,22 @@ export class RuntimeDaemon {
         // The agent model and tools steps compile like any node; the agent
         // executor runs them with the run's own identity and records each step.
         await host.activate(createAgentPlugin());
+        // GitHub is a first-party component: a workflow uses it only by wiring it in.
+        // Its token, when there is one, is read per request and never recorded.
+        const githubToken = process.env["GITHUB_TOKEN"];
+        if (githubToken !== undefined && githubToken.length > 0) {
+          this.redaction.registerSecret(githubToken);
+        }
+        const githubApi = process.env["GITHUB_API_URL"];
+        await host.activate(
+          createGitHubPlugin({
+            ...(githubApi === undefined || githubApi.length === 0 ? {} : { apiBaseUrl: githubApi }),
+            token: () => {
+              const token = process.env["GITHUB_TOKEN"];
+              return token === undefined || token.length === 0 ? undefined : token;
+            },
+          }),
+        );
         const loaded = await loadRuntimePlugins(this.pluginOptions, host);
         this.pluginHost = loaded.host;
         this.pluginReport = loaded.report;
@@ -543,14 +560,23 @@ export class RuntimeDaemon {
     });
     const host = this.pluginHost;
     if (host === undefined) return plugins(request);
-    // Agent steps get the plugins' models and tools, limited to granted capabilities,
-    // plus whatever models a person configured here, which carry their own authority.
+    // Agent steps get the plugins' models, limited to granted capabilities, plus
+    // whatever models a person configured here, which carry their own authority.
+    // Plugin tools reach a step only through a component wired into it, and only
+    // tools whose plugin was granted what they need — first-party ones excepted.
     return createAgentNodeExecutor({
       database: this.database,
       models: host.models,
-      tools: host.tools.listManifests().flatMap((manifest) => {
+      componentTools: host.tools.listManifests().flatMap((manifest) => {
         const adapter = host.tools.getAdapter(manifest.id, manifest.version);
-        return adapter === undefined ? [] : [adapter];
+        if (adapter === undefined) return [];
+        const pluginId = host.tools.getResolution(manifest.id, manifest.version)?.plugin.id;
+        if (pluginId === GITHUB_PLUGIN_ID) return [adapter];
+        const policy = pluginId === undefined ? undefined : this.pluginPolicies.get(pluginId);
+        const granted = manifest.behavior.requiredCapabilities.every(
+          (capability) => policy?.allows(capability) === true,
+        );
+        return granted ? [adapter] : [];
       }),
       allows: (capability) => this.pluginAuthority(capability).decision === "allow",
       configuredModels: () => this.configuredModelIds(),

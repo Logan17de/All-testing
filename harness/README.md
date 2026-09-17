@@ -150,7 +150,8 @@ copied into the plugins directory or, where the host allows it, installed from n
 Git repository on the Plugins page — see
 [Installing a plugin](./PLUGINS.md#installing-a-plugin). A plugin arrives disabled and is
 granted nothing until you say so. Models are connected on the Models page — see
-[Connecting a model](./PLUGINS.md#connecting-a-model).
+[Connecting a model](./PLUGINS.md#connecting-a-model) — and a conversation is answered by a
+ready-made **Chat** or **Chat with GitHub** workflow — see [Chatting](./PLUGINS.md#chatting).
 
 The Graph JSON v1 freeze now includes:
 

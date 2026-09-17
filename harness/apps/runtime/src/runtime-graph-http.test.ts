@@ -177,6 +177,7 @@ describe("editor endpoints on a running daemon", () => {
       (node) => node.manifest.type,
     );
     expect(types).toEqual([
+      "github.component",
       "harness.agent-model",
       "harness.agent-tools",
       "harness.condition",

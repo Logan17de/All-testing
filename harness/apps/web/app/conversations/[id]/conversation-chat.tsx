@@ -1,8 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 
+import {
+  REPLY_CHOICES,
+  editorLink,
+  isReplyChoice,
+  rememberChoice,
+  rememberedChoice,
+  replyOutcome,
+  runSettled,
+  type ReplyChoice,
+  type WorkflowChoice,
+} from "../../../lib/chat-reply";
 import { modelLabel, toolLabel } from "../../../lib/plain-words";
 import { workspaceRequest } from "../../../lib/workspace-client";
 import {
@@ -68,11 +79,47 @@ async function loadConversation(conversationId: string): Promise<Loaded> {
     : { ok: false, reason: result.reason };
 }
 
+interface WorkflowSummary {
+  readonly id: string;
+  readonly available: boolean;
+}
+
+interface ReplyState {
+  readonly runId: string;
+  readonly settled: boolean;
+  readonly problem: string | null;
+}
+
+async function runStatus(runId: string): Promise<string | undefined> {
+  try {
+    const response = await fetch(`/api/editor/runs/${encodeURIComponent(runId)}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) return undefined;
+    const body = (await response.json()) as { readonly run?: { readonly status?: unknown } };
+    return typeof body.run?.status === "string" ? body.run.status : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function modelCount(): Promise<number | undefined> {
+  try {
+    const response = await fetch("/api/editor/models", { cache: "no-store" });
+    if (!response.ok) return undefined;
+    const body = (await response.json()) as { readonly models?: unknown };
+    return Array.isArray(body.models) ? body.models.length : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * A conversation's current branch, with a composer for the next user message.
  *
  * Messages are append-only in the runtime. Sending continues from the newest
- * message; agent runs append their replies and tool results to the same record.
+ * message; when a workflow answers this conversation, sending also starts its
+ * run, and the page reads the conversation again once that run settles.
  */
 export function ConversationChat({ conversationId }: { readonly conversationId: string }) {
   const [conversation, setConversation] = useState<ConversationView | null>(null);
@@ -82,6 +129,53 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
   const [error, setError] = useState<string | null>(null);
 
   const [version, setVersion] = useState(0);
+  // The composer only appears once the conversation has loaded in the browser, so
+  // reading the remembered choice here cannot disagree with the server render.
+  const [choice, setChoice] = useState<ReplyChoice>(() => rememberedChoice(conversationId));
+  const [workflows, setWorkflows] = useState<readonly WorkflowSummary[]>([]);
+  const [models, setModels] = useState<number | undefined>(undefined);
+  const [reply, setReply] = useState<ReplyState | null>(null);
+
+  useEffect(() => {
+    void workspaceRequest<{ readonly workflows: readonly WorkflowSummary[] }>("workflows").then(
+      (result) => {
+        if (result.ok) setWorkflows(result.data.workflows);
+      },
+    );
+    void modelCount().then(setModels);
+  }, [conversationId]);
+
+  // Follow a reply until its run settles, then show what it wrote.
+  useEffect(() => {
+    if (reply === null || reply.settled) return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void runStatus(reply.runId).then((status) => {
+        if (cancelled || status === undefined || !runSettled(status)) return;
+        setReply({ runId: reply.runId, settled: true, problem: replyOutcome(status) });
+        setVersion((current) => current + 1);
+      });
+    }, 700);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [reply]);
+
+  const answer = useCallback(
+    async (workflow: WorkflowChoice): Promise<void> => {
+      const started = await workspaceRequest<{ readonly runId: string }>(
+        `conversations/${conversationId}/reply`,
+        { workflow },
+      );
+      if (!started.ok) {
+        setError(started.reason);
+        return;
+      }
+      setReply({ runId: started.data.runId, settled: false, problem: null });
+    },
+    [conversationId],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +210,7 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
     }
     setDraft("");
     setVersion((current) => current + 1);
+    if (choice !== "none") await answer(choice);
   };
 
   if (conversation === null) {
@@ -128,6 +223,10 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
 
   const branch = latestBranch(messages);
   const hidden = messages.length - branch.length;
+  const replying = reply !== null && !reply.settled;
+  const lastRole = branch.at(-1)?.role;
+  const unavailable = (id: string): boolean =>
+    workflows.some((workflow) => workflow.id === id && !workflow.available);
 
   return (
     <>
@@ -165,11 +264,27 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
         ))}
       </div>
 
+      {replying ? (
+        <p className="chatStatus" role="status">
+          Thinking… <Link href={`/runs/${reply.runId}`}>watch the run</Link>
+        </p>
+      ) : null}
+      {reply?.problem === null || reply?.problem === undefined ? null : (
+        <p className="warn" role="alert">
+          {reply.problem} <Link href={`/runs/${reply.runId}`}>See where it stopped</Link>
+        </p>
+      )}
       {error === null ? null : (
         <p className="field__error" role="alert">
           {error}
         </p>
       )}
+      {choice !== "none" && models === 0 ? (
+        <p className="warn">
+          No model is connected yet, so nothing can answer.{" "}
+          <Link href="/models">Connect a model</Link>
+        </p>
+      ) : null}
       {conversation.status === "archived" ? (
         <p className="muted">This conversation is archived.</p>
       ) : (
@@ -191,14 +306,52 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
               }}
             />
           </label>
+          <div className="chatControls">
+            <label className="field chatAnswerer">
+              <span className="field__label">Answered by</span>
+              <select
+                className="field__input"
+                value={choice}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  if (!isReplyChoice(next)) return;
+                  setChoice(next);
+                  rememberChoice(conversationId, next);
+                }}
+              >
+                {REPLY_CHOICES.map((option) => (
+                  <option key={option.id} value={option.id} disabled={unavailable(option.id)}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {choice === "none" ? null : (
+              <Link className="small" href={editorLink(choice, conversationId)}>
+                Open this workflow in the editor
+              </Link>
+            )}
+          </div>
           <div className="btnRow">
             <button
               className="btn btn--primary"
               type="submit"
-              disabled={busy || draft.trim().length === 0}
+              disabled={busy || replying || draft.trim().length === 0}
             >
               {busy ? "Sending…" : "Send"}
             </button>
+            {choice !== "none" && lastRole === "user" && !replying ? (
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  void answer(choice);
+                }}
+              >
+                Answer the last message
+              </button>
+            ) : null}
           </div>
         </form>
       )}

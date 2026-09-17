@@ -35,6 +35,7 @@ import {
   isModelHttpPath,
   type RuntimeModelHttpServices,
 } from "./runtime-model-http.js";
+import { handleWorkflowHttp, isWorkflowHttpPath } from "./runtime-workflow-http.js";
 import {
   handleTriggerHttp,
   isTriggerHttpPath,
@@ -393,6 +394,20 @@ export class RuntimeHttpServer {
           return;
         }
         void handleTriggerHttp(request, response, url, this.security, triggers).catch(
+          (error: unknown) => {
+            writeRuntimeApiError(response, error);
+          },
+        );
+        return;
+      }
+      // Before conversation paths: /api/conversations/:id/reply belongs to workflows.
+      if (isWorkflowHttpPath(url.pathname)) {
+        const graphs = this.graphServices;
+        if (graphs === undefined) {
+          writeJson(response, 503, { error: { code: "WORKFLOW_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void handleWorkflowHttp(request, response, url, this.security, graphs).catch(
           (error: unknown) => {
             writeRuntimeApiError(response, error);
           },

@@ -343,6 +343,14 @@ Each server gets its own `mcp:<id>` capability, and an unknown remote tool is cl
 conservatively as an external write with manual recovery. A server's `readOnlyHint` is a claim, not
 a guarantee, so it relaxes nothing unless a host explicitly opts in. See `PHASE-10-MCP.md`.
 
+**Workflows and components:** a conversation can now be answered by a ready-made workflow —
+**Chat**, or **Chat with GitHub** — chosen on the chat page and run like any other graph; the editor
+opens the exact graph a conversation uses. GitHub is a first-party plugin that reads repositories,
+issues, pull requests and files, and it reaches an agent step as a component: its `tools` output,
+wired into a step's new `tools` input, is what hands the step those tools. A plugin's tools are now
+offered to a step only through such a component, and pages show plain words in place of internal
+names such as `harness.agent-model`.
+
 **Installing:** 10.11 installs a package from npm or an https Git repository into the plugins
 directory, and the Plugins page now offers it wherever the host turned it on — the report says
 whether this harness installs at all, so the page explains how to allow it rather than showing a

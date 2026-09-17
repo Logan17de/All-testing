@@ -79,8 +79,15 @@ export class AgentStepError extends Error {
 export interface AgentNodeExecutorOptions {
   readonly database: SqliteDatabase;
   readonly models: ModelCatalog;
-  /** Tools the agent may call beside the project's goal and todo actions. */
+  /** Tools the host offers every step, beside the project's goal and todo actions. */
   readonly tools?: readonly ToolAdapter[];
+  /**
+   * Tools a component can hand to a step by naming them on its `tools` input.
+   *
+   * The host has already decided these may run; a step offers one only when a
+   * component wired into it names it, so a graph uses exactly what it shows.
+   */
+  readonly componentTools?: readonly ToolAdapter[];
   /**
    * Host authority for adapter capabilities. A model or tool demanding a capability
    * this does not allow is never offered; without it, only adapters demanding none are.
@@ -441,11 +448,23 @@ export function createAgentNodeExecutor(
     projectId: string,
     runId: string,
     memories: boolean,
+    wired: readonly string[],
   ): readonly ToolAdapter[] => [
     ...createGoalActionTools({ database, projectId, now, createId }),
     ...(memories ? createMemoryActionTools({ database, projectId, runId, now, createId }) : []),
     ...(options.tools ?? []).filter((tool) => granted(tool.manifest.behavior.requiredCapabilities)),
+    ...(options.componentTools ?? []).filter((tool) => wired.includes(tool.manifest.id)),
   ];
+
+  /** The tool ids the components wired into this step hand over. */
+  const wiredTools = (execution: RuntimeNodeExecution): readonly string[] => {
+    const value = execution.inputs.find((input) => input.port === "tools")?.value;
+    if (value === undefined || value === null) return [];
+    if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+      throw new AgentStepError("AGENT_CONFIG_INVALID", "tools must be a list of tool ids.");
+    }
+    return value.filter((item): item is string => typeof item === "string");
+  };
 
   const latestMessage = (conversationId: string): DurableMessageRecord | undefined => {
     const messages = readConversationMessages(database.connection(), conversationId);
@@ -610,7 +629,12 @@ export function createAgentNodeExecutor(
     }
     await holdProject(execution, conversation.projectId);
     enforceModelBudgets(execution.runId, config);
-    const tools = offeredTools(conversation.projectId, execution.runId, maxMemories > 0);
+    const tools = offeredTools(
+      conversation.projectId,
+      execution.runId,
+      maxMemories > 0,
+      wiredTools(execution),
+    );
     const configured = options.configuredModels?.() ?? new Set<string>();
     const decision = routeModel({
       manifests: options.models
@@ -796,7 +820,12 @@ export function createAgentNodeExecutor(
         : [];
     enforceToolBudget(execution.runId, config, calls.length);
     const maxMemories = countConfig(config, "maxMemories") ?? MEMORY_LIMIT;
-    const tools = offeredTools(conversation.projectId, execution.runId, maxMemories > 0).filter(
+    const tools = offeredTools(
+      conversation.projectId,
+      execution.runId,
+      maxMemories > 0,
+      wiredTools(execution),
+    ).filter(
       (tool) =>
         allowedTools === undefined || allowedTools.includes(modelToolName(tool.manifest.id)),
     );

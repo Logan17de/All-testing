@@ -853,3 +853,21 @@ button.timeline__row:focus-visible {
 .modelCheck--ok {
   color: #6ee7a0;
 }
+
+/* Chat — who answers, and a reply in progress */
+.chatControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.chatAnswerer {
+  min-width: 14rem;
+  margin: 0;
+}
+
+.chatStatus {
+  color: #9a9a9a;
+  font-size: 0.9rem;
+}

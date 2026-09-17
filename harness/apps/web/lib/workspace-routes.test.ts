@@ -18,6 +18,16 @@ describe("workspace proxy paths", () => {
     expect(runtimeWorkspacePath(["todos", ID, "status"], new URLSearchParams())).toBe(
       `/api/todos/${ID}/status`,
     );
+    expect(runtimeWorkspacePath(["conversations", ID, "reply"], new URLSearchParams())).toBe(
+      `/api/conversations/${ID}/reply`,
+    );
+    expect(runtimeWorkspacePath(["workflows"], new URLSearchParams())).toBe("/api/workflows");
+    expect(
+      runtimeWorkspacePath(
+        ["workflows", "chat-github"],
+        new URLSearchParams(`conversationId=${ID}`),
+      ),
+    ).toBe(`/api/workflows/chat-github?conversationId=${ID}`);
   });
 
   it("refuses anything outside the workspace allowlist", () => {
@@ -31,6 +41,8 @@ describe("workspace proxy paths", () => {
       ["projects", `${ID}/archive`],
       ["goals", ID, "todos", "extra"],
       ["approvals", ID],
+      ["workflows", "anything"],
+      ["workflows", "chat", "run"],
     ];
     for (const segments of refused) {
       expect(runtimeWorkspacePath(segments, new URLSearchParams())).toBeUndefined();

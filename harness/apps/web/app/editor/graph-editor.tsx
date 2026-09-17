@@ -51,6 +51,7 @@ import {
 } from "../../lib/graph-document";
 import { harnessNodeTypes, type HarnessFlowNode } from "../harness-node";
 import { behaviourLabel, capabilityLabel, fieldLabel, pluginLabel } from "../../lib/plain-words";
+import { workspaceRequest } from "../../lib/workspace-client";
 import { SchemaField } from "./schema-field";
 
 const DRAFT_KEY = "zet-harness.editor.draft.v1";
@@ -178,6 +179,47 @@ function EditorWorkspace() {
         setPaletteError("The runtime daemon is not reachable, so no nodes are available.");
         setPalette([]);
       });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // A link from a conversation opens that conversation's workflow here.
+  const graphNow = useRef(graph);
+  useEffect(() => {
+    graphNow.current = graph;
+  }, [graph]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const workflow = params.get("workflow");
+    if (workflow === null) return;
+    const conversation = params.get("conversation") ?? "";
+    let cancelled = false;
+    void workspaceRequest<{ readonly graph: unknown }>(
+      `workflows/${encodeURIComponent(workflow)}?conversationId=${encodeURIComponent(conversation)}`,
+    ).then((result) => {
+      if (cancelled) return;
+      window.history.replaceState(null, "", window.location.pathname);
+      if (!result.ok) {
+        setRunError(result.reason);
+        return;
+      }
+      const opened = parseGraphDocument(result.data.graph);
+      if (opened === undefined) {
+        setRunError("That workflow could not be opened.");
+        return;
+      }
+      if (
+        graphNow.current.nodes.length > 0 &&
+        !window.confirm("Replace the graph you are editing with this workflow?")
+      ) {
+        return;
+      }
+      setGraph(opened);
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+      setDragPositions({});
+    });
     return () => {
       cancelled = true;
     };

@@ -160,6 +160,36 @@ words — a refused key, a wrong URL, a server that is not running. **Check** re
 Signing in to a provider with an account (OAuth) is not offered: the providers above give API access
 through keys.
 
+## Chatting
+
+Open **Projects**, create a project, and start a conversation in it. Under the message box,
+**Answered by** says what replies:
+
+- **Chat** — a normal conversation. The model answers each message, and can use the project's
+  goals, todos and memory when that helps.
+- **Chat with GitHub** — the same conversation with a GitHub component wired in, so the model can
+  read repositories, issues, pull requests and files.
+- **Nobody** — messages are only saved.
+
+Pressing **Send** saves your message and starts the chosen workflow; the page shows "Thinking…"
+until the reply is in, with a link to watch the run. If no model is connected yet, the page says so
+and links to **Models**. **Open this workflow in the editor** shows the exact graph that answers the
+conversation — a Loop around an **Agent model step** and an **Agent tools step**, plus the
+**GitHub** component when it is used — so you can change it and run your own version.
+
+### The GitHub component
+
+GitHub is a first-party plugin. It only reads: repository details, issues, pull requests and text
+files. Public repositories work with no setup. For private repositories, or GitHub's higher request
+limit, set `GITHUB_TOKEN` before starting the harness; the token is read when a request is made,
+never stored, and removed from anything the harness records. `GITHUB_API_URL` points it at a GitHub
+Enterprise server instead.
+
+The component does no work of its own. Its **Tools** output names the GitHub tools, and connecting
+it to an agent step's **Tools** input is what lets that step use them. A step offers a plugin's
+tools only when a component hands them over this way, so a workflow uses exactly what its graph
+shows. One component can feed each step for now.
+
 ## Building and running a graph
 
 Open `http://127.0.0.1:3000/editor`. The palette lists every node your enabled plugins registered,
@@ -228,6 +258,14 @@ The manifest:
 
 The entry module default-exports an object with a `manifest` and an `activate(context)` function.
 `activate` registers nodes, tools or model adapters through the context it is given.
+
+### Giving agent steps new tools
+
+A plugin can give agent steps new abilities the same way GitHub does: register tool adapters with
+`context.tools.register`, and a component node whose `tools` output lists their ids. Declare that
+output with exactly `{ "type": "array", "items": { "type": "string" } }` — the schema of an agent
+step's **Tools** input — so the two connect. The tools still need the capabilities they declare
+granted in `plugins.json`.
 
 ### Rules the loader enforces
 

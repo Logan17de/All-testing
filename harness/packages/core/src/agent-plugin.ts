@@ -24,6 +24,18 @@ const SORTABLE_ID_SCHEMA = {
   pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
 };
 
+/**
+ * Tools handed over by a component wired into the step, such as GitHub.
+ *
+ * A component's `tools` output names tools its plugin registered; the step offers
+ * those, and only those, beside the project's own actions. Nothing wired in means
+ * no plugin tools at all, so a workflow uses exactly what its graph shows.
+ */
+const COMPONENT_TOOLS = {
+  // Exactly the schema a component's `tools` output declares, so the two connect.
+  schema: { type: "array", items: { type: "string" } },
+} as const;
+
 function hostOnly(): never {
   throw new Error("Agent steps run through the durable host agent executor.");
 }
@@ -53,7 +65,7 @@ export function createAgentPlugin(): HarnessPlugin {
           title: "Agent model step",
           description:
             "Asks a model for the next step of a conversation, offering the project's goal and todo actions as tools. Place it inside a Loop and feed its again output back to the loop.",
-          inputs: {},
+          inputs: { tools: COMPONENT_TOOLS },
           outputs: {
             again: { schema: { type: "boolean" } },
             finishReason: { schema: { type: "string" } },
@@ -101,7 +113,7 @@ export function createAgentPlugin(): HarnessPlugin {
           title: "Agent tools step",
           description:
             "Runs the tool calls in the conversation's latest model message and records their results for the next model step.",
-          inputs: {},
+          inputs: { tools: COMPONENT_TOOLS },
           outputs: { calls: { schema: { type: "integer", minimum: 0 } } },
           configSchema: {
             type: "object",

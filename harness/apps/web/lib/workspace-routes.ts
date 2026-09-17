@@ -14,15 +14,22 @@ const ALLOWED_PATHS: readonly RegExp[] = [
   new RegExp(`^projects/${ID}/(archive|restore|conversations|goals)$`, "u"),
   new RegExp(`^projects/${ID}/todos/(next|runnable)$`, "u"),
   new RegExp(`^conversations/${ID}$`, "u"),
-  new RegExp(`^conversations/${ID}/(archive|restore|messages)$`, "u"),
+  new RegExp(`^conversations/${ID}/(archive|restore|messages|reply)$`, "u"),
   new RegExp(`^conversations/${ID}/messages/${ID}/path$`, "u"),
   new RegExp(`^goals/${ID}$`, "u"),
   new RegExp(`^goals/${ID}/(status|todos)$`, "u"),
   new RegExp(`^todos/${ID}$`, "u"),
   new RegExp(`^todos/${ID}/status$`, "u"),
+  /^workflows$/u,
+  /^workflows\/(chat|chat-github)$/u,
 ];
 
-const ALLOWED_QUERY_KEYS: ReadonlySet<string> = new Set(["status", "goalId", "limit"]);
+const ALLOWED_QUERY_KEYS: ReadonlySet<string> = new Set([
+  "status",
+  "goalId",
+  "limit",
+  "conversationId",
+]);
 
 /** The runtime path for a workspace request, or undefined when it is not allowed. */
 export function runtimeWorkspacePath(
