@@ -3,10 +3,14 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 
 import { controlHandleId } from "../lib/graph-document";
+import { fieldLabel } from "../lib/plain-words";
 
 export type HarnessNodeData = {
   readonly title: string;
+  /** The node type, shown only on hover. */
   readonly type: string;
+  /** Where the node comes from, in plain words. */
+  readonly subtitle?: string;
   readonly inputs: readonly string[];
   readonly outputs: readonly string[];
   /** Control ports above the node; `undefined` is an unnamed ordering port. */
@@ -54,7 +58,7 @@ export function HarnessNode({ data, selected }: NodeProps<HarnessFlowNode>) {
   const connectable = data.readOnly !== true;
 
   return (
-    <div className={className}>
+    <div className={className} title={data.type}>
       <ControlPorts ports={data.controlInputs ?? []} direction="in" connectable={connectable} />
       <header className="hnode__head">
         <span className="hnode__title">{data.title}</span>
@@ -64,7 +68,7 @@ export function HarnessNode({ data, selected }: NodeProps<HarnessFlowNode>) {
           </span>
         ) : null}
       </header>
-      <p className="hnode__type">{data.type}</p>
+      {data.subtitle === undefined ? null : <p className="hnode__type">{data.subtitle}</p>}
       {data.status === undefined ? null : (
         <p className={`hnode__status hnode__status--${data.status}`}>
           {STATUS_LABEL[data.status] ?? data.status}
@@ -84,14 +88,14 @@ export function HarnessNode({ data, selected }: NodeProps<HarnessFlowNode>) {
                 isConnectable={connectable}
                 className="hnode__handle"
               />
-              {port}
+              {fieldLabel(port)}
             </li>
           ))}
         </ul>
         <ul className="hnode__col hnode__col--out">
           {data.outputs.map((port) => (
             <li key={port} className="hnode__port hnode__port--out">
-              {port}
+              {fieldLabel(port)}
               <Handle
                 type="source"
                 position={Position.Right}

@@ -23,6 +23,12 @@ import {
   type GraphNode,
   type PaletteEntry,
 } from "../../../lib/graph-document";
+import {
+  capabilityLabel,
+  eventLabel,
+  isInternalEvent,
+  pluginLabel,
+} from "../../../lib/plain-words";
 import { isRunReplayView, replayNodeStatuses, type RunReplayView } from "../../../lib/replay-view";
 import { harnessNodeTypes, type HarnessFlowNode } from "../../harness-node";
 import { ApprovalCards } from "./approval-cards";
@@ -271,6 +277,7 @@ function Inspector({ runId }: { readonly runId: string }) {
           data: {
             title: entry?.manifest.title ?? node.type,
             type: `${node.type}@${node.version}`,
+            ...(entry === undefined ? {} : { subtitle: pluginLabel(entry.pluginId) }),
             inputs: Object.keys(entry?.manifest.inputs ?? {}),
             outputs: Object.keys(entry?.manifest.outputs ?? {}),
             controlInputs: controlPortsOf(entry?.manifest).inputs,
@@ -520,7 +527,7 @@ function Inspector({ runId }: { readonly runId: string }) {
               <GraphChanges graphId={run.graphId} revisionId={run.revisionId} />
               <ForkList forks={run.forks ?? []} />
               <Timeline
-                events={run.timeline}
+                events={run.timeline.filter((event) => !isInternalEvent(event.eventType))}
                 startedAt={firstEventAt}
                 nodeByOp={nodeByOp}
                 onSelect={setSelectedNodeId}
@@ -539,7 +546,11 @@ function Inspector({ runId }: { readonly runId: string }) {
               events={
                 selectedState === undefined
                   ? []
-                  : run.timeline.filter((event) => event.opIndex === selectedState.opIndex)
+                  : run.timeline.filter(
+                      (event) =>
+                        event.opIndex === selectedState.opIndex &&
+                        !isInternalEvent(event.eventType),
+                    )
               }
               startedAt={firstEventAt}
               onBack={() => {
@@ -600,7 +611,7 @@ function Timeline({
               <>
                 <span className="timeline__time">+{String(event.occurredAtMs - startedAt)}ms</span>
                 <span className="timeline__type">
-                  {event.eventType}
+                  {eventLabel(event.eventType)}
                   {nodeId === undefined ? null : (
                     <span className="timeline__node">
                       {nodeId}
@@ -668,7 +679,7 @@ function NodeDetails({
       </div>
       <h2 className="panelTitle">{manifest?.title ?? node.type}</h2>
       <p className="cardMeta">
-        <code>{node.id}</code> · {node.type}@{node.version}
+        <code>{node.id}</code>
       </p>
       <p className="statusLine">
         <span className={`runStatus runStatus--${state?.status ?? "pending"}`}>
@@ -692,7 +703,7 @@ function NodeDetails({
             <div className="chips">
               {manifest.behavior.requiredCapabilities.map((capability) => (
                 <span key={capability} className="chip">
-                  {capability}
+                  {capabilityLabel(capability)}
                 </span>
               ))}
             </div>
@@ -755,7 +766,7 @@ function NodeDetails({
             <li key={event.eventId}>
               <div className="timeline__row">
                 <span className="timeline__time">+{String(event.occurredAtMs - startedAt)}ms</span>
-                <span className="timeline__type">{event.eventType}</span>
+                <span className="timeline__type">{eventLabel(event.eventType)}</span>
               </div>
             </li>
           ))}

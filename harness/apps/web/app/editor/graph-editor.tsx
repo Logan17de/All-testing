@@ -50,6 +50,7 @@ import {
   type PaletteEntry,
 } from "../../lib/graph-document";
 import { harnessNodeTypes, type HarnessFlowNode } from "../harness-node";
+import { behaviourLabel, capabilityLabel, fieldLabel, pluginLabel } from "../../lib/plain-words";
 import { SchemaField } from "./schema-field";
 
 const DRAFT_KEY = "zet-harness.editor.draft.v1";
@@ -298,6 +299,7 @@ function EditorWorkspace() {
           data: {
             title: entry?.manifest.title ?? node.type,
             type: `${node.type}@${node.version}`,
+            ...(entry === undefined ? {} : { subtitle: pluginLabel(entry.pluginId) }),
             inputs: Object.keys(entry?.manifest.inputs ?? {}),
             outputs: Object.keys(entry?.manifest.outputs ?? {}),
             controlInputs: controlPortsOf(entry?.manifest).inputs,
@@ -595,7 +597,7 @@ function EditorWorkspace() {
                 type="button"
                 className="paletteItem"
                 draggable
-                title={entry.manifest.description ?? entry.manifest.type}
+                title={entry.manifest.description ?? entry.manifest.title}
                 onDragStart={(event) => {
                   event.dataTransfer.setData(
                     DRAG_TYPE,
@@ -609,8 +611,8 @@ function EditorWorkspace() {
               >
                 <span className="paletteItem__title">{entry.manifest.title}</span>
                 <span className="paletteItem__meta">
-                  {entry.manifest.type} · {entry.pluginId}
-                  {entry.isolated ? " · isolated" : ""}
+                  {pluginLabel(entry.pluginId)}
+                  {entry.isolated ? " · runs isolated" : ""}
                 </span>
               </button>
             </li>
@@ -746,7 +748,7 @@ function EditorWorkspace() {
                           }
                         }}
                       >
-                        {diagnostic.message} <code>{diagnostic.code}</code>
+                        {diagnostic.message}
                       </button>
                     </li>
                   ))}
@@ -868,7 +870,7 @@ function NodeInspector({
     <>
       <h2 className="panelTitle">{manifest?.title ?? node.type}</h2>
       <p className="cardMeta">
-        <code>{node.id}</code> · {node.type}@{node.version}
+        <code>{node.id}</code>
       </p>
 
       {manifest === undefined ? (
@@ -881,14 +883,14 @@ function NodeInspector({
       ) : (
         <>
           <p className="muted small">
-            From <strong>{entry?.pluginId}</strong>
+            From <strong>{entry === undefined ? "" : pluginLabel(entry.pluginId)}</strong>
             {entry?.isolated === true ? " · runs isolated" : ""}
           </p>
           {manifest.description === undefined ? null : (
             <p className="small">{manifest.description}</p>
           )}
           <p className="muted small">
-            Effect: {manifest.behavior.effect} · recovery: {manifest.behavior.recovery}
+            {behaviourLabel(manifest.behavior.effect, manifest.behavior.recovery)}
           </p>
           {manifest.behavior.requiredCapabilities.length > 0 ? (
             <>
@@ -896,7 +898,7 @@ function NodeInspector({
               <div className="chips">
                 {manifest.behavior.requiredCapabilities.map((capability) => (
                   <span key={capability} className="chip">
-                    {capability}
+                    {capabilityLabel(capability)}
                   </span>
                 ))}
               </div>
@@ -910,7 +912,7 @@ function NodeInspector({
             properties.map(([key, schema]) => (
               <SchemaField
                 key={`config:${key}`}
-                label={key}
+                label={fieldLabel(key)}
                 schema={schema}
                 value={node.config[key]}
                 required={requiredConfig.has(key)}
@@ -928,17 +930,17 @@ function NodeInspector({
             Object.entries(manifest.inputs).map(([port, spec]) =>
               fed.has(port) ? (
                 <p key={port} className="small">
-                  <code>{port}</code> is connected.
+                  <strong>{fieldLabel(port)}</strong> is connected.
                 </p>
               ) : spec.secret === true ? (
                 <p key={port} className="small">
-                  <code>{port}</code> is a secret input and needs a secret reference, not a typed
-                  value.
+                  <strong>{fieldLabel(port)}</strong> is a secret input and needs a secret
+                  reference, not a typed value.
                 </p>
               ) : (
                 <SchemaField
                   key={`input:${port}`}
-                  label={port}
+                  label={fieldLabel(port)}
                   schema={spec.schema}
                   value={literalFor(node, port)}
                   required={spec.required === true}

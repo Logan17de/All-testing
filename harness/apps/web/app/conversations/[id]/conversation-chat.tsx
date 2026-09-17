@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { modelLabel, toolLabel } from "../../../lib/plain-words";
 import { workspaceRequest } from "../../../lib/workspace-client";
 import {
   latestBranch,
@@ -31,9 +32,7 @@ function Part({ part }: { readonly part: MessagePartView }) {
     case "tool-call":
       return (
         <div>
-          <span className="muted small">
-            Calls <code>{part.name}</code>
-          </span>
+          <span className="muted small">Uses {toolLabel(part.name)}</span>
           <pre className="codeBlock">{JSON.stringify(part.arguments, null, 2)}</pre>
         </div>
       );
@@ -157,7 +156,7 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
           >
             <p className="eyebrow">
               {message.role}
-              {message.model === null ? "" : ` · ${message.model}`}
+              {message.model === null ? "" : ` · ${modelLabel(message.model)}`}
             </p>
             {message.parts.map((part, index) => (
               <Part key={index} part={part} />
