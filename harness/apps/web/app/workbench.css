@@ -854,6 +854,59 @@ button.timeline__row:focus-visible {
   margin-bottom: 0.75rem;
 }
 
+/* The folders this harness works in */
+.pageActions {
+  margin: 1.25rem 0;
+}
+
+.workspaces {
+  margin: 1.5rem 0;
+}
+
+.workspaceList {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspaceRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.workspaceOpen {
+  flex: 1 1 22rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  background: transparent;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 0.5rem;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspaceOpen:hover,
+.workspaceOpen:focus-visible {
+  background: #1a1a1a;
+}
+
+.workspaceOpen[aria-current="true"] {
+  border-color: #3b82f6;
+}
+
+.workspacePath {
+  overflow-wrap: anywhere;
+}
+
 /* Signing in to a provider instead of pasting a key */
 .signIn {
   display: grid;

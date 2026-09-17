@@ -48,6 +48,20 @@ The daemon reads plugins from `apps/runtime/plugins/`. Set `ZET_RUNTIME_PLUGINS_
 folder; the Plugins page shows which directory was read. A missing folder simply means no plugins
 are enabled.
 
+## Working in more than one folder
+
+The overview leads with **New project**, **Models** and **Plugins**, and lists every folder this
+harness has worked in below them. One of them is open at a time:
+
+- **Clicking a folder opens it** and shows its projects. A project belongs to the folder it was
+  created in, so **Projects** lists that folder's projects and says how many are elsewhere; the
+  link beside it shows all of them.
+- **Adding a folder** is the same **Setup** screen that asked for the first one. Each folder you
+  open is remembered, so coming back is one click.
+- **Forget** takes a folder out of the list and touches nothing on disk. The folder being worked
+  in cannot be forgotten — open another one first. A folder that has since been moved or deleted
+  is shown as **Not found** until you forget it.
+
 ## Before you enable a plugin
 
 A plugin runs in one of two tiers, and you choose which per plugin.
@@ -146,7 +160,8 @@ Agent steps need a model to call. Open **Models** (`http://127.0.0.1:3000/models
 
 - **Sign in (OAuth) with OpenRouter.** Choose **Sign in (OAuth)**, then **Sign in with
   OpenRouter**. You approve the harness on openrouter.ai and come straight back; then search
-  OpenRouter's models (with quick filters for OpenAI, Anthropic, Google and xAI), pick one and save.
+  OpenRouter's models — newest first, with quick filters for OpenAI, Anthropic, Google and xAI —
+  and pick one.
   One sign-in reaches GPT, Claude, Gemini, Grok and many others, billed to your OpenRouter account.
 - **API key** for **OpenAI**, **Anthropic (Claude)**, **Google Gemini**, **xAI (Grok)** or
   **OpenRouter**: pick the provider (its endpoint is filled in), type the model name, and either
@@ -167,8 +182,11 @@ words — a refused key, a wrong URL, a server that is not running. **Check** re
   read at the moment a request is made — and set the variable before starting the runtime.
 - **Where a key goes.** Only to that model's endpoint, only over https or to an address on this
   machine, and it is removed from everything the harness records.
-- **Which model a step uses.** An **Agent model step** uses the model named in its **Model id**
-  setting, or otherwise any available model that can call tools. A model you add is available
+- **Which model a step uses.** Models belong to the harness, not to a project: connect as many as
+  you like and choose between them in a conversation, with the **Model** box beside **Answered
+  by**. Leave it on **Any model that can answer** and the runtime picks one that can call tools;
+  pick one and that conversation keeps using it. An **Agent model step** in a graph of your own
+  still uses the model named in its **Model id** setting. A model you add is available
   immediately, without restarting the runtime.
 
 ### Why only OpenRouter offers sign-in
@@ -202,6 +220,9 @@ Open **Projects**, create a project, and start a conversation in it. Under the m
 - **Chat with GitHub** — the same conversation with a GitHub component wired in, so the model can
   read repositories, issues, pull requests and files.
 - **Nobody** — messages are only saved.
+
+Beside it, **Model** chooses which connected model answers this conversation — it is remembered for
+that conversation, and falls back to any available model if you later remove it.
 
 Pressing **Send** saves your message and starts the chosen workflow; the page shows "Thinking…"
 until the reply is in, with a link to watch the run. If no model is connected yet, the page says so

@@ -179,6 +179,8 @@ export interface ProjectSummary {
   readonly description: string;
   readonly status: string;
   readonly updatedAtMs: number;
+  /** The folder it was created in, or null when it was made without one. */
+  readonly workspacePath?: string | null;
 }
 
 export function fetchProjects(): Promise<
@@ -190,6 +192,13 @@ export function fetchProjects(): Promise<
 /** The models a person configured; keys are never part of this answer. */
 export function fetchModels(): Promise<RuntimeFetch<{ readonly models: readonly unknown[] }>> {
   return readRuntime<{ readonly models: readonly unknown[] }>("/api/models");
+}
+
+/** Every folder this harness works in, the one opened most recently first. */
+export function fetchWorkspaces(): Promise<
+  RuntimeFetch<{ readonly workspaces: readonly unknown[] }>
+> {
+  return readRuntime<{ readonly workspaces: readonly unknown[] }>("/api/setup/workspaces");
 }
 
 /** Which providers a person has signed in to; keys are never part of this answer. */

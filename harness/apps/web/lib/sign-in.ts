@@ -24,6 +24,8 @@ export interface OpenRouterModel {
   readonly id: string;
   readonly name: string;
   readonly contextLength: number;
+  /** When OpenRouter first listed it; the runtime sends them newest first. */
+  readonly releasedAtMs: number;
 }
 
 /** The address OpenRouter should send the person back to. */
@@ -52,7 +54,8 @@ export function isOpenRouterModel(value: unknown): value is OpenRouterModel {
   return (
     typeof record["id"] === "string" &&
     typeof record["name"] === "string" &&
-    typeof record["contextLength"] === "number"
+    typeof record["contextLength"] === "number" &&
+    typeof record["releasedAtMs"] === "number"
   );
 }
 
@@ -67,12 +70,11 @@ export const MODEL_MAKERS = [
 
 export type ModelMaker = (typeof MODEL_MAKERS)[number]["prefix"];
 
-/** The models matching what a person typed and the maker they chose, at most `limit`. */
+/** The models matching what a person typed and the maker they chose, in the order given. */
 export function filterModels(
   models: readonly OpenRouterModel[],
   query: string,
   maker: ModelMaker,
-  limit = 50,
 ): readonly OpenRouterModel[] {
   const words = query
     .toLowerCase()
@@ -83,8 +85,12 @@ export function filterModels(
     .filter((model) => {
       const text = `${model.id} ${model.name}`.toLowerCase();
       return words.every((word) => text.includes(word));
-    })
-    .slice(0, limit);
+    });
+}
+
+/** The year a model was listed, for the picker; empty when OpenRouter did not say. */
+export function releaseYear(model: OpenRouterModel): string {
+  return model.releasedAtMs > 0 ? new Date(model.releasedAtMs).toISOString().slice(0, 7) : "";
 }
 
 /** A short id for this harness, from OpenRouter's `maker/model` id. */

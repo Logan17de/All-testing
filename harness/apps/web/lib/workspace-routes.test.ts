@@ -35,6 +35,12 @@ describe("workspace proxy paths", () => {
         new URLSearchParams(`conversationId=${ID}`),
       ),
     ).toBe(`/api/workflows/chat-github?conversationId=${ID}`);
+    expect(runtimeWorkspacePath(["setup", "workspaces"], new URLSearchParams())).toBe(
+      "/api/setup/workspaces",
+    );
+    expect(runtimeWorkspacePath(["setup", "workspaces", "forget"], new URLSearchParams())).toBe(
+      "/api/setup/workspaces/forget",
+    );
     expect(runtimeWorkspacePath(["connections"], new URLSearchParams())).toBe("/api/connections");
     for (const action of ["start", "complete", "sign-out", "models"]) {
       expect(

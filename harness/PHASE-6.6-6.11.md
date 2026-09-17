@@ -145,7 +145,9 @@ OpenAI-compatible address, and a model's key can come from a sign-in.
   attempt, exchanges the code at `/api/v1/auth/keys`, registers the key with the redactor and
   stores it. `POST .../sign-out` deletes it. `GET /api/connections` reports whether a sign-in
   exists, how many models use it and the one address those models may call — never the key.
-  `GET .../models` lists OpenRouter's models that support tools, cached for ten minutes.
+  `GET .../models` lists OpenRouter's models that support tools, newest first by the date
+  OpenRouter gives each one, cached for ten minutes; the page lists all of them rather than a
+  first page, so a provider's latest model is at the top of its filter.
 - **The key stays with its provider.** Saving a model that uses the OpenRouter sign-in is refused
   unless its endpoint has OpenRouter's origin. `OPENROUTER_URL` moves that origin for tests.
 - **The page.** `/models` offers **API key** or **Sign in (OAuth)**. Signing in goes to OpenRouter

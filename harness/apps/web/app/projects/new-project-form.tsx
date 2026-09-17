@@ -31,6 +31,7 @@ export function NewProjectForm() {
 
   return (
     <form
+      id="new-project"
       className="panel"
       aria-label="New project"
       onSubmit={(event) => {

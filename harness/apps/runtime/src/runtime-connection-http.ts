@@ -43,6 +43,8 @@ export interface OpenRouterModel {
   readonly id: string;
   readonly name: string;
   readonly contextLength: number;
+  /** When OpenRouter first listed it, so the newest models come first. */
+  readonly releasedAtMs: number;
 }
 
 class ConnectionRequestError extends Error {
@@ -226,6 +228,7 @@ export function createConnectionHttpHandler(services: RuntimeConnectionHttpServi
         const id = record["id"];
         if (!tools || typeof id !== "string") return [];
         const context = record["context_length"];
+        const created = record["created"];
         return [
           {
             id,
@@ -234,10 +237,19 @@ export function createConnectionHttpHandler(services: RuntimeConnectionHttpServi
               typeof context === "number" && Number.isSafeInteger(context) && context > 0
                 ? context
                 : 32_000,
+            // OpenRouter dates a model in seconds; anything else sorts last.
+            releasedAtMs:
+              typeof created === "number" && Number.isFinite(created) && created > 0
+                ? Math.round(created * 1_000)
+                : 0,
           },
         ];
       })
-      .sort((left: OpenRouterModel, right: OpenRouterModel) => left.id.localeCompare(right.id));
+      // Newest first: a provider's latest model is what a person is looking for.
+      .sort(
+        (left: OpenRouterModel, right: OpenRouterModel) =>
+          right.releasedAtMs - left.releasedAtMs || left.id.localeCompare(right.id),
+      );
     modelList = { models, atMs: now() };
     return models;
   };

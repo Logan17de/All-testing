@@ -83,6 +83,9 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
   (Claude), Google Gemini, xAI (Grok) and OpenRouter; **Sign in with OpenRouter** (OAuth PKCE)
   reaches all of them without a key, and its key is only ever sent to OpenRouter (migration 22).
   Codex, Claude Code, Gemini CLI and Grok sign-ins are kept by those providers for their own apps.
+- **Also just finished:** more than one workspace. The overview leads with New project, Models
+  and Plugins and lists every folder the harness has worked in; opening one shows its projects
+  (migration 23). A conversation also chooses which connected model answers it.
 - **Next:** 6.12 needs only a real Ollama or llama.cpp run through the Models page; then the
   optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),

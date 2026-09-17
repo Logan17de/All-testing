@@ -349,6 +349,16 @@ files), then for a model. The choice is kept in the database (migration 21, `app
 takes effect without a restart; new projects start in the workspace unless they name their own
 folder, and a whole drive is refused as a workspace.
 
+**More than one workspace:** the overview leads with New project, Models and Plugins, and lists
+every folder the harness has worked in (migration 23, `workspaces`). Clicking one opens it and
+shows its projects; Projects lists the open folder's projects and links to the rest. Forgetting a
+folder only removes it from the list, and the folder being worked in cannot be forgotten.
+
+**Which model answers a chat:** models belong to the harness, not to a project. A conversation has
+a Model box beside Answered by: any model that can answer, or one a person picks, remembered per
+conversation in the browser and sent with the reply. A model that is later removed falls back to
+any.
+
 **Signing in to a model provider:** the Models page offers **API key** or **Sign in (OAuth)**. API
 keys have presets for OpenAI, Anthropic, Google Gemini, xAI and OpenRouter. Sign-in uses
 OpenRouter's OAuth PKCE flow — the only one of these providers that lets other apps sign in — and

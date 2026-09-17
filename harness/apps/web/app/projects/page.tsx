@@ -1,14 +1,28 @@
 import Link from "next/link";
 
-import { fetchProjects, runtimeOrigin } from "../../lib/runtime-client";
+import { fetchProjects, fetchSetup, runtimeOrigin } from "../../lib/runtime-client";
+import { inWorkspace } from "../../lib/workspaces";
 import { NewProjectForm } from "./new-project-form";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Projects — Zet Harness" };
 
-export default async function ProjectsPage() {
-  const result = await fetchProjects();
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  readonly searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [result, setup, params] = await Promise.all([fetchProjects(), fetchSetup(), searchParams]);
+  const workspace = setup.ok ? (setup.data.setup.workspace?.path ?? null) : null;
+  // A project belongs to the folder it was made in; `all` looks past that.
+  const everywhere = params["all"] === "1";
+  const all = result.ok ? result.data.projects : [];
+  const projects =
+    everywhere || workspace === null
+      ? all
+      : all.filter((project) => inWorkspace(project.workspacePath ?? null, workspace));
+  const elsewhere = all.length - projects.length;
 
   return (
     <main className="page">
@@ -20,7 +34,32 @@ export default async function ProjectsPage() {
 
       <div className="pageHeader">
         <h1 className="pageTitle">Projects</h1>
+        <Link className="btn" href="#new-project">
+          New project
+        </Link>
       </div>
+
+      {workspace === null ? null : (
+        <p className="muted small">
+          {everywhere ? (
+            <>
+              Every project, from all folders. <Link href="/projects">Only this folder</Link>
+            </>
+          ) : (
+            <>
+              In <code>{workspace}</code>
+              {elsewhere > 0 ? (
+                <>
+                  {" · "}
+                  <Link href="/projects?all=1">
+                    {elsewhere} in other {elsewhere === 1 ? "folder" : "folders"}
+                  </Link>
+                </>
+              ) : null}
+            </>
+          )}
+        </p>
+      )}
 
       {!result.ok ? (
         <div className="panel">
@@ -31,9 +70,9 @@ export default async function ProjectsPage() {
         </div>
       ) : (
         <>
-          {result.data.projects.length === 0 ? (
+          {projects.length === 0 ? (
             <div className="panel">
-              <p>No projects yet.</p>
+              <p>{all.length === 0 ? "No projects yet." : "No projects in this folder yet."}</p>
               <p className="muted">
                 A project holds conversations, goals and todos, and the agent runs that work on
                 them.
@@ -50,7 +89,7 @@ export default async function ProjectsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {result.data.projects.map((project) => (
+                  {projects.map((project) => (
                     <tr key={project.projectId}>
                       <td>
                         <Link href={`/projects/${project.projectId}`}>{project.name}</Link>

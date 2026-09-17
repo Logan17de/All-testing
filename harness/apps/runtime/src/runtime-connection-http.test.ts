@@ -82,12 +82,14 @@ async function fakeOpenRouter() {
               id: "x-ai/grok-4",
               name: "xAI: Grok 4",
               context_length: 256_000,
+              created: 1_760_000_000,
               supported_parameters: ["tools", "max_tokens"],
             },
             {
               id: "anthropic/claude-sonnet-4",
               name: "Anthropic: Claude Sonnet 4",
               context_length: 200_000,
+              created: 1_780_000_000,
               supported_parameters: ["tools"],
             },
             { id: "some/text-only", name: "No tools", supported_parameters: ["max_tokens"] },
@@ -227,7 +229,7 @@ describe("signing in to OpenRouter", () => {
     });
   });
 
-  it("lists only the OpenRouter models that can call tools", async () => {
+  it("lists only the OpenRouter models that can call tools, newest first", async () => {
     const openRouter = await fakeOpenRouter();
     process.env["OPENROUTER_URL"] = openRouter.url;
     const { send } = await startDaemon();
@@ -237,8 +239,14 @@ describe("signing in to OpenRouter", () => {
         id: "anthropic/claude-sonnet-4",
         name: "Anthropic: Claude Sonnet 4",
         contextLength: 200_000,
+        releasedAtMs: 1_780_000_000_000,
       },
-      { id: "x-ai/grok-4", name: "xAI: Grok 4", contextLength: 256_000 },
+      {
+        id: "x-ai/grok-4",
+        name: "xAI: Grok 4",
+        contextLength: 256_000,
+        releasedAtMs: 1_760_000_000_000,
+      },
     ]);
   });
 

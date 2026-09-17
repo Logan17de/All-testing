@@ -5,15 +5,23 @@ import {
   filterModels,
   isConnectionView,
   modelIdFromOpenRouter,
+  releaseYear,
   signInReturnUrl,
   type OpenRouterModel,
 } from "./sign-in";
 
+const model = (id: string, name: string, releasedAtMs = 0): OpenRouterModel => ({
+  id,
+  name,
+  contextLength: 128_000,
+  releasedAtMs,
+});
+
 const MODELS: readonly OpenRouterModel[] = [
-  { id: "anthropic/claude-sonnet-4", name: "Anthropic: Claude Sonnet 4", contextLength: 200_000 },
-  { id: "google/gemini-2.5-flash", name: "Google: Gemini 2.5 Flash", contextLength: 1_000_000 },
-  { id: "openai/gpt-4o-mini", name: "OpenAI: GPT-4o-mini", contextLength: 128_000 },
-  { id: "x-ai/grok-4", name: "xAI: Grok 4", contextLength: 256_000 },
+  model("anthropic/claude-sonnet-4", "Anthropic: Claude Sonnet 4"),
+  model("google/gemini-2.5-flash", "Google: Gemini 2.5 Flash"),
+  model("openai/gpt-4o-mini", "OpenAI: GPT-4o-mini"),
+  model("x-ai/grok-4", "xAI: Grok 4"),
 ];
 
 describe("signing in to OpenRouter", () => {
@@ -41,13 +49,24 @@ describe("signing in to OpenRouter", () => {
     expect(filterModels(MODELS, "GEMINI flash", "").map((model) => model.id)).toEqual([
       "google/gemini-2.5-flash",
     ]);
-    expect(filterModels(MODELS, "", "", 2)).toHaveLength(2);
+    expect(filterModels(MODELS, "", "")).toHaveLength(4);
     expect(filterModels(MODELS, "grok", "openai/")).toEqual([]);
   });
 
   it("names a picked model after its OpenRouter id, without the maker", () => {
     expect(modelIdFromOpenRouter("anthropic/claude-sonnet-4")).toBe("claude-sonnet-4");
     expect(modelIdFromOpenRouter("openai/gpt-4o:free")).toBe("gpt-4o-free");
+  });
+
+  it("keeps the order it was given, so the newest models stay on top", () => {
+    const newest = model("openai/gpt-5.5", "OpenAI: GPT-5.5", Date.parse("2026-09-01T00:00:00Z"));
+    const listed = [newest, ...MODELS.filter((entry) => entry.id.startsWith("openai/"))];
+    expect(filterModels(listed, "", "openai/").map((entry) => entry.id)).toEqual([
+      "openai/gpt-5.5",
+      "openai/gpt-4o-mini",
+    ]);
+    expect(releaseYear(newest)).toBe("2026-09");
+    expect(releaseYear(model("openai/gpt-4o-mini", "OpenAI: GPT-4o-mini"))).toBe("");
   });
 
   it("accepts only a sign-in status it understands", () => {

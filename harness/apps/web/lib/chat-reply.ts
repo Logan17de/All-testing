@@ -20,6 +20,10 @@ export function isReplyChoice(value: unknown): value is ReplyChoice {
 }
 
 const STORAGE_PREFIX = "zet-harness.chat.answered-by.";
+const MODEL_PREFIX = "zet-harness.chat.model.";
+
+/** Any configured model that can do the job, rather than one a person named. */
+export const ANY_MODEL = "";
 
 /** The choice made for this conversation before, or Chat. */
 export function rememberedChoice(conversationId: string): ReplyChoice {
@@ -34,6 +38,30 @@ export function rememberedChoice(conversationId: string): ReplyChoice {
 export function rememberChoice(conversationId: string, choice: ReplyChoice): void {
   try {
     window.localStorage.setItem(`${STORAGE_PREFIX}${conversationId}`, choice);
+  } catch {
+    // Remembering is a convenience; the page works without it.
+  }
+}
+
+/**
+ * The model chosen for this conversation before, if it is still configured.
+ *
+ * A model belongs to the harness, not to a project: a conversation only remembers
+ * which of them a person last picked, and falls back to letting the runtime choose.
+ */
+export function rememberedModel(conversationId: string, configured: readonly string[]): string {
+  try {
+    const stored = window.localStorage.getItem(`${MODEL_PREFIX}${conversationId}`);
+    return stored !== null && configured.includes(stored) ? stored : ANY_MODEL;
+  } catch {
+    return ANY_MODEL;
+  }
+}
+
+export function rememberModel(conversationId: string, modelId: string): void {
+  try {
+    if (modelId === ANY_MODEL) window.localStorage.removeItem(`${MODEL_PREFIX}${conversationId}`);
+    else window.localStorage.setItem(`${MODEL_PREFIX}${conversationId}`, modelId);
   } catch {
     // Remembering is a convenience; the page works without it.
   }

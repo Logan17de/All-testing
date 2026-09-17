@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ANY_MODEL,
   editorLink,
   isReplyChoice,
   rememberChoice,
+  rememberModel,
   rememberedChoice,
+  rememberedModel,
   replyOutcome,
   runSettled,
 } from "./chat-reply";
@@ -58,6 +61,32 @@ describe("who answers a conversation", () => {
     expect(isReplyChoice("chat")).toBe(true);
     expect(isReplyChoice("none")).toBe(true);
     expect(isReplyChoice("chat-slack")).toBe(false);
+  });
+});
+
+describe("which model answers", () => {
+  it("remembers the model per conversation, and otherwise lets the runtime choose", () => {
+    vi.stubGlobal("window", { localStorage: fakeStorage() });
+    expect(rememberedModel("a", ["grok-4"])).toBe(ANY_MODEL);
+    rememberModel("a", "grok-4");
+    expect(rememberedModel("a", ["grok-4", "gpt-5"])).toBe("grok-4");
+    expect(rememberedModel("b", ["grok-4"])).toBe(ANY_MODEL);
+    // A model that has since been removed is not asked for again.
+    expect(rememberedModel("a", ["gpt-5"])).toBe(ANY_MODEL);
+    rememberModel("a", ANY_MODEL);
+    expect(rememberedModel("a", ["grok-4"])).toBe(ANY_MODEL);
+  });
+
+  it("still works where the browser keeps nothing", () => {
+    vi.stubGlobal("window", {
+      get localStorage(): Storage {
+        throw new Error("blocked");
+      },
+    });
+    expect(rememberedModel("a", ["grok-4"])).toBe(ANY_MODEL);
+    expect(() => {
+      rememberModel("a", "grok-4");
+    }).not.toThrow();
   });
 });
 

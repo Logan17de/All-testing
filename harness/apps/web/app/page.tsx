@@ -7,20 +7,24 @@ import {
   fetchPluginReport,
   fetchRuntimeHealth,
   fetchSetup,
+  fetchWorkspaces,
   runtimeOrigin,
 } from "../lib/runtime-client";
+import { isWorkspaceEntry } from "../lib/workspaces";
+import { WorkspaceList } from "./workspace-list";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [health, plugins, setup] = await Promise.all([
+  const [health, plugins, setup, listed] = await Promise.all([
     fetchRuntimeHealth(),
     fetchPluginReport(),
     fetchSetup(),
+    fetchWorkspaces(),
   ]);
   // The first thing a new harness needs is to know where to work.
   if (setup.ok && !setup.data.setup.complete) redirect("/setup");
-  const workspace = setup.ok ? setup.data.setup.workspace : null;
+  const workspaces = listed.ok ? listed.data.workspaces.filter(isWorkspaceEntry) : [];
 
   const running = health.ok && health.data.status === "ok";
   const installedCount = plugins.ok ? plugins.data.installed.length : 0;
@@ -40,18 +44,24 @@ export default async function HomePage() {
         {running ? "Runtime daemon is healthy" : "Runtime daemon is not reachable"}
       </div>
 
-      {workspace === null ? null : (
-        <p className="muted small">
-          Workspace <code>{workspace.path}</code> · <Link href="/setup">Change</Link>
-        </p>
-      )}
+      <div className="btnRow pageActions">
+        <Link className="btn btn--primary" href="/projects#new-project">
+          New project
+        </Link>
+        <Link className="btn" href="/models">
+          Models
+        </Link>
+        <Link className="btn" href="/plugins">
+          Plugins
+        </Link>
+      </div>
+
+      <WorkspaceList initial={workspaces} />
 
       <nav className="navLinks" aria-label="Sections">
-        <Link href="/editor">Graph editor</Link>
         <Link href="/projects">Projects</Link>
+        <Link href="/editor">Graph editor</Link>
         <Link href="/runs">Runs</Link>
-        <Link href="/models">Models</Link>
-        <Link href="/plugins">Plugins</Link>
         <Link href="/setup">Setup</Link>
       </nav>
 

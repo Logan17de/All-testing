@@ -7,14 +7,13 @@ import {
   filterModels,
   isConnectionView,
   isOpenRouterModel,
+  releaseYear,
   signInReturnUrl,
   type ConnectionView,
   type ModelMaker,
   type OpenRouterModel,
 } from "../../lib/sign-in";
 import { workspaceRequest } from "../../lib/workspace-client";
-
-const SHOWN_MODELS = 50;
 
 /**
  * Signing in to OpenRouter, and picking one of its models.
@@ -95,9 +94,7 @@ export function SignInPanel({
     if (isConnectionView(result.data.connection)) onConnection(result.data.connection);
   };
 
-  const matching =
-    models === null ? [] : filterModels(models, query, maker, Number.MAX_SAFE_INTEGER);
-  const shown = matching.slice(0, SHOWN_MODELS);
+  const shown = models === null ? [] : filterModels(models, query, maker);
 
   return (
     <div className="signIn">
@@ -232,17 +229,17 @@ export function SignInPanel({
                         onPick(model);
                       }}
                     >
-                      {model.name} <code className="muted small">{model.id}</code>
+                      {model.name} <code className="muted small">{model.id}</code>{" "}
+                      <span className="muted small">{releaseYear(model)}</span>
                     </button>
                   </li>
                 ))}
               </ul>
             )}
             <span className="field__hint">
-              Only models that can call tools are listed, because agent steps use tools.
-              {matching.length > shown.length
-                ? ` Showing ${String(shown.length)} of ${String(matching.length)}; search to narrow it.`
-                : ""}
+              Newest first. Only models that can call tools are listed, because agent steps use
+              tools.
+              {shown.length > 0 ? ` ${String(shown.length)} to choose from.` : ""}
             </span>
           </div>
         </>

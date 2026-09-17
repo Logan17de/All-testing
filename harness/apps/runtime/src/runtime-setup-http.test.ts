@@ -60,7 +60,7 @@ describe("first-run setup", () => {
     });
 
     const chosen = await first.send("POST", "/api/setup/workspace", { path: project });
-    expect(chosen).toEqual({
+    expect(chosen).toMatchObject({
       status: 200,
       body: { workspace: { path: project, exists: true } },
     });
@@ -95,6 +95,44 @@ describe("first-run setup", () => {
       workspacePath: elsewhere,
     });
     expect(ownFolder.body["project"]).toMatchObject({ workspacePath: elsewhere });
+  });
+
+  it("keeps every folder it has worked in, and opens whichever one is asked for", async () => {
+    const alpha = join(root, "alpha");
+    const beta = join(root, "beta");
+    await mkdir(alpha);
+    await mkdir(beta);
+    const { send } = await startDaemon();
+
+    expect((await send("GET", "/api/setup/workspaces")).body["workspaces"]).toEqual([]);
+
+    await send("POST", "/api/setup/workspace", { path: alpha });
+    const both = await send("POST", "/api/setup/workspace", { path: beta });
+    expect(both.body["workspaces"]).toEqual([
+      expect.objectContaining({ path: beta, exists: true, current: true }),
+      expect.objectContaining({ path: alpha, exists: true, current: false }),
+    ]);
+
+    // Opening the first one again brings it back to the front.
+    await send("POST", "/api/setup/workspace", { path: alpha });
+    const listed = (await send("GET", "/api/setup/workspaces")).body["workspaces"] as {
+      readonly path: string;
+      readonly current: boolean;
+    }[];
+    expect(listed.map((entry) => entry.path)).toEqual([alpha, beta]);
+    expect(listed[0]?.current).toBe(true);
+
+    // The folder being worked in cannot be forgotten; another can.
+    const refused = await send("POST", "/api/setup/workspaces/forget", { path: alpha });
+    expect(refused).toMatchObject({ status: 409, body: { error: { code: "WORKSPACE_IN_USE" } } });
+    const forgotten = await send("POST", "/api/setup/workspaces/forget", { path: beta });
+    expect(forgotten.body["workspaces"]).toEqual([
+      expect.objectContaining({ path: alpha, current: true }),
+    ]);
+    expect((await send("GET", "/api/setup/workspace")).body["workspace"]).toEqual({
+      path: alpha,
+      exists: true,
+    });
   });
 
   it("refuses a workspace it could not work in", async () => {

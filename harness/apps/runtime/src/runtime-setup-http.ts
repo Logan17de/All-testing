@@ -7,6 +7,11 @@ import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 import type { SqliteDatabase } from "@zet-harness/db";
 import { listModelConfigs } from "@zet-harness/db/durable-model-records";
 import { readSetting, writeSetting } from "@zet-harness/db/durable-setting-records";
+import {
+  forgetWorkspace,
+  listWorkspaces,
+  rememberWorkspace,
+} from "@zet-harness/db/durable-workspace-records";
 
 import { RuntimeApiSecurityError, type RuntimeApiSecurity } from "./runtime-api-security.js";
 import { writeRuntimeJson } from "./runtime-approval-http.js";
@@ -24,6 +29,8 @@ export interface RuntimeSetupHttpServices {
 const SETUP_PATH = "/api/setup";
 const WORKSPACE_PATH = "/api/setup/workspace";
 const FOLDERS_PATH = "/api/setup/folders";
+const WORKSPACES_PATH = "/api/setup/workspaces";
+const FORGET_PATH = "/api/setup/workspaces/forget";
 const MAX_BODY_BYTES = 8_192;
 const MAX_FOLDERS = 500;
 
@@ -40,13 +47,44 @@ class SetupRequestError extends Error {
 }
 
 export function isSetupHttpPath(pathname: string): boolean {
-  return pathname === SETUP_PATH || pathname === WORKSPACE_PATH || pathname === FOLDERS_PATH;
+  return (
+    pathname === SETUP_PATH ||
+    pathname === WORKSPACE_PATH ||
+    pathname === FOLDERS_PATH ||
+    pathname === WORKSPACES_PATH ||
+    pathname === FORGET_PATH
+  );
 }
 
 export interface WorkspaceView {
   readonly path: string;
   /** False when the folder was chosen once and has since gone. */
   readonly exists: boolean;
+}
+
+/** One folder this harness knows, and whether it is the one open now. */
+export interface WorkspaceListEntry extends WorkspaceView {
+  readonly current: boolean;
+  readonly openedAtMs: number;
+}
+
+/**
+ * Every folder this harness knows, the one opened most recently first.
+ *
+ * The open workspace is always in this list, even in a database written before
+ * the list existed, so a person never loses sight of where they are working.
+ */
+export function readWorkspaces(database: SqliteDatabase): readonly WorkspaceListEntry[] {
+  const current = readWorkspace(database);
+  const known = listWorkspaces(database.connection());
+  const listed = known.map((entry) => ({
+    path: entry.path,
+    exists: existsSync(entry.path),
+    current: entry.path === current?.path,
+    openedAtMs: entry.openedAtMs,
+  }));
+  if (current === undefined || listed.some((entry) => entry.current)) return listed;
+  return [{ ...current, current: true, openedAtMs: 0 }, ...listed];
 }
 
 /** The workspace a person chose, if they have chosen one. */
@@ -209,6 +247,32 @@ export async function handleSetupHttp(
       return;
     }
 
+    if (url.pathname === WORKSPACES_PATH) {
+      if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+      writeRuntimeJson(response, 200, { workspaces: readWorkspaces(services.database) });
+      return;
+    }
+
+    if (url.pathname === FORGET_PATH) {
+      if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
+      security.checkMutation(request);
+      const body = await readBody(request);
+      const path = body["path"];
+      if (typeof path !== "string" || path.length === 0) {
+        throw new SetupRequestError("SETUP_REQUEST_INVALID", "Name the folder to forget.", 400);
+      }
+      if (path === readWorkspace(services.database)?.path) {
+        throw new SetupRequestError(
+          "WORKSPACE_IN_USE",
+          "This is the folder the harness is working in. Open another one first.",
+          409,
+        );
+      }
+      await services.database.commit((connection) => forgetWorkspace(connection, path));
+      writeRuntimeJson(response, 200, { workspaces: readWorkspaces(services.database) });
+      return;
+    }
+
     if (request.method === "GET") {
       writeRuntimeJson(response, 200, { workspace: readWorkspace(services.database) ?? null });
       return;
@@ -217,10 +281,15 @@ export async function handleSetupHttp(
     security.checkMutation(request);
     const body = await readBody(request);
     const path = await checkWorkspace(body["path"]);
-    await services.database.commit((connection) =>
-      writeSetting(connection, "workspace.root", path, now()),
-    );
-    writeRuntimeJson(response, 200, { workspace: { path, exists: true } });
+    // Opening a folder both points the harness at it and keeps it in the list.
+    await services.database.commit((connection) => {
+      writeSetting(connection, "workspace.root", path, now());
+      rememberWorkspace(connection, path, now());
+    });
+    writeRuntimeJson(response, 200, {
+      workspace: { path, exists: true },
+      workspaces: readWorkspaces(services.database),
+    });
   } catch (error: unknown) {
     if (error instanceof SetupRequestError) {
       writeRuntimeJson(response, error.statusCode, {

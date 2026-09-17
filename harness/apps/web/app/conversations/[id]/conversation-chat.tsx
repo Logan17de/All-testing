@@ -4,16 +4,20 @@ import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import {
+  ANY_MODEL,
   REPLY_CHOICES,
   editorLink,
   isReplyChoice,
   rememberChoice,
+  rememberModel,
   rememberedChoice,
+  rememberedModel,
   replyOutcome,
   runSettled,
   type ReplyChoice,
   type WorkflowChoice,
 } from "../../../lib/chat-reply";
+import { isModelView, type ModelView } from "../../../lib/model-form";
 import { modelLabel, toolLabel } from "../../../lib/plain-words";
 import { workspaceRequest } from "../../../lib/workspace-client";
 import {
@@ -103,14 +107,15 @@ async function runStatus(runId: string): Promise<string | undefined> {
   }
 }
 
-async function modelCount(): Promise<number | undefined> {
+/** The models this harness can call, for the picker beside the composer. */
+async function configuredModels(): Promise<readonly ModelView[]> {
   try {
     const response = await fetch("/api/editor/models", { cache: "no-store" });
-    if (!response.ok) return undefined;
+    if (!response.ok) return [];
     const body = (await response.json()) as { readonly models?: unknown };
-    return Array.isArray(body.models) ? body.models.length : undefined;
+    return Array.isArray(body.models) ? body.models.filter(isModelView) : [];
   } catch {
-    return undefined;
+    return [];
   }
 }
 
@@ -133,7 +138,8 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
   // reading the remembered choice here cannot disagree with the server render.
   const [choice, setChoice] = useState<ReplyChoice>(() => rememberedChoice(conversationId));
   const [workflows, setWorkflows] = useState<readonly WorkflowSummary[]>([]);
-  const [models, setModels] = useState<number | undefined>(undefined);
+  const [models, setModels] = useState<readonly ModelView[] | null>(null);
+  const [modelId, setModelId] = useState<string>(ANY_MODEL);
   const [reply, setReply] = useState<ReplyState | null>(null);
 
   useEffect(() => {
@@ -142,7 +148,15 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
         if (result.ok) setWorkflows(result.data.workflows);
       },
     );
-    void modelCount().then(setModels);
+    void configuredModels().then((configured) => {
+      setModels(configured);
+      setModelId(
+        rememberedModel(
+          conversationId,
+          configured.map((model) => model.modelId),
+        ),
+      );
+    });
   }, [conversationId]);
 
   // Follow a reply until its run settles, then show what it wrote.
@@ -166,7 +180,7 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
     async (workflow: WorkflowChoice): Promise<void> => {
       const started = await workspaceRequest<{ readonly runId: string }>(
         `conversations/${conversationId}/reply`,
-        { workflow },
+        { workflow, ...(modelId === ANY_MODEL ? {} : { modelId }) },
       );
       if (!started.ok) {
         setError(started.reason);
@@ -174,7 +188,7 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
       }
       setReply({ runId: started.data.runId, settled: false, problem: null });
     },
-    [conversationId],
+    [conversationId, modelId],
   );
 
   useEffect(() => {
@@ -279,7 +293,7 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
           {error}
         </p>
       )}
-      {choice !== "none" && models === 0 ? (
+      {choice !== "none" && models !== null && models.length === 0 ? (
         <p className="warn">
           No model is connected yet, so nothing can answer.{" "}
           <Link href="/models">Connect a model</Link>
@@ -326,6 +340,26 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
                 ))}
               </select>
             </label>
+            {choice === "none" || models === null || models.length === 0 ? null : (
+              <label className="field chatAnswerer">
+                <span className="field__label">Model</span>
+                <select
+                  className="field__input"
+                  value={modelId}
+                  onChange={(event) => {
+                    setModelId(event.target.value);
+                    rememberModel(conversationId, event.target.value);
+                  }}
+                >
+                  <option value={ANY_MODEL}>Any model that can answer</option>
+                  {models.map((model) => (
+                    <option key={model.modelId} value={model.modelId}>
+                      {model.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {choice === "none" ? null : (
               <Link className="small" href={editorLink(choice, conversationId)}>
                 Open this workflow in the editor
