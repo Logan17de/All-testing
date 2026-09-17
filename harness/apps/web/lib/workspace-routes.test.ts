@@ -22,6 +22,13 @@ describe("workspace proxy paths", () => {
       `/api/conversations/${ID}/reply`,
     );
     expect(runtimeWorkspacePath(["workflows"], new URLSearchParams())).toBe("/api/workflows");
+    expect(runtimeWorkspacePath(["setup"], new URLSearchParams())).toBe("/api/setup");
+    expect(runtimeWorkspacePath(["setup", "workspace"], new URLSearchParams())).toBe(
+      "/api/setup/workspace",
+    );
+    expect(
+      runtimeWorkspacePath(["setup", "folders"], new URLSearchParams({ path: "D:\\Code", x: "1" })),
+    ).toBe("/api/setup/folders?path=D%3A%5CCode");
     expect(
       runtimeWorkspacePath(
         ["workflows", "chat-github"],
@@ -42,6 +49,7 @@ describe("workspace proxy paths", () => {
       ["goals", ID, "todos", "extra"],
       ["approvals", ID],
       ["workflows", "anything"],
+      ["setup", "delete"],
       ["workflows", "chat", "run"],
     ];
     for (const segments of refused) {

@@ -343,6 +343,12 @@ Each server gets its own `mcp:<id>` capability, and an unknown remote tool is cl
 conservatively as an external write with manual recovery. A server's `readOnlyHint` is a claim, not
 a guarantee, so it relaxes nothing unless a host explicitly opts in. See `PHASE-10-MCP.md`.
 
+**First-run setup:** opening a new harness goes to **Setup**, which asks first for the workspace —
+the folder projects live in — with a folder browser served by the runtime (folders only, never
+files), then for a model. The choice is kept in the database (migration 21, `app_settings`) and
+takes effect without a restart; new projects start in the workspace unless they name their own
+folder, and a whole drive is refused as a workspace.
+
 **Workflows and components:** a conversation can now be answered by a ready-made workflow —
 **Chat**, or **Chat with GitHub** — chosen on the chat page and run like any other graph; the editor
 opens the exact graph a conversation uses. GitHub is a first-party plugin that reads repositories,

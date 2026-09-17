@@ -29,6 +29,7 @@ import {
   DURABLE_MODEL_CONFIGS_MIGRATION,
   listModelConfigs,
 } from "@zet-harness/db/durable-model-records";
+import { DURABLE_APP_SETTINGS_MIGRATION } from "@zet-harness/db/durable-setting-records";
 import { DURABLE_TRIGGER_FIRES_MIGRATION } from "@zet-harness/db/durable-trigger-fire-records";
 import { DURABLE_TRIGGERS_MIGRATION } from "@zet-harness/db/durable-trigger-records";
 import { DURABLE_PROJECTS_MIGRATION } from "@zet-harness/db/durable-project-records";
@@ -107,6 +108,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_TRIGGER_FIRES_MIGRATION,
   DURABLE_CLIENT_SESSIONS_MIGRATION,
   DURABLE_MODEL_CONFIGS_MIGRATION,
+  DURABLE_APP_SETTINGS_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
@@ -250,6 +252,7 @@ export class RuntimeDaemon {
             }),
         projects: { database: this.database },
         memories: { database: this.database },
+        setup: { database: this.database },
         models: {
           database: this.database,
           refresh: (modelId: string) => {

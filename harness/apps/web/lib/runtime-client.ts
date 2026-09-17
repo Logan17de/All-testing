@@ -191,3 +191,14 @@ export function fetchProjects(): Promise<
 export function fetchModels(): Promise<RuntimeFetch<{ readonly models: readonly unknown[] }>> {
   return readRuntime<{ readonly models: readonly unknown[] }>("/api/models");
 }
+
+export interface SetupStatus {
+  readonly workspace: { readonly path: string; readonly exists: boolean } | null;
+  readonly modelsConfigured: number;
+  readonly complete: boolean;
+}
+
+/** Whether first-run setup is done: where the harness works, and whether a model is connected. */
+export function fetchSetup(): Promise<RuntimeFetch<{ readonly setup: SetupStatus }>> {
+  return readRuntime<{ readonly setup: SetupStatus }>("/api/setup");
+}

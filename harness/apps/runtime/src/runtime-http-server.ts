@@ -37,6 +37,11 @@ import {
 } from "./runtime-model-http.js";
 import { handleWorkflowHttp, isWorkflowHttpPath } from "./runtime-workflow-http.js";
 import {
+  handleSetupHttp,
+  isSetupHttpPath,
+  type RuntimeSetupHttpServices,
+} from "./runtime-setup-http.js";
+import {
   handleTriggerHttp,
   isTriggerHttpPath,
   type RuntimeTriggerHttpServices,
@@ -165,6 +170,7 @@ export class RuntimeHttpServer {
   private readonly goalServices: RuntimeGoalHttpServices | undefined;
   private readonly memoryServices: RuntimeMemoryHttpServices | undefined;
   private readonly modelServices: RuntimeModelHttpServices | undefined;
+  private readonly setupServices: RuntimeSetupHttpServices | undefined;
   private readonly triggerServices: RuntimeTriggerHttpServices | undefined;
   private readonly clientServices: RuntimeClientHttpServices | undefined;
   private readonly eventClients = new Map<ServerResponse, () => void>();
@@ -208,6 +214,7 @@ export class RuntimeHttpServer {
       /** What a project remembers across conversations and runs. */
       readonly memories?: RuntimeMemoryHttpServices;
       readonly models?: RuntimeModelHttpServices;
+      readonly setup?: RuntimeSetupHttpServices;
       /** Standing reasons to start a run: manual, cron, webhook and api triggers. */
       readonly triggers?: RuntimeTriggerHttpServices;
       /** External clients: tokens issued locally, then used instead of a browser session. */
@@ -226,6 +233,7 @@ export class RuntimeHttpServer {
     this.goalServices = services.goals;
     this.memoryServices = services.memories;
     this.modelServices = services.models;
+    this.setupServices = services.setup;
     this.triggerServices = services.triggers;
     this.clientServices = services.clients;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
@@ -394,6 +402,19 @@ export class RuntimeHttpServer {
           return;
         }
         void handleTriggerHttp(request, response, url, this.security, triggers).catch(
+          (error: unknown) => {
+            writeRuntimeApiError(response, error);
+          },
+        );
+        return;
+      }
+      if (isSetupHttpPath(url.pathname)) {
+        const setup = this.setupServices;
+        if (setup === undefined) {
+          writeJson(response, 503, { error: { code: "SETUP_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void handleSetupHttp(request, response, url, this.security, setup).catch(
           (error: unknown) => {
             writeRuntimeApiError(response, error);
           },

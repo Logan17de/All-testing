@@ -77,6 +77,8 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
   with GitHub**, chosen on the chat page; GitHub is a first-party plugin whose component hands
   its read-only tools to the agent steps it is wired into; and the pages say what things are
   instead of showing internal names like `harness.agent-model`.
+- **Also just finished:** first-run setup. A new harness asks for its workspace folder before
+  anything else, then for a model; new projects start in that folder (migration 21).
 - **Next:** 6.12 needs only a real Ollama or llama.cpp run through the Models page; then the
   optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),

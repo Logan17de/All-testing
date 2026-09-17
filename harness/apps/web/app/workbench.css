@@ -871,3 +871,66 @@ button.timeline__row:focus-visible {
   color: #9a9a9a;
   font-size: 0.9rem;
 }
+
+/* First-run setup */
+.setupStep {
+  margin-bottom: 1rem;
+  max-width: 48rem;
+}
+
+.setupStep--waiting {
+  opacity: 0.6;
+}
+
+.setupChosen {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  overflow-wrap: anywhere;
+}
+
+.folderPicker {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0.75rem 0;
+}
+
+.folderPicker__bar {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.folderPicker__path {
+  overflow-wrap: anywhere;
+}
+
+.folderPicker__list {
+  max-height: 18rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 0.5rem;
+}
+
+.folderPicker__item {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0.35rem;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folderPicker__item:hover,
+.folderPicker__item:focus-visible {
+  background: #1a1a1a;
+}
+
+.setupTyped {
+  margin-top: 0.75rem;
+}

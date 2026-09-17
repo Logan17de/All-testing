@@ -16,6 +16,7 @@ import { SORTABLE_ID_PATTERN, createSortableId } from "@zet-harness/db/sortable-
 
 import { RuntimeApiSecurityError, type RuntimeApiSecurity } from "./runtime-api-security.js";
 import { writeRuntimeJson } from "./runtime-approval-http.js";
+import { readWorkspace } from "./runtime-setup-http.js";
 
 /** Services the project endpoints need; supplied by the daemon. */
 export interface RuntimeProjectHttpServices {
@@ -178,8 +179,19 @@ export async function handleProjectHttp(
       const fields = projectFields(await readProjectBody(request));
       const name = fields.name;
       if (name === undefined) throw invalidRequest("A project needs a name.", "name");
+      // A project with no folder of its own works in the harness's workspace.
+      const workspacePath =
+        fields.workspacePath === undefined
+          ? (readWorkspace(services.database)?.path ?? null)
+          : fields.workspacePath;
       const project = await services.database.commit((connection) =>
-        createProject(connection, { ...fields, name, projectId: createId(), nowMs: now() }),
+        createProject(connection, {
+          ...fields,
+          workspacePath,
+          name,
+          projectId: createId(),
+          nowMs: now(),
+        }),
       );
       writeRuntimeJson(response, 201, { project });
       return;

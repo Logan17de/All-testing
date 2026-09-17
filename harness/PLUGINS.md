@@ -17,6 +17,14 @@ That starts the runtime daemon and the web UI together. The UI is at `http://127
 daemon listens on `http://127.0.0.1:3211`. Both bind to loopback only. **Ctrl+C** stops both, and
 closing the terminal does too.
 
+The first time you open the app it goes straight to **Setup**:
+
+1. **Choose the workspace** — the folder your projects live in. Browse to it, or type its path,
+   and press **Use this folder**. New projects start there, and anything an agent does with files
+   stays inside it. A whole drive is refused. You can change it later from **Setup**.
+2. **Connect a model** — see [Connecting a model](#connecting-a-model).
+3. **Start** — create a project and open a conversation.
+
 If the ports are already taken, `npm start` says by which process and whether it is a Zet Harness,
 and starts nothing. When it is an earlier harness you want to replace, run:
 

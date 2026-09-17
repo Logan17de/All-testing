@@ -144,7 +144,8 @@ Phase 10 MCP + custom-node SDK + trust      ✅ 10/11 (10.10 WASI stays open by 
 Phase 11 Packaging + optional scale-out     🚧 4/9 (start, setup, backup, graph diffs)
 ```
 
-To try it, follow [Running the harness](./PLUGINS.md#running-the-harness) and
+To try it, run `npm start` and open `http://127.0.0.1:3000`: the first screen asks for the
+workspace folder, then for a model. More in [Running the harness](./PLUGINS.md#running-the-harness) and
 [Building and running a graph](./PLUGINS.md#building-and-running-a-graph). Plugins can be
 copied into the plugins directory or, where the host allows it, installed from npm or an https
 Git repository on the Plugins page — see

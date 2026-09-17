@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./durable-setting-records": {
+      "types": "./src/durable-setting-records.ts",
+      "default": "./dist/durable-setting-records.js"
+    },
     "./durable-model-records": {
       "types": "./src/durable-model-records.ts",
       "default": "./dist/durable-model-records.js"

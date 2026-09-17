@@ -21,6 +21,7 @@ const ALLOWED_PATHS: readonly RegExp[] = [
   new RegExp(`^todos/${ID}$`, "u"),
   new RegExp(`^todos/${ID}/status$`, "u"),
   /^workflows$/u,
+  /^setup(\/(workspace|folders))?$/u,
   /^workflows\/(chat|chat-github)$/u,
 ];
 
@@ -29,6 +30,7 @@ const ALLOWED_QUERY_KEYS: ReadonlySet<string> = new Set([
   "goalId",
   "limit",
   "conversationId",
+  "path",
 ]);
 
 /** The runtime path for a workspace request, or undefined when it is not allowed. */

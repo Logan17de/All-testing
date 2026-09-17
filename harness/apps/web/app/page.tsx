@@ -1,13 +1,26 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { HARNESS_PRODUCT_NAME } from "@zet-harness/shared";
 
-import { fetchPluginReport, fetchRuntimeHealth, runtimeOrigin } from "../lib/runtime-client";
+import {
+  fetchPluginReport,
+  fetchRuntimeHealth,
+  fetchSetup,
+  runtimeOrigin,
+} from "../lib/runtime-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [health, plugins] = await Promise.all([fetchRuntimeHealth(), fetchPluginReport()]);
+  const [health, plugins, setup] = await Promise.all([
+    fetchRuntimeHealth(),
+    fetchPluginReport(),
+    fetchSetup(),
+  ]);
+  // The first thing a new harness needs is to know where to work.
+  if (setup.ok && !setup.data.setup.complete) redirect("/setup");
+  const workspace = setup.ok ? setup.data.setup.workspace : null;
 
   const running = health.ok && health.data.status === "ok";
   const installedCount = plugins.ok ? plugins.data.installed.length : 0;
@@ -27,12 +40,19 @@ export default async function HomePage() {
         {running ? "Runtime daemon is healthy" : "Runtime daemon is not reachable"}
       </div>
 
+      {workspace === null ? null : (
+        <p className="muted small">
+          Workspace <code>{workspace.path}</code> · <Link href="/setup">Change</Link>
+        </p>
+      )}
+
       <nav className="navLinks" aria-label="Sections">
         <Link href="/editor">Graph editor</Link>
         <Link href="/projects">Projects</Link>
         <Link href="/runs">Runs</Link>
         <Link href="/models">Models</Link>
         <Link href="/plugins">Plugins</Link>
+        <Link href="/setup">Setup</Link>
       </nav>
 
       {running ? (
