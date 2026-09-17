@@ -27,6 +27,7 @@ import { DURABLE_CONVERSATION_SUMMARIES_MIGRATION } from "@zet-harness/db/durabl
 import { DURABLE_CLIENT_SESSIONS_MIGRATION } from "@zet-harness/db/durable-client-records";
 import {
   DURABLE_MODEL_CONFIGS_MIGRATION,
+  DURABLE_MODEL_CONNECTIONS_MIGRATION,
   listModelConfigs,
 } from "@zet-harness/db/durable-model-records";
 import { DURABLE_APP_SETTINGS_MIGRATION } from "@zet-harness/db/durable-setting-records";
@@ -58,6 +59,7 @@ import {
 import { GITHUB_PLUGIN_ID, createGitHubPlugin } from "@zet-harness/github";
 import { createAgentNodeExecutor } from "./runtime-agent-nodes.js";
 import { RuntimeModels } from "./runtime-models.js";
+import { OPENROUTER_BASE_URL } from "./runtime-connection-http.js";
 import type { ModelCheckResult } from "./runtime-model-http.js";
 import { createCompositeNodeResolver } from "./runtime-graphs.js";
 import { createPluginNodeExecutor } from "./runtime-plugin-executor.js";
@@ -109,6 +111,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_CLIENT_SESSIONS_MIGRATION,
   DURABLE_MODEL_CONFIGS_MIGRATION,
   DURABLE_APP_SETTINGS_MIGRATION,
+  DURABLE_MODEL_CONNECTIONS_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
@@ -218,6 +221,8 @@ export class RuntimeDaemon {
             },
           }),
     });
+    // A test or a proxy may stand in for OpenRouter; its sign-in and its models follow.
+    const openRouterUrl = process.env["OPENROUTER_URL"] ?? OPENROUTER_BASE_URL;
     this.httpServer = new RuntimeHttpServer(
       options.api,
       this.eventStream,
@@ -253,6 +258,13 @@ export class RuntimeDaemon {
         projects: { database: this.database },
         memories: { database: this.database },
         setup: { database: this.database },
+        connections: {
+          database: this.database,
+          registerSecret: (secret: string) => {
+            this.redaction.registerSecret(secret);
+          },
+          openRouterUrl,
+        },
         models: {
           database: this.database,
           refresh: (modelId: string) => {
@@ -262,6 +274,7 @@ export class RuntimeDaemon {
             this.models?.remove(modelId);
           },
           check: (modelId: string) => this.checkModel(modelId),
+          connectionOrigins: { openrouter: new URL(openRouterUrl).origin },
         },
         clients: {
           database: this.database,

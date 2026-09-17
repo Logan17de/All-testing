@@ -58,8 +58,13 @@ function optionsFor(
       return { ...ollamaEndpointProfile(input), title: model.title };
     case "llama-cpp":
       return { ...llamaCppEndpointProfile(input), title: model.title };
+    // Each of these serves the OpenAI Chat Completions shape at its own address, as
+    // any other conforming API does: the ecosystem's field name, and no assumptions.
+    case "anthropic":
+    case "gemini":
+    case "xai":
+    case "openrouter":
     case "custom":
-      // Anything else conforming: the ecosystem's field name, and no assumptions.
       return { ...input, title: model.title, tokenLimitField: "max_tokens" };
   }
 }

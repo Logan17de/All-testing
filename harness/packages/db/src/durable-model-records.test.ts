@@ -4,21 +4,28 @@ import { describe, expect, it } from "vitest";
 
 import {
   DURABLE_MODEL_CONFIGS_MIGRATION,
+  DURABLE_MODEL_CONNECTIONS_MIGRATION,
   DurableModelError,
   MODEL_CONFIGS_TABLE,
   deleteModelConfig,
+  deleteProviderConnection,
   listModelConfigs,
   readModelApiKey,
   readModelConfig,
+  readProviderConnection,
   replaceModelConfig,
   saveModelConfig,
+  saveProviderConnection,
   type SaveModelInput,
 } from "./durable-model-records.js";
 import { runSqliteMigrations } from "./index.js";
 
 function database(): DatabaseSync {
   const connection = new DatabaseSync(":memory:");
-  runSqliteMigrations(connection, [DURABLE_MODEL_CONFIGS_MIGRATION]);
+  runSqliteMigrations(connection, [
+    DURABLE_MODEL_CONFIGS_MIGRATION,
+    DURABLE_MODEL_CONNECTIONS_MIGRATION,
+  ]);
   return connection;
 }
 
@@ -204,5 +211,91 @@ describe("configured models", () => {
     expect(refusal(() => replaceModelConfig(connection, { ...OLLAMA, nowMs: 2_000 })).code).toBe(
       "MODEL_CONFIG_NOT_FOUND",
     );
+  });
+
+  it("reads a model's key from a provider sign-in, and loses it when the person signs out", () => {
+    const connection = database();
+    const saved = saveModelConfig(connection, {
+      ...OLLAMA,
+      modelId: "claude-via-openrouter",
+      profile: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "anthropic/claude-sonnet-4",
+      credential: "connection",
+      connection: "openrouter",
+    });
+    expect(saved).toMatchObject({ credential: "connection", connection: "openrouter" });
+    // Not signed in yet: the model is configured but has no key.
+    expect(readModelApiKey(connection, "claude-via-openrouter")).toBeUndefined();
+
+    expect(saveProviderConnection(connection, "openrouter", "sk-or-first", 2_000)).toEqual({
+      provider: "openrouter",
+      method: "oauth",
+      connectedAtMs: 2_000,
+    });
+    expect(readModelApiKey(connection, "claude-via-openrouter")).toBe("sk-or-first");
+    // Signing in again replaces the key for every model that uses the sign-in.
+    saveProviderConnection(connection, "openrouter", "sk-or-second", 3_000);
+    expect(readModelApiKey(connection, "claude-via-openrouter")).toBe("sk-or-second");
+    expect(JSON.stringify(readProviderConnection(connection, "openrouter"))).not.toContain("sk-or");
+
+    expect(deleteProviderConnection(connection, "openrouter")).toBe(true);
+    expect(deleteProviderConnection(connection, "openrouter")).toBe(false);
+    expect(readModelApiKey(connection, "claude-via-openrouter")).toBeUndefined();
+    expect(readModelConfig(connection, "claude-via-openrouter")).toMatchObject({
+      credential: "connection",
+    });
+  });
+
+  it("refuses a sign-in credential that names no provider it knows", () => {
+    const connection = database();
+    expect(
+      refusal(() =>
+        saveModelConfig(connection, {
+          ...OLLAMA,
+          baseUrl: "https://openrouter.ai/api/v1",
+          credential: "connection",
+        }),
+      ).field,
+    ).toBe("connection");
+    expect(
+      refusal(() => saveModelConfig(connection, { ...OLLAMA, connection: "openrouter" })).field,
+    ).toBe("connection");
+    expect(() => saveProviderConnection(connection, "openrouter", "  ", 1)).toThrow(
+      DurableModelError,
+    );
+  });
+
+  it("keeps every model configured before sign-ins existed", () => {
+    const connection = new DatabaseSync(":memory:");
+    runSqliteMigrations(connection, [DURABLE_MODEL_CONFIGS_MIGRATION]);
+    connection
+      .prepare(
+        `INSERT INTO model_configs (
+          model_id, title, profile, base_url, model, credential, credential_env, api_key,
+          tools, streaming, context_window_tokens, created_at_ms, updated_at_ms
+        ) VALUES ('hosted', 'Hosted', 'openai', 'https://api.example.com/v1', 'gpt', 'stored',
+          NULL, 'sk-kept', 1, 0, 128000, 5, 6)`,
+      )
+      .run();
+
+    runSqliteMigrations(connection, [
+      DURABLE_MODEL_CONFIGS_MIGRATION,
+      DURABLE_MODEL_CONNECTIONS_MIGRATION,
+    ]);
+
+    expect(readModelConfig(connection, "hosted")).toMatchObject({
+      credential: "stored",
+      connection: null,
+      createdAtMs: 5,
+      updatedAtMs: 6,
+    });
+    expect(readModelApiKey(connection, "hosted")).toBe("sk-kept");
+    // The rebuilt table still keeps a model's identity.
+    expect(() =>
+      connection
+        .prepare("UPDATE model_configs SET created_at_ms = 1 WHERE model_id = 'hosted'")
+        .run(),
+    ).toThrow(/keeps its id/u);
   });
 });

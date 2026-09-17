@@ -144,12 +144,18 @@ the runtime: installing is still not enabling, and enabling is still a file you 
 
 Agent steps need a model to call. Open **Models** (`http://127.0.0.1:3000/models`) and add one:
 
+- **Sign in (OAuth) with OpenRouter.** Choose **Sign in (OAuth)**, then **Sign in with
+  OpenRouter**. You approve the harness on openrouter.ai and come straight back; then search
+  OpenRouter's models (with quick filters for OpenAI, Anthropic, Google and xAI), pick one and save.
+  One sign-in reaches GPT, Claude, Gemini, Grok and many others, billed to your OpenRouter account.
+- **API key** for **OpenAI**, **Anthropic (Claude)**, **Google Gemini**, **xAI (Grok)** or
+  **OpenRouter**: pick the provider (its endpoint is filled in), type the model name, and either
+  paste the API key or name the environment variable that holds it.
 - **Ollama** or **llama.cpp** running on this machine: pick it, type the model name exactly as the
   server knows it (for example `llama3.1:8b`), and keep **No key**. The endpoint is filled in with
   the server's usual local address.
-- **OpenAI**, or any other API that speaks the OpenAI Chat Completions format: pick it, type the
-  model name and the endpoint, and either paste the API key or name the environment variable that
-  holds it.
+- **Anything else** that speaks the OpenAI Chat Completions format: choose **Other compatible
+  API** and type the endpoint.
 
 Saving checks the model straight away with a one-token request, and says what went wrong in plain
 words — a refused key, a wrong URL, a server that is not running. **Check** repeats it at any time.
@@ -165,8 +171,26 @@ words — a refused key, a wrong URL, a server that is not running. **Check** re
   setting, or otherwise any available model that can call tools. A model you add is available
   immediately, without restarting the runtime.
 
-Signing in to a provider with an account (OAuth) is not offered: the providers above give API access
-through keys.
+### Why only OpenRouter offers sign-in
+
+OpenAI (Codex), Anthropic (Claude Code), Google (Gemini CLI) and xAI (Grok) keep their account
+sign-ins for their own apps; they do not let another app use your subscription. Their models are
+reached here with an API key from each provider's console. OpenRouter offers a sign-in built for
+apps like this one, so it is the way to use those models without handling a key.
+
+How the sign-in works, and what it keeps:
+
+- The runtime starts the sign-in with a one-time secret only it holds (PKCE, S256) and sends you
+  to `openrouter.ai`. OpenRouter sends you back to `http://localhost:<port>/models/openrouter`
+  with a code, and the runtime trades the code and its secret for a key. A code that was not
+  started here, has expired (after ten minutes) or was already tried is refused.
+- The key is kept in this harness's database like a pasted key, named "Zet Harness" on your
+  OpenRouter account, never returned by any endpoint, and removed from everything the harness
+  records. Every model you add through the sign-in uses it, and it is sent only to OpenRouter —
+  the runtime refuses a sign-in model that points anywhere else.
+- **Sign out** removes the key from this harness; models that used it stay configured and say they
+  need the sign-in until you sign in again. The key itself stays on your OpenRouter account until
+  you delete it there.
 
 ## Chatting
 

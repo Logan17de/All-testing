@@ -35,6 +35,15 @@ describe("workspace proxy paths", () => {
         new URLSearchParams(`conversationId=${ID}`),
       ),
     ).toBe(`/api/workflows/chat-github?conversationId=${ID}`);
+    expect(runtimeWorkspacePath(["connections"], new URLSearchParams())).toBe("/api/connections");
+    for (const action of ["start", "complete", "sign-out", "models"]) {
+      expect(
+        runtimeWorkspacePath(["connections", "openrouter", action], new URLSearchParams()),
+      ).toBe(`/api/connections/openrouter/${action}`);
+    }
+    expect(runtimeWorkspacePath(["connections", "openai", "start"], new URLSearchParams())).toBe(
+      undefined,
+    );
   });
 
   it("refuses anything outside the workspace allowlist", () => {

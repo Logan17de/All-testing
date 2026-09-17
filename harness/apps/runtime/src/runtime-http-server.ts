@@ -37,6 +37,11 @@ import {
 } from "./runtime-model-http.js";
 import { handleWorkflowHttp, isWorkflowHttpPath } from "./runtime-workflow-http.js";
 import {
+  createConnectionHttpHandler,
+  isConnectionHttpPath,
+  type RuntimeConnectionHttpServices,
+} from "./runtime-connection-http.js";
+import {
   handleSetupHttp,
   isSetupHttpPath,
   type RuntimeSetupHttpServices,
@@ -171,6 +176,7 @@ export class RuntimeHttpServer {
   private readonly memoryServices: RuntimeMemoryHttpServices | undefined;
   private readonly modelServices: RuntimeModelHttpServices | undefined;
   private readonly setupServices: RuntimeSetupHttpServices | undefined;
+  private readonly connectionHandler: ReturnType<typeof createConnectionHttpHandler> | undefined;
   private readonly triggerServices: RuntimeTriggerHttpServices | undefined;
   private readonly clientServices: RuntimeClientHttpServices | undefined;
   private readonly eventClients = new Map<ServerResponse, () => void>();
@@ -215,6 +221,7 @@ export class RuntimeHttpServer {
       readonly memories?: RuntimeMemoryHttpServices;
       readonly models?: RuntimeModelHttpServices;
       readonly setup?: RuntimeSetupHttpServices;
+      readonly connections?: RuntimeConnectionHttpServices;
       /** Standing reasons to start a run: manual, cron, webhook and api triggers. */
       readonly triggers?: RuntimeTriggerHttpServices;
       /** External clients: tokens issued locally, then used instead of a browser session. */
@@ -234,6 +241,10 @@ export class RuntimeHttpServer {
     this.memoryServices = services.memories;
     this.modelServices = services.models;
     this.setupServices = services.setup;
+    this.connectionHandler =
+      services.connections === undefined
+        ? undefined
+        : createConnectionHttpHandler(services.connections);
     this.triggerServices = services.triggers;
     this.clientServices = services.clients;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
@@ -406,6 +417,17 @@ export class RuntimeHttpServer {
             writeRuntimeApiError(response, error);
           },
         );
+        return;
+      }
+      if (isConnectionHttpPath(url.pathname)) {
+        const handle = this.connectionHandler;
+        if (handle === undefined) {
+          writeJson(response, 503, { error: { code: "CONNECTION_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void handle(request, response, url, this.security).catch((error: unknown) => {
+          writeRuntimeApiError(response, error);
+        });
         return;
       }
       if (isSetupHttpPath(url.pathname)) {

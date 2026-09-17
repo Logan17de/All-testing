@@ -850,6 +850,33 @@ button.timeline__row:focus-visible {
   font-size: 0.85rem;
 }
 
+.modelMode {
+  margin-bottom: 0.75rem;
+}
+
+/* Signing in to a provider instead of pasting a key */
+.signIn {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.signIn__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.folderPicker__item code {
+  overflow-wrap: anywhere;
+}
+
+.folderPicker__item--picked {
+  background: #1f2a3a;
+  outline: 1px solid #3b82f6;
+}
+
 .modelCheck--ok {
   color: #6ee7a0;
 }

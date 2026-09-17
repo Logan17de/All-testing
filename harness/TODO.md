@@ -349,6 +349,14 @@ files), then for a model. The choice is kept in the database (migration 21, `app
 takes effect without a restart; new projects start in the workspace unless they name their own
 folder, and a whole drive is refused as a workspace.
 
+**Signing in to a model provider:** the Models page offers **API key** or **Sign in (OAuth)**. API
+keys have presets for OpenAI, Anthropic, Google Gemini, xAI and OpenRouter. Sign-in uses
+OpenRouter's OAuth PKCE flow — the only one of these providers that lets other apps sign in — and
+then picks any of its tool-capable models. The key is stored once (migration 22,
+`provider_connections`), shared by every model that uses the sign-in, sent only to OpenRouter and
+never shown; signing out leaves those models configured but keyless. Verified against a stand-in
+OpenRouter, not the real site. See `PHASE-6.6-6.11.md`.
+
 **Workflows and components:** a conversation can now be answered by a ready-made workflow —
 **Chat**, or **Chat with GitHub** — chosen on the chat page and run like any other graph; the editor
 opens the exact graph a conversation uses. GitHub is a first-party plugin that reads repositories,

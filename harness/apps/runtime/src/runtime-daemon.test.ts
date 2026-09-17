@@ -56,6 +56,7 @@ describe("RuntimeDaemon", () => {
       { version: 19, name: "durable_client_sessions" },
       { version: 20, name: "durable_model_configs" },
       { version: 21, name: "durable_app_settings" },
+      { version: 22, name: "durable_model_connections" },
     ]);
   });
 
@@ -107,10 +108,10 @@ describe("RuntimeDaemon", () => {
           query: "ok",
           migrations: {
             status: "ok",
-            appliedCount: 21,
-            expectedCount: 21,
-            appliedVersion: 21,
-            expectedVersion: 21,
+            appliedCount: 22,
+            expectedCount: 22,
+            appliedVersion: 22,
+            expectedVersion: 22,
           },
         },
       },

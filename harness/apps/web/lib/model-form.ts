@@ -6,10 +6,22 @@
  * starts from sensible values instead of an empty form.
  */
 
-export const MODEL_PROFILES = ["openai", "ollama", "llama-cpp", "custom"] as const;
+export const MODEL_PROFILES = [
+  "openai",
+  "anthropic",
+  "gemini",
+  "xai",
+  "openrouter",
+  "ollama",
+  "llama-cpp",
+  "custom",
+] as const;
 export type ModelProfile = (typeof MODEL_PROFILES)[number];
 
-export type ModelCredential = "none" | "stored" | "environment";
+export type ModelCredential = "none" | "stored" | "environment" | "connection";
+
+/** The providers a person can sign in to instead of pasting a key. */
+export type ModelConnection = "openrouter";
 
 export interface ModelView {
   readonly modelId: string;
@@ -19,6 +31,8 @@ export interface ModelView {
   readonly model: string;
   readonly credential: ModelCredential;
   readonly credentialEnv: string | null;
+  /** Which sign-in supplies the key, when the credential is a sign-in. */
+  readonly connection?: ModelConnection | null;
   readonly tools: boolean;
   readonly streaming: boolean;
   readonly contextWindowTokens: number;
@@ -46,6 +60,42 @@ export const MODEL_PRESETS: Readonly<Record<ModelProfile, ModelPreset>> = {
     credentialEnv: "OPENAI_API_KEY",
     modelPlaceholder: "gpt-4o-mini",
     contextWindowTokens: 128_000,
+  },
+  anthropic: {
+    label: "Anthropic (Claude)",
+    hint: "Claude through Anthropic's OpenAI-compatible API. It needs an API key from the Anthropic Console.",
+    baseUrl: "https://api.anthropic.com/v1",
+    credential: "stored",
+    credentialEnv: "ANTHROPIC_API_KEY",
+    modelPlaceholder: "claude-sonnet-5",
+    contextWindowTokens: 200_000,
+  },
+  gemini: {
+    label: "Google Gemini",
+    hint: "Gemini through Google's OpenAI-compatible API. It needs an API key from Google AI Studio.",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    credential: "stored",
+    credentialEnv: "GEMINI_API_KEY",
+    modelPlaceholder: "gemini-2.5-flash",
+    contextWindowTokens: 1_000_000,
+  },
+  xai: {
+    label: "xAI (Grok)",
+    hint: "Grok through xAI's API. It needs an API key from the xAI Console.",
+    baseUrl: "https://api.x.ai/v1",
+    credential: "stored",
+    credentialEnv: "XAI_API_KEY",
+    modelPlaceholder: "grok-4",
+    contextWindowTokens: 256_000,
+  },
+  openrouter: {
+    label: "OpenRouter",
+    hint: "One key for models from OpenAI, Anthropic, Google, xAI and more. You can also sign in instead of pasting a key.",
+    baseUrl: "https://openrouter.ai/api/v1",
+    credential: "stored",
+    credentialEnv: "OPENROUTER_API_KEY",
+    modelPlaceholder: "anthropic/claude-sonnet-4",
+    contextWindowTokens: 200_000,
   },
   ollama: {
     label: "Ollama",
@@ -86,6 +136,8 @@ export interface ModelDraft {
   /** Typed only when adding a key, or replacing one; empty keeps a stored key on edit. */
   readonly apiKey: string;
   readonly credentialEnv: string;
+  /** The sign-in that supplies the key; empty unless the credential is a sign-in. */
+  readonly connection: ModelConnection | "";
   readonly tools: boolean;
   readonly contextWindowTokens: string;
 }
@@ -101,8 +153,20 @@ export function draftFor(profile: ModelProfile): ModelDraft {
     credential: preset.credential,
     apiKey: "",
     credentialEnv: preset.credentialEnv,
+    connection: "",
     tools: true,
     contextWindowTokens: String(preset.contextWindowTokens),
+  };
+}
+
+/** A model reached through the OpenRouter sign-in, at the address the runtime reports. */
+export function draftForSignIn(apiBaseUrl: string): ModelDraft {
+  return {
+    ...draftFor("openrouter"),
+    baseUrl: apiBaseUrl,
+    credential: "connection",
+    credentialEnv: "",
+    connection: "openrouter",
   };
 }
 
@@ -117,6 +181,7 @@ export function draftFromModel(model: ModelView): ModelDraft {
     credential: model.credential,
     apiKey: "",
     credentialEnv: model.credentialEnv ?? "",
+    connection: model.connection ?? "",
     tools: model.tools,
     contextWindowTokens: String(model.contextWindowTokens),
   };
@@ -192,6 +257,9 @@ export function checkModelDraft(draft: ModelDraft, editing: boolean): ModelDraft
   if (draft.credential === "environment" && !ENV_NAME.test(env)) {
     return { ok: false, reason: "Name the environment variable that holds the key." };
   }
+  if (draft.credential === "connection" && draft.connection === "") {
+    return { ok: false, reason: "Sign in first, then pick a model." };
+  }
 
   const title = draft.title.trim();
   return {
@@ -205,6 +273,7 @@ export function checkModelDraft(draft: ModelDraft, editing: boolean): ModelDraft
       credential: draft.credential,
       ...(draft.credential === "stored" && key.length > 0 ? { apiKey: key } : {}),
       ...(draft.credential === "environment" ? { credentialEnv: env } : {}),
+      ...(draft.credential === "connection" ? { connection: draft.connection } : {}),
       tools: draft.tools,
       contextWindowTokens,
     },
@@ -256,7 +325,7 @@ function httpReason(status: number): string {
 
 const CHECK_REASONS: Readonly<Record<string, string>> = {
   MODEL_CREDENTIAL_UNAVAILABLE:
-    "No key was available: store one, or set the environment variable and restart the runtime.",
+    "No key was available: store one, sign in again, or set the environment variable and restart the runtime.",
   MODEL_NETWORK_ERROR: "The endpoint could not be reached. Is the server running at that URL?",
   MODEL_TIMEOUT: "The endpoint took too long to answer.",
   MODEL_RESPONSE_INVALID: "Something answered, but not in the Chat Completions format.",

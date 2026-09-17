@@ -79,6 +79,10 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
   instead of showing internal names like `harness.agent-model`.
 - **Also just finished:** first-run setup. A new harness asks for its workspace folder before
   anything else, then for a model; new projects start in that folder (migration 21).
+- **Also just finished:** API key or sign-in on the Models page. Presets for OpenAI, Anthropic
+  (Claude), Google Gemini, xAI (Grok) and OpenRouter; **Sign in with OpenRouter** (OAuth PKCE)
+  reaches all of them without a key, and its key is only ever sent to OpenRouter (migration 22).
+  Codex, Claude Code, Gemini CLI and Grok sign-ins are kept by those providers for their own apps.
 - **Next:** 6.12 needs only a real Ollama or llama.cpp run through the Models page; then the
   optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),

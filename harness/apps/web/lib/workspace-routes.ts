@@ -23,6 +23,8 @@ const ALLOWED_PATHS: readonly RegExp[] = [
   /^workflows$/u,
   /^setup(\/(workspace|folders))?$/u,
   /^workflows\/(chat|chat-github)$/u,
+  /^connections$/u,
+  /^connections\/openrouter\/(start|complete|sign-out|models)$/u,
 ];
 
 const ALLOWED_QUERY_KEYS: ReadonlySet<string> = new Set([

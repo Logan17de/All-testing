@@ -192,6 +192,13 @@ export function fetchModels(): Promise<RuntimeFetch<{ readonly models: readonly 
   return readRuntime<{ readonly models: readonly unknown[] }>("/api/models");
 }
 
+/** Which providers a person has signed in to; keys are never part of this answer. */
+export function fetchConnections(): Promise<
+  RuntimeFetch<{ readonly connections: readonly unknown[] }>
+> {
+  return readRuntime<{ readonly connections: readonly unknown[] }>("/api/connections");
+}
+
 export interface SetupStatus {
   readonly workspace: { readonly path: string; readonly exists: boolean } | null;
   readonly modelsConfigured: number;

@@ -125,8 +125,43 @@ server reported as such, and a model removed.
 
 6.12 is still unchecked for the reason above: every endpoint in those checks was a fixture. The
 difference now is that proving it takes a person with Ollama or llama.cpp one form and one **Check**.
-Signing in with a provider account (OAuth) is not offered; the providers these profiles cover give
-API access through keys.
+
+### Signing in instead of pasting a key
+
+Profiles now also cover Anthropic, Google Gemini, xAI and OpenRouter, each at its
+OpenAI-compatible address, and a model's key can come from a sign-in.
+
+- **Why OpenRouter.** OpenAI, Anthropic, Google and xAI keep their account sign-ins (Codex, Claude
+  Code, Gemini CLI, Grok) for their own apps, so a third-party harness cannot use them. OpenRouter
+  publishes an OAuth PKCE flow for apps, and one sign-in reaches all of those models.
+- **Migration 22** adds `provider_connections` (one row per provider, holding the issued key) and
+  rebuilds `model_configs` with the new profiles, a `connection` credential and a `connection`
+  column, keeping every existing row and the identity trigger. A model whose credential is
+  `connection` reads the key from that row at request time, so signing in again takes effect
+  without re-registering anything, and signing out leaves the model configured but keyless.
+- **The flow.** `POST /api/connections/openrouter/start` accepts only a loopback callback, keeps a
+  random verifier in memory for ten minutes and answers with OpenRouter's authorize URL (S256
+  challenge, `key_label=Zet Harness`). `POST .../complete` spends that verifier on the first
+  attempt, exchanges the code at `/api/v1/auth/keys`, registers the key with the redactor and
+  stores it. `POST .../sign-out` deletes it. `GET /api/connections` reports whether a sign-in
+  exists, how many models use it and the one address those models may call — never the key.
+  `GET .../models` lists OpenRouter's models that support tools, cached for ten minutes.
+- **The key stays with its provider.** Saving a model that uses the OpenRouter sign-in is refused
+  unless its endpoint has OpenRouter's origin. `OPENROUTER_URL` moves that origin for tests.
+- **The page.** `/models` offers **API key** or **Sign in (OAuth)**. Signing in goes to OpenRouter
+  and back to `/models/openrouter`, which hands the code over once, removes it from the address
+  bar and returns to the model picker (search plus maker filters). Cards say whether a
+  sign-in model currently has its key.
+
+Covered by `durable-model-records.test.ts` (reading a key through a sign-in, losing it on sign-out,
+upgrading a version-20 database), `runtime-connection-http.test.ts` against a stand-in OpenRouter
+that checks the PKCE proof (a key only for the right verifier, a model check sending it, refusals
+for foreign callbacks, unstarted and reused codes, and a model pointed elsewhere), and
+`sign-in.test.ts`, `model-form.test.ts` and `workspace-routes.test.ts` on the web side. Checked in
+the browser against the same kind of stand-in, not the real openrouter.ai: signing in and coming
+back, picking a model by maker, save and check, a chat reply answered through that model with the
+key absent from the run, editing, signing out (the card then says it needs the sign-in and the
+check says no key is available), signing in again, a cancelled sign-in and a forged code.
 
 ## Verification
 

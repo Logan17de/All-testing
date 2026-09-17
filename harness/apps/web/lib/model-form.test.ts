@@ -4,6 +4,7 @@ import {
   checkModelDraft,
   describeCheck,
   draftFor,
+  draftForSignIn,
   draftFromModel,
   suggestModelId,
   type ModelDraft,
@@ -99,6 +100,42 @@ describe("what the Models page sends", () => {
     expect(reason({ credential: "environment", credentialEnv: "" })).toBe(
       "Name the environment variable that holds the key.",
     );
+  });
+
+  it("sends which sign-in supplies the key, and only once there is one", () => {
+    const signedIn = {
+      ...draftForSignIn("https://openrouter.ai/api/v1"),
+      modelId: "claude",
+      model: "anthropic/claude-sonnet-4",
+    };
+    expect(checkModelDraft(signedIn, false)).toMatchObject({
+      ok: true,
+      request: {
+        profile: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        credential: "connection",
+        connection: "openrouter",
+      },
+    });
+    const request = checkModelDraft(signedIn, false);
+    expect(request.ok && "apiKey" in request.request).toBe(false);
+    expect(checkModelDraft({ ...signedIn, connection: "" }, false)).toEqual({
+      ok: false,
+      reason: "Sign in first, then pick a model.",
+    });
+  });
+
+  it("knows where the hosted providers' compatible APIs live", () => {
+    expect(draftFor("anthropic")).toMatchObject({
+      baseUrl: "https://api.anthropic.com/v1",
+      credential: "stored",
+      credentialEnv: "ANTHROPIC_API_KEY",
+    });
+    expect(draftFor("gemini").baseUrl).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+    );
+    expect(draftFor("xai").baseUrl).toBe("https://api.x.ai/v1");
+    expect(draftFor("openrouter").baseUrl).toBe("https://openrouter.ai/api/v1");
   });
 
   it("starts an edit from what is configured, without the key", () => {

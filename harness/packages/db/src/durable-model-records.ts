@@ -11,12 +11,37 @@ export const MODEL_TITLE_MAX_LENGTH = 120;
  * Chat Completions to all of them and a profile only records where a particular
  * server differs. `custom` is any other conforming endpoint.
  */
-export const MODEL_PROFILES = ["openai", "ollama", "llama-cpp", "custom"] as const;
+export const MODEL_PROFILES = [
+  "openai",
+  "anthropic",
+  "gemini",
+  "xai",
+  "openrouter",
+  "ollama",
+  "llama-cpp",
+  "custom",
+] as const;
 export type DurableModelProfile = (typeof MODEL_PROFILES)[number];
 
-/** Where a model's key comes from, when it needs one at all. */
-export const MODEL_CREDENTIALS = ["none", "stored", "environment"] as const;
+/**
+ * Where a model's key comes from, when it needs one at all: nowhere, a key stored
+ * here, an environment variable, or a provider the person signed in to.
+ */
+export const MODEL_CREDENTIALS = ["none", "stored", "environment", "connection"] as const;
 export type DurableModelCredential = (typeof MODEL_CREDENTIALS)[number];
+
+export const PROVIDER_CONNECTIONS_TABLE = "provider_connections" as const;
+
+/** Providers a person can sign in to rather than paste a key for. */
+export const PROVIDER_CONNECTION_IDS = ["openrouter"] as const;
+export type ProviderConnectionId = (typeof PROVIDER_CONNECTION_IDS)[number];
+
+/** A provider sign-in. The secret it produced is never part of this record. */
+export interface DurableProviderConnection {
+  readonly provider: ProviderConnectionId;
+  readonly method: "oauth";
+  readonly connectedAtMs: number;
+}
 
 /**
  * A model this harness can call.
@@ -37,6 +62,8 @@ export interface DurableModelRecord {
   readonly credential: DurableModelCredential;
   /** The environment variable holding the key, when the credential is an environment one. */
   readonly credentialEnv: string | null;
+  /** The provider sign-in the key comes from, when the credential is a connection. */
+  readonly connection: ProviderConnectionId | null;
   readonly tools: boolean;
   readonly streaming: boolean;
   readonly contextWindowTokens: number;
@@ -67,6 +94,72 @@ CREATE TABLE ${MODEL_CONFIGS_TABLE} (
   CHECK (credential != 'environment' OR (credential_env IS NOT NULL AND api_key IS NULL)),
   CHECK (credential != 'none' OR (api_key IS NULL AND credential_env IS NULL))
 ) STRICT;
+
+CREATE TRIGGER model_configs_keep_their_identity
+BEFORE UPDATE OF model_id, created_at_ms ON ${MODEL_CONFIGS_TABLE}
+BEGIN
+  SELECT RAISE(ABORT, 'a model keeps its id and creation time');
+END;
+`,
+});
+
+/**
+ * Provider sign-ins, and model configurations that can read their key from one.
+ *
+ * SQLite cannot widen a CHECK in place, so `model_configs` is rebuilt with the new
+ * profiles and credential and every existing row is carried across unchanged.
+ * Signing out deletes a connection even while models still name it: those models
+ * then have no key until the person signs in again, which a check reports.
+ */
+export const DURABLE_MODEL_CONNECTIONS_MIGRATION: SqliteMigration = Object.freeze({
+  version: 22,
+  name: "durable_model_connections",
+  sql: `
+CREATE TABLE ${PROVIDER_CONNECTIONS_TABLE} (
+  provider TEXT PRIMARY KEY CHECK (provider IN ('openrouter')),
+  method TEXT NOT NULL CHECK (method IN ('oauth')),
+  secret TEXT NOT NULL CHECK (length(secret) BETWEEN 1 AND 4096),
+  connected_at_ms INTEGER NOT NULL CHECK (connected_at_ms >= 0)
+) STRICT;
+
+CREATE TABLE model_configs_next (
+  model_id TEXT PRIMARY KEY CHECK (length(model_id) BETWEEN 1 AND ${String(MODEL_ID_MAX_LENGTH)}),
+  title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND ${String(MODEL_TITLE_MAX_LENGTH)}),
+  profile TEXT NOT NULL CHECK (
+    profile IN ('openai', 'anthropic', 'gemini', 'xai', 'openrouter', 'ollama', 'llama-cpp', 'custom')
+  ),
+  base_url TEXT NOT NULL CHECK (length(base_url) BETWEEN 1 AND 2048),
+  model TEXT NOT NULL CHECK (length(model) BETWEEN 1 AND 200),
+  credential TEXT NOT NULL CHECK (credential IN ('none', 'stored', 'environment', 'connection')),
+  credential_env TEXT,
+  api_key TEXT,
+  connection TEXT CHECK (connection IS NULL OR connection IN ('openrouter')),
+  tools INTEGER NOT NULL CHECK (tools IN (0, 1)),
+  streaming INTEGER NOT NULL CHECK (streaming IN (0, 1)),
+  context_window_tokens INTEGER NOT NULL CHECK (context_window_tokens > 0),
+  created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+  updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+  CHECK (credential != 'stored' OR
+    (api_key IS NOT NULL AND credential_env IS NULL AND connection IS NULL)),
+  CHECK (credential != 'environment' OR
+    (credential_env IS NOT NULL AND api_key IS NULL AND connection IS NULL)),
+  CHECK (credential != 'connection' OR
+    (connection IS NOT NULL AND api_key IS NULL AND credential_env IS NULL)),
+  CHECK (credential != 'none' OR
+    (api_key IS NULL AND credential_env IS NULL AND connection IS NULL))
+) STRICT;
+
+INSERT INTO model_configs_next (
+  model_id, title, profile, base_url, model, credential, credential_env, api_key, connection,
+  tools, streaming, context_window_tokens, created_at_ms, updated_at_ms
+)
+SELECT
+  model_id, title, profile, base_url, model, credential, credential_env, api_key, NULL,
+  tools, streaming, context_window_tokens, created_at_ms, updated_at_ms
+FROM ${MODEL_CONFIGS_TABLE};
+
+DROP TABLE ${MODEL_CONFIGS_TABLE};
+ALTER TABLE model_configs_next RENAME TO ${MODEL_CONFIGS_TABLE};
 
 CREATE TRIGGER model_configs_keep_their_identity
 BEFORE UPDATE OF model_id, created_at_ms ON ${MODEL_CONFIGS_TABLE}
@@ -110,6 +203,8 @@ export interface SaveModelInput {
   /** Defaults to no credential at all, which is how a local endpoint usually runs. */
   readonly credential?: DurableModelCredential;
   readonly credentialEnv?: string | null;
+  /** The provider sign-in to read the key from, when the credential is a connection. */
+  readonly connection?: ProviderConnectionId | null;
   /** Plaintext, stored in this harness's own database; never returned by a read. */
   readonly apiKey?: string | null;
   readonly tools?: boolean;
@@ -189,6 +284,7 @@ function toModel(row: Record<string, unknown>): DurableModelRecord {
     model: row["model"] as string,
     credential: row["credential"] as DurableModelCredential,
     credentialEnv: (row["credential_env"] as string | null) ?? null,
+    connection: (row["connection"] as ProviderConnectionId | null) ?? null,
     tools: row["tools"] === 1,
     streaming: row["streaming"] === 1,
     contextWindowTokens: row["context_window_tokens"] as number,
@@ -225,6 +321,14 @@ function prepared(
   } else if (credentialEnv !== null) {
     invalid("Only a model reading its key from the environment names a variable.", "credentialEnv");
   }
+  const connectionId = input.connection ?? null;
+  if (credential === "connection") {
+    if (connectionId === null || !PROVIDER_CONNECTION_IDS.includes(connectionId)) {
+      invalid(`connection must be one of: ${PROVIDER_CONNECTION_IDS.join(", ")}.`, "connection");
+    }
+  } else if (connectionId !== null) {
+    invalid("Only a model using a sign-in names one.", "connection");
+  }
   const keyGiven = input.apiKey !== undefined && input.apiKey !== null;
   const apiKey =
     credential === "stored"
@@ -249,6 +353,7 @@ function prepared(
       model: checkText("model", input.model, 200),
       credential,
       credentialEnv,
+      connection: connectionId,
       tools: input.tools ?? true,
       streaming: input.streaming ?? false,
       contextWindowTokens,
@@ -275,8 +380,8 @@ export function saveModelConfig(
     .prepare(
       `INSERT INTO ${MODEL_CONFIGS_TABLE} (
         model_id, title, profile, base_url, model, credential, credential_env, api_key,
-        tools, streaming, context_window_tokens, created_at_ms, updated_at_ms
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        connection, tools, streaming, context_window_tokens, created_at_ms, updated_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       record.modelId,
@@ -287,6 +392,7 @@ export function saveModelConfig(
       record.credential,
       record.credentialEnv,
       apiKey,
+      record.connection,
       record.tools ? 1 : 0,
       record.streaming ? 1 : 0,
       record.contextWindowTokens,
@@ -322,6 +428,7 @@ export function replaceModelConfig(
     .prepare(
       `UPDATE ${MODEL_CONFIGS_TABLE}
        SET title = ?, profile = ?, base_url = ?, model = ?, credential = ?, credential_env = ?,
+           connection = ?,
            api_key = CASE WHEN ? THEN ? ELSE api_key END,
            tools = ?, streaming = ?, context_window_tokens = ?, updated_at_ms = ?
        WHERE model_id = ?`,
@@ -333,6 +440,7 @@ export function replaceModelConfig(
       record.model,
       record.credential,
       record.credentialEnv,
+      record.connection,
       // A replace that names no key keeps the stored one, so editing an endpoint
       // does not ask someone to paste their key again.
       record.credential === "stored" && apiKey === null ? 0 : 1,
@@ -383,10 +491,68 @@ export function readModelApiKey(
   modelId: string,
 ): string | undefined {
   const row = connection
-    .prepare(`SELECT api_key AS key FROM ${MODEL_CONFIGS_TABLE} WHERE model_id = ?`)
+    .prepare(
+      `SELECT COALESCE(m.api_key, p.secret) AS key
+       FROM ${MODEL_CONFIGS_TABLE} AS m
+       LEFT JOIN ${PROVIDER_CONNECTIONS_TABLE} AS p
+         ON m.credential = 'connection' AND p.provider = m.connection
+       WHERE m.model_id = ?`,
+    )
     .get(modelId);
   const key = row?.["key"];
   return typeof key === "string" && key.length > 0 ? key : undefined;
+}
+
+/** Record a provider sign-in, replacing an earlier one for the same provider. */
+export function saveProviderConnection(
+  connection: ModelStatementRunner,
+  provider: ProviderConnectionId,
+  secret: string,
+  nowMs: number,
+): DurableProviderConnection {
+  if (!PROVIDER_CONNECTION_IDS.includes(provider)) {
+    invalid(`provider must be one of: ${PROVIDER_CONNECTION_IDS.join(", ")}.`, "provider");
+  }
+  const key = checkKey(secret);
+  const at = checkTime(nowMs);
+  connection
+    .prepare(
+      `INSERT INTO ${PROVIDER_CONNECTIONS_TABLE} (provider, method, secret, connected_at_ms)
+       VALUES (?, 'oauth', ?, ?)
+       ON CONFLICT(provider) DO UPDATE SET secret = excluded.secret,
+         connected_at_ms = excluded.connected_at_ms`,
+    )
+    .run(provider, key, at);
+  return Object.freeze({ provider, method: "oauth", connectedAtMs: at });
+}
+
+/** A provider sign-in, without its secret, if there is one. */
+export function readProviderConnection(
+  connection: ModelStatementRunner,
+  provider: ProviderConnectionId,
+): DurableProviderConnection | undefined {
+  const row = connection
+    .prepare(
+      `SELECT provider, method, connected_at_ms FROM ${PROVIDER_CONNECTIONS_TABLE}
+       WHERE provider = ?`,
+    )
+    .get(provider);
+  if (row === undefined) return undefined;
+  return Object.freeze({
+    provider,
+    method: "oauth",
+    connectedAtMs: row["connected_at_ms"] as number,
+  });
+}
+
+/** Sign out of a provider. Models that used it keep their configuration but have no key. */
+export function deleteProviderConnection(
+  connection: ModelStatementRunner,
+  provider: ProviderConnectionId,
+): boolean {
+  if (readProviderConnection(connection, provider) === undefined) return false;
+  connection.prepare(`DELETE FROM ${PROVIDER_CONNECTIONS_TABLE} WHERE provider = ?`).run(provider);
+  return true;
 }
 
 /** Forget a configured model. Runs that already used it keep their own records. */

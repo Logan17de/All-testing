@@ -5,6 +5,7 @@ import {
   DurableModelError,
   MODEL_CREDENTIALS,
   MODEL_PROFILES,
+  PROVIDER_CONNECTION_IDS,
   deleteModelConfig,
   listModelConfigs,
   readModelConfig,
@@ -13,6 +14,7 @@ import {
   type DurableModelCredential,
   type DurableModelErrorCode,
   type DurableModelProfile,
+  type ProviderConnectionId,
 } from "@zet-harness/db/durable-model-records";
 
 import { RuntimeApiSecurityError, type RuntimeApiSecurity } from "./runtime-api-security.js";
@@ -39,6 +41,11 @@ export interface RuntimeModelHttpServices {
   readonly remove?: (modelId: string) => void;
   /** Ask a model to answer, which proves the endpoint, the key and the model name. */
   readonly check?: (modelId: string) => Promise<ModelCheckResult>;
+  /**
+   * The only origin each sign-in's key may be sent to. A model that uses a sign-in
+   * must point there: the key belongs to that provider and to nobody else.
+   */
+  readonly connectionOrigins?: Readonly<Partial<Record<ProviderConnectionId, string>>>;
 }
 
 const MAX_MODEL_BODY_BYTES = 16_384;
@@ -53,6 +60,7 @@ const MODEL_FIELDS: readonly string[] = [
   "model",
   "credential",
   "credentialEnv",
+  "connection",
   "apiKey",
   "tools",
   "streaming",
@@ -187,12 +195,46 @@ function contextWindowOf(body: Record<string, unknown>): number {
   return value;
 }
 
+function checkConnectionOrigin(
+  body: Record<string, unknown>,
+  origins: Readonly<Partial<Record<ProviderConnectionId, string>>>,
+): void {
+  const connection = body["connection"];
+  if (body["credential"] !== "connection" || typeof connection !== "string") return;
+  const origin = origins[connection as ProviderConnectionId];
+  let target: string | undefined;
+  try {
+    target = typeof body["baseUrl"] === "string" ? new URL(body["baseUrl"]).origin : undefined;
+  } catch {
+    target = undefined;
+  }
+  if (origin === undefined || target !== origin) {
+    throw invalidRequest(
+      `A model that uses the ${connection} sign-in must call ${origin ?? "that provider"}.`,
+      "baseUrl",
+    );
+  }
+}
+
 function saveInput(
   body: Record<string, unknown>,
   modelId: string,
   nowMs: number,
+  origins: Readonly<Partial<Record<ProviderConnectionId, string>>>,
 ): Parameters<typeof saveModelConfig>[1] {
   const credential = credentialOf(body);
+  const connection = body["connection"];
+  if (
+    connection !== undefined &&
+    connection !== null &&
+    !(PROVIDER_CONNECTION_IDS as readonly unknown[]).includes(connection)
+  ) {
+    throw invalidRequest(
+      `connection must be one of: ${PROVIDER_CONNECTION_IDS.join(", ")}.`,
+      "connection",
+    );
+  }
+  checkConnectionOrigin(body, origins);
   const credentialEnv = body["credentialEnv"];
   if (credentialEnv !== undefined && credentialEnv !== null && typeof credentialEnv !== "string") {
     throw invalidRequest("credentialEnv must be text.", "credentialEnv");
@@ -211,6 +253,7 @@ function saveInput(
     model: requiredString(body, "model"),
     ...(credential === undefined ? {} : { credential }),
     ...(credentialEnv === undefined ? {} : { credentialEnv }),
+    ...(connection === undefined ? {} : { connection: connection as ProviderConnectionId | null }),
     ...(apiKey === undefined ? {} : { apiKey }),
     ...(tools === undefined ? {} : { tools }),
     ...(streaming === undefined ? {} : { streaming }),
@@ -240,6 +283,7 @@ export async function handleModelHttp(
 ): Promise<void> {
   const now = services.now ?? (() => Date.now());
   const database = services.database;
+  const origins = services.connectionOrigins ?? {};
   try {
     if (MODELS_PATH.test(url.pathname)) {
       if (request.method === "GET") {
@@ -255,7 +299,7 @@ export async function handleModelHttp(
       onlyFields(body);
       const modelId = requiredString(body, "modelId");
       const model = await database.commit((connection) =>
-        saveModelConfig(connection, saveInput(body, modelId, now())),
+        saveModelConfig(connection, saveInput(body, modelId, now(), origins)),
       );
       services.refresh?.(model.modelId);
       writeRuntimeJson(response, 201, { model });
@@ -314,7 +358,7 @@ export async function handleModelHttp(
       throw invalidRequest("A model keeps its id.", "modelId");
     }
     const model = await database.commit((connection) =>
-      replaceModelConfig(connection, saveInput(body, modelId, now())),
+      replaceModelConfig(connection, saveInput(body, modelId, now(), origins)),
     );
     services.refresh?.(model.modelId);
     writeRuntimeJson(response, 200, { model });
