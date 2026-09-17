@@ -70,6 +70,9 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
   the environment, checks it, and agent steps can use it straight away (migration 20).
 - **Also just finished:** the editor no longer marks a half-drawn graph as wrong; pressing Run
   graph on an unfinished one is how you see what is missing.
+- **Also just finished:** `npm start` no longer leaves the runtime and Next.js running after it
+  stops on Windows, says which process holds a port it needs, and `npm start -- --restart`
+  replaces a harness that is already running.
 - **Next:** 6.12 needs only a real Ollama or llama.cpp run through the Models page; then the
   optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),

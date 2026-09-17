@@ -14,7 +14,20 @@ npm start
 ```
 
 That starts the runtime daemon and the web UI together. The UI is at `http://127.0.0.1:3000`; the
-daemon listens on `http://127.0.0.1:3211`. Both bind to loopback only. To run them separately:
+daemon listens on `http://127.0.0.1:3211`. Both bind to loopback only. **Ctrl+C** stops both, and
+closing the terminal does too.
+
+If the ports are already taken, `npm start` says by which process and whether it is a Zet Harness,
+and starts nothing. When it is an earlier harness you want to replace, run:
+
+```sh
+npm start -- --restart
+```
+
+which stops that harness first. It only ever stops a process that answers as this harness;
+anything else on those ports is reported, and left alone.
+
+To run them separately:
 
 ```sh
 npm run start --workspace @zet-harness/runtime

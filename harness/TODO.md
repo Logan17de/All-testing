@@ -382,6 +382,14 @@ first experience — and spawns npm's JavaScript entry through the current Node 
 `npm.cmd` cannot be spawned on Windows without a shell. If either half exits, the other is stopped
 rather than leaving a half-started system that looks healthy.
 
+Both servers are now started by Node directly rather than through npm. On Windows npm runs a script
+through `cmd.exe`, and a server cmd started outlived `npm start`: stopping it, or closing its
+terminal, left the runtime and Next.js holding ports 3211 and 3000, and the next `npm start` failed
+with "another next dev server is already running". A server Node starts itself ends with it, a
+shutdown stops each whole process tree, and `npm start` now checks its ports first — naming the
+process that holds one, saying whether it is a Zet Harness, and offering `npm start -- --restart`
+to replace one. The runtime still runs from `apps/runtime`, so its data stays where it was.
+
 
 **Versions and diffs:** 11.5 compares two stored revisions of a graph and says what changed —
 nodes added, removed or changed (including a node whose version moved), edges added, removed or
