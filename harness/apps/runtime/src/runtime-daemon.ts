@@ -39,6 +39,7 @@ import { DURABLE_PROJECTS_MIGRATION } from "@zet-harness/db/durable-project-reco
 import {
   PluginHost,
   createAgentPlugin,
+  createBoxesPlugin,
   createControlFlowPlugin,
   createHumanApprovalPlugin,
   type CapabilityPermissionPolicy,
@@ -480,6 +481,8 @@ export class RuntimeDaemon {
         // The agent model and tools steps compile like any node; the agent
         // executor runs them with the run's own identity and records each step.
         await host.activate(createAgentPlugin());
+        // Text box, Model and Output box: text in, text out, no conversation needed.
+        await host.activate(createBoxesPlugin());
         // GitHub is a first-party component: a workflow uses it only by wiring it in.
         // Its token, when there is one, is read per request and never recorded.
         const githubToken = process.env["GITHUB_TOKEN"];

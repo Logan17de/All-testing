@@ -23,6 +23,13 @@ export type HarnessNodeData = {
   /** No enabled plugin provides this node type. */
   readonly unresolved?: boolean;
   readonly readOnly?: boolean;
+  /**
+   * What a box shows inside itself: the text typed into a Text box, editable
+   * when `onChange` is given, or the text that reached an Output box in a run.
+   */
+  readonly box?:
+    | { readonly kind: "text"; readonly value: string; readonly onChange?: (text: string) => void }
+    | { readonly kind: "output"; readonly value: string | undefined };
 };
 
 export type HarnessFlowNode = Node<HarnessNodeData, "harness">;
@@ -77,6 +84,7 @@ export function HarnessNode({ data, selected }: NodeProps<HarnessFlowNode>) {
       {data.unresolved === true ? (
         <p className="hnode__diag">No enabled plugin provides this node.</p>
       ) : null}
+      {data.box === undefined ? null : <BoxContent box={data.box} />}
       <div className="hnode__ports">
         <ul className="hnode__col">
           {data.inputs.map((port) => (
@@ -116,6 +124,38 @@ export function HarnessNode({ data, selected }: NodeProps<HarnessFlowNode>) {
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Inside a box. The text area is marked `nodrag` and `nowheel` so typing, selecting
+ * and scrolling stay in the box instead of moving or zooming the canvas.
+ */
+function BoxContent({ box }: { readonly box: NonNullable<HarnessNodeData["box"]> }) {
+  if (box.kind === "text") {
+    const { onChange } = box;
+    return (
+      <textarea
+        className="hnode__box nodrag nowheel"
+        aria-label="Text"
+        value={box.value}
+        rows={4}
+        maxLength={100_000}
+        readOnly={onChange === undefined}
+        placeholder={onChange === undefined ? "" : "Type the text to send…"}
+        onChange={(event) => {
+          onChange?.(event.target.value);
+        }}
+      />
+    );
+  }
+  return (
+    <pre
+      className={`hnode__box hnode__box--output nowheel${box.value === undefined ? " hnode__box--empty" : ""}`}
+      aria-label="Output"
+    >
+      {box.value ?? "Run the graph to see what arrives here."}
+    </pre>
   );
 }
 

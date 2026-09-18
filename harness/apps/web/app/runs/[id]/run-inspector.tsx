@@ -29,6 +29,7 @@ import {
   isInternalEvent,
   pluginLabel,
 } from "../../../lib/plain-words";
+import { OUTPUT_BOX_TYPE, TEXT_BOX_TYPE, recordedText, textBoxValue } from "../../../lib/boxes";
 import { describeFailure } from "../../../lib/failure-words";
 import { isRunReplayView, replayNodeStatuses, type RunReplayView } from "../../../lib/replay-view";
 import { harnessNodeTypes, type HarnessFlowNode } from "../../harness-node";
@@ -256,6 +257,20 @@ function Inspector({ runId }: { readonly runId: string }) {
   const replayNodeId =
     replay === null || replayIndex === null ? null : (replay.steps[replayIndex]?.nodeId ?? null);
 
+  // What reached each Output box: the text its latest finished attempt passed on.
+  const boxOutputs = useMemo(() => {
+    const shown = new Map<string, string>();
+    for (const state of run?.nodes ?? []) {
+      if (state.type !== OUTPUT_BOX_TYPE) continue;
+      const attempt = (run?.attempts ?? []).findLast(
+        (candidate) => candidate.opIndex === state.opIndex && candidate.status === "completed",
+      );
+      const text = attempt === undefined ? undefined : recordedText(attempt.outputs);
+      if (text !== undefined) shown.set(state.nodeId, text);
+    }
+    return shown;
+  }, [run]);
+
   const flowNodes = useMemo<HarnessFlowNode[]>(
     () =>
       (graph?.nodes ?? []).map((node, index) => {
@@ -287,10 +302,24 @@ function Inspector({ runId }: { readonly runId: string }) {
             isolated: entry?.isolated ?? false,
             readOnly: true,
             ...(state?.status === undefined ? {} : { status: state.status }),
+            ...(node.type === TEXT_BOX_TYPE
+              ? { box: { kind: "text" as const, value: textBoxValue(node.config) } }
+              : node.type === OUTPUT_BOX_TYPE
+                ? { box: { kind: "output" as const, value: boxOutputs.get(node.id) } }
+                : {}),
           },
         };
       }),
-    [graph, palette, stateByNode, selectedNodeId, measured, replayStatuses, replayNodeId],
+    [
+      graph,
+      palette,
+      stateByNode,
+      selectedNodeId,
+      measured,
+      replayStatuses,
+      replayNodeId,
+      boxOutputs,
+    ],
   );
 
   const onNodesChange = useCallback((changes: NodeChange<HarnessFlowNode>[]) => {

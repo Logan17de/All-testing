@@ -250,6 +250,22 @@ shows. One component can feed each step for now.
 Open `http://127.0.0.1:3000/editor`. The palette lists every node your enabled plugins registered,
 plus the built-in **Human approval** node, which any graph can use to pause for a person.
 
+### Boxes: text in, text out
+
+The first three nodes in the palette are the simplest way to use a model, with no project or
+conversation involved:
+
+- **Text box** — type into the box on the canvas. Its `text` output carries what you typed.
+- **Model** — sends whatever reaches its `prompt` to a model and puts the answer on its `text`
+  output. Leave **Model id** empty to use any connected model, or name one from the Models page;
+  **Instructions** are sent ahead of the prompt.
+- **Output box** — shows the text that reaches it. Press **Run graph** and the run's page shows the
+  answer inside the box.
+
+Every one of these ports carries text, so they connect any way that reads sensibly: a Text box
+into a Model, a Model into an Output box, or one Model's `text` into another Model's `prompt` to
+chain them. A Model given an empty prompt stops with "A model was given no text".
+
 - Drag a node onto the canvas, or click it to add it. Connect an output handle to an input handle.
   An input nothing feeds can take a typed value in the inspector.
 - The compiler checks the graph in the background while you build, and the status line says

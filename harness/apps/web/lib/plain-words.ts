@@ -40,6 +40,7 @@ export function fieldLabel(key: string): string {
 
 const PLUGIN_LABELS: Readonly<Record<string, string>> = {
   "harness.agent-plugin": "Agent",
+  "harness.boxes-plugin": "Boxes",
   "harness.control-flow-plugin": "Control flow",
   "harness.human-approval-plugin": "People",
   "harness.github-plugin": "GitHub",

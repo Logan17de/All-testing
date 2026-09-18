@@ -203,6 +203,7 @@ const AGENT_FAILURE_CODES: ReadonlySet<string> = new Set([
   "AGENT_NO_MODEL",
   "AGENT_PROJECT_BUSY",
   "AGENT_BUDGET_EXCEEDED",
+  "AGENT_INPUT_MISSING",
 ]);
 
 /**

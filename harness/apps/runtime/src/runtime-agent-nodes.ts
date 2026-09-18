@@ -1,6 +1,7 @@
 import {
   AGENT_MODEL_NODE_TYPE,
   AGENT_TOOLS_NODE_TYPE,
+  ASK_MODEL_NODE_TYPE,
   buildModelContext,
   contextBudgetForModel,
   routeModel,
@@ -64,7 +65,8 @@ export type AgentStepErrorCode =
   | "AGENT_CONVERSATION_NOT_FOUND"
   | "AGENT_NO_MODEL"
   | "AGENT_PROJECT_BUSY"
-  | "AGENT_BUDGET_EXCEEDED";
+  | "AGENT_BUDGET_EXCEEDED"
+  | "AGENT_INPUT_MISSING";
 
 export class AgentStepError extends Error {
   readonly code: AgentStepErrorCode;
@@ -902,8 +904,81 @@ export function createAgentNodeExecutor(
     return recorded(execution) ?? { outputs };
   };
 
+  /**
+   * One question to one model: the text on the prompt in, the model's text out.
+   *
+   * Nothing is written anywhere, so a retry simply asks again. The model is the
+   * one named, or any a person configured or a plugin was granted, exactly as for
+   * an agent step — but no tools are offered, so a model that cannot call them
+   * is as good as one that can.
+   */
+  const runAskModel = async (
+    execution: RuntimeNodeExecution,
+  ): Promise<RuntimeNodeExecutionResult> => {
+    const config = execution.operation.config;
+    const prompt = execution.inputs.find((input) => input.port === "prompt")?.value;
+    if (typeof prompt !== "string" || prompt.trim().length === 0) {
+      throw new AgentStepError(
+        "AGENT_INPUT_MISSING",
+        "The model was given no text: connect a Text box to its prompt.",
+      );
+    }
+    const instructions = stringConfig(config, "instructions");
+    const modelId = stringConfig(config, "modelId");
+    const maxOutputTokens = integerConfig(config, "maxOutputTokens");
+
+    const configured = options.configuredModels?.() ?? new Set<string>();
+    const decision = routeModel({
+      manifests: options.models
+        .listManifests()
+        .filter(
+          (manifest) => configured.has(manifest.id) || granted(manifest.requiredCapabilities),
+        ),
+      requirements: modelId === undefined ? {} : { modelId },
+    });
+    const manifest =
+      decision.selectedId === null || decision.selectedVersion === null
+        ? undefined
+        : options.models.getManifest(decision.selectedId, decision.selectedVersion);
+    const adapter =
+      manifest === undefined ? undefined : options.models.getAdapter(manifest.id, manifest.version);
+    if (manifest === undefined || adapter === undefined) {
+      throw new AgentStepError("AGENT_NO_MODEL", "No available model can answer this prompt.");
+    }
+
+    const result = await adapter.generate(
+      {
+        messages: [
+          ...(instructions === undefined || instructions.trim().length === 0
+            ? []
+            : [
+                { role: "system" as const, parts: [{ kind: "text" as const, text: instructions }] },
+              ]),
+          { role: "user", parts: [{ kind: "text", text: prompt }] },
+        ],
+        ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+      },
+      invocationContext(execution, execution.logicalEffectId, options.modelSecrets?.(manifest.id)),
+    );
+    execution.signal.throwIfAborted();
+
+    const text = result.message.parts
+      .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+      .join("");
+    return {
+      outputs: { text },
+      usage: {
+        model: { id: manifest.id, version: manifest.version },
+        selectionRule: decision.selectionRule,
+        finishReason: result.finishReason,
+        ...(result.usage === undefined ? {} : { provider: result.usage }),
+      },
+    };
+  };
+
   return (execution) => {
     const { type, version } = execution.operation;
+    if (version === "1" && type === ASK_MODEL_NODE_TYPE) return runAskModel(execution);
     if (version === "1" && type === AGENT_MODEL_NODE_TYPE) return runModelStep(execution);
     if (version === "1" && type === AGENT_TOOLS_NODE_TYPE) return runToolsStep(execution);
     return options.fallback(execution);

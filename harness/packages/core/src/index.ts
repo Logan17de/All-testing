@@ -107,3 +107,10 @@ export {
   AGENT_TOOLS_NODE_TYPE,
   createAgentPlugin,
 } from "./agent-plugin.js";
+export {
+  ASK_MODEL_NODE_TYPE,
+  BOXES_PLUGIN_ID,
+  OUTPUT_BOX_NODE_TYPE,
+  TEXT_BOX_NODE_TYPE,
+  createBoxesPlugin,
+} from "./boxes-plugin.js";

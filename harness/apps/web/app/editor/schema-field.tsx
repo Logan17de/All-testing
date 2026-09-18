@@ -108,6 +108,32 @@ export function SchemaField({
     );
   }
 
+  // Long text — instructions, a prompt, a Text box — gets room to be read.
+  const declared =
+    typeof schema === "object" ? (schema as Readonly<Record<string, unknown>>)["maxLength"] : 0;
+  const maxLength = typeof declared === "number" ? declared : 0;
+  if (type === "string" && maxLength >= 1_000) {
+    return (
+      <div className="field">
+        <label className="field__label" htmlFor={id}>
+          {labelText}
+        </label>
+        <textarea
+          id={id}
+          className="field__input"
+          rows={5}
+          maxLength={maxLength}
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => {
+            const raw = event.target.value;
+            onChange(raw === "" ? undefined : raw);
+          }}
+        />
+        {help}
+      </div>
+    );
+  }
+
   if (type === "string") {
     return (
       <div className="field">

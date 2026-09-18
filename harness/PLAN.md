@@ -89,6 +89,9 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
 - **Also just finished:** a failed run says why. A step's failure keeps the model's transport
   code and HTTP status, or the step's own code, and the chat and the run page turn that into a
   sentence; an endpoint's body and keys are still never recorded.
+- **Also just finished:** boxes. A Text box, a Model (prompt in, text out, no conversation) and
+  an Output box that shows the answer on the run's canvas; a Model's text can feed another
+  Model's prompt.
 - **Next:** 6.12 needs only a real Ollama or llama.cpp run through the Models page; then the
   optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),

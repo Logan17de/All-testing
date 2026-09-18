@@ -24,6 +24,8 @@ export const MODEL_FAILURE_REASONS: Readonly<Record<string, string>> = {
   AGENT_PROJECT_BUSY: "Another run is already working on this project.",
   AGENT_BUDGET_EXCEEDED: "The step reached the limit set for it.",
   AGENT_CONFIG_INVALID: "A step's settings are not valid; open the workflow in the editor.",
+  AGENT_INPUT_MISSING:
+    "A model was given no text: connect a Text box to its prompt, or type in it.",
   PERMISSION_DENIED: "A step asked for something it was not allowed to do.",
   RUNTIME_BUDGET_EXCEEDED: "The run reached the limit set for it.",
 };

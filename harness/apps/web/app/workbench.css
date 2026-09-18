@@ -343,6 +343,38 @@
   font-size: 0.72rem;
 }
 
+/* A box's own content: typed text in a Text box, what arrived in an Output box. */
+.hnode__box {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 14rem;
+  max-height: 14rem;
+  margin: 10px 0 0;
+  padding: 0.5rem 0.6rem;
+  background: #0d0d0d;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  border-radius: 0.4rem;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow: auto;
+  resize: vertical;
+  cursor: text;
+}
+
+.hnode__box--output {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  resize: none;
+}
+
+.hnode__box--empty {
+  color: #8a8a8a;
+  font-style: italic;
+}
+
 /* Control flow: handles above and below a node, drawn as dashed violet edges. */
 .hnode__ctl {
   display: flex;

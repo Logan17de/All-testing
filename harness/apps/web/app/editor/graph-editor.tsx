@@ -49,6 +49,7 @@ import {
   type JsonValue,
   type PaletteEntry,
 } from "../../lib/graph-document";
+import { OUTPUT_BOX_TYPE, TEXT_BOX_TYPE, orderPalette, textBoxValue } from "../../lib/boxes";
 import { harnessNodeTypes, type HarnessFlowNode } from "../harness-node";
 import { behaviourLabel, capabilityLabel, fieldLabel, pluginLabel } from "../../lib/plain-words";
 import { workspaceRequest } from "../../lib/workspace-client";
@@ -172,7 +173,7 @@ function EditorWorkspace() {
           typeof body === "object" && body !== null && "nodes" in body
             ? (body as { readonly nodes: unknown }).nodes
             : [];
-        setPalette(Array.isArray(nodes) ? (nodes as PaletteEntry[]) : []);
+        setPalette(Array.isArray(nodes) ? orderPalette(nodes as PaletteEntry[]) : []);
       })
       .catch(() => {
         if (cancelled) return;
@@ -349,6 +350,26 @@ function EditorWorkspace() {
             diagnostics: (nodeProblems.get(node.id) ?? []).map((problem) => problem.message),
             isolated: entry?.isolated ?? false,
             unresolved: palette !== null && entry === undefined,
+            ...(node.type === TEXT_BOX_TYPE
+              ? {
+                  box: {
+                    kind: "text" as const,
+                    value: textBoxValue(node.config),
+                    onChange: (text: string) => {
+                      setGraph((current) =>
+                        setConfigValue(
+                          current,
+                          node.id,
+                          "text",
+                          text.length === 0 ? undefined : text,
+                        ),
+                      );
+                    },
+                  },
+                }
+              : node.type === OUTPUT_BOX_TYPE
+                ? { box: { kind: "output" as const, value: undefined } }
+                : {}),
           },
         };
       }),

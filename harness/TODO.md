@@ -349,6 +349,15 @@ files), then for a model. The choice is kept in the database (migration 21, `app
 takes effect without a restart; new projects start in the workspace unless they name their own
 folder, and a whole drive is refused as a workspace.
 
+**Boxes — text in, text out:** a first-party plugin adds three nodes that need no project or
+conversation. **Text box** (typed into on the canvas) outputs its text; **Model** sends the text on
+its `prompt` to a model — the one named, or any a person configured or a plugin was granted — and
+outputs the answer, with optional instructions and a reply limit; **Output box** shows what
+reached it inside the node on the run's page, and passes it on. All their ports are the same text
+type, so Text box → Model → Model → Output box compiles and chains. The Model node is an external
+read (nothing is written, a retry asks again), and an empty prompt fails with its own code. Long
+text settings now get a multi-line field in the inspector.
+
 **Why a run failed:** an attempt's failure used to be a bare `RUNTIME_EXECUTION_FAILED`, which
 told a person nothing. It now carries a `cause` when one is safe to keep: a model transport code
 with the endpoint's HTTP status, or an agent step's own code, both written by this harness rather
