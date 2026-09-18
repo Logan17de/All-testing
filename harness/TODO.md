@@ -349,6 +349,13 @@ files), then for a model. The choice is kept in the database (migration 21, `app
 takes effect without a restart; new projects start in the workspace unless they name their own
 folder, and a whole drive is refused as a workspace.
 
+**Why a run failed:** an attempt's failure used to be a bare `RUNTIME_EXECUTION_FAILED`, which
+told a person nothing. It now carries a `cause` when one is safe to keep: a model transport code
+with the endpoint's HTTP status, or an agent step's own code, both written by this harness rather
+than quoted from a provider. Exception text, endpoint bodies and keys are still never recorded.
+The chat says the reason under the reply, and the run page shows it above the recorded failure,
+both from `failure-words.ts`, which the Models page's check now shares.
+
 **More than one workspace:** the overview leads with New project, Models and Plugins, and lists
 every folder the harness has worked in (migration 23, `workspaces`). Clicking one opens it and
 shows its projects; Projects lists the open folder's projects and links to the rest. Forgetting a

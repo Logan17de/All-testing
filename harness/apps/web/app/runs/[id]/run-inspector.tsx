@@ -29,6 +29,7 @@ import {
   isInternalEvent,
   pluginLabel,
 } from "../../../lib/plain-words";
+import { describeFailure } from "../../../lib/failure-words";
 import { isRunReplayView, replayNodeStatuses, type RunReplayView } from "../../../lib/replay-view";
 import { harnessNodeTypes, type HarnessFlowNode } from "../../harness-node";
 import { ApprovalCards } from "./approval-cards";
@@ -746,6 +747,9 @@ function NodeDetails({
             {attempt.error === null ? null : (
               <>
                 <h4 className="subTitle">Error</h4>
+                {describeFailure(attempt.error) === null ? null : (
+                  <p className="warn">{describeFailure(attempt.error)}</p>
+                )}
                 <pre className="codeBlock codeBlock--error">{pretty(attempt.error)}</pre>
               </>
             )}

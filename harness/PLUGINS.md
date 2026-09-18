@@ -225,7 +225,9 @@ Beside it, **Model** chooses which connected model answers this conversation —
 that conversation, and falls back to any available model if you later remove it.
 
 Pressing **Send** saves your message and starts the chosen workflow; the page shows "Thinking…"
-until the reply is in, with a link to watch the run. If no model is connected yet, the page says so
+until the reply is in, with a link to watch the run. If it does not finish, the page says why in
+the same words the Models page uses — a refused key, a 404 from the endpoint, no model that could
+take the step — and the run's own page repeats it above the recorded failure. If no model is connected yet, the page says so
 and links to **Models**. **Open this workflow in the editor** shows the exact graph that answers the
 conversation — a Loop around an **Agent model step** and an **Agent tools step**, plus the
 **GitHub** component when it is used — so you can change it and run your own version.

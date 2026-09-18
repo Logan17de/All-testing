@@ -17,6 +17,7 @@ import {
   type ReplyChoice,
   type WorkflowChoice,
 } from "../../../lib/chat-reply";
+import { describeFailure } from "../../../lib/failure-words";
 import { isModelView, type ModelView } from "../../../lib/model-form";
 import { modelLabel, toolLabel } from "../../../lib/plain-words";
 import { workspaceRequest } from "../../../lib/workspace-client";
@@ -94,14 +95,27 @@ interface ReplyState {
   readonly problem: string | null;
 }
 
-async function runStatus(runId: string): Promise<string | undefined> {
+/** Where a reply's run has got to, and what it said when it stopped. */
+async function runStatus(
+  runId: string,
+): Promise<{ readonly status: string; readonly reason: string | null } | undefined> {
   try {
     const response = await fetch(`/api/editor/runs/${encodeURIComponent(runId)}`, {
       cache: "no-store",
     });
     if (!response.ok) return undefined;
-    const body = (await response.json()) as { readonly run?: { readonly status?: unknown } };
-    return typeof body.run?.status === "string" ? body.run.status : undefined;
+    const body = (await response.json()) as {
+      readonly run?: {
+        readonly status?: unknown;
+        readonly attempts?: readonly { readonly error?: unknown }[];
+      };
+    };
+    if (typeof body.run?.status !== "string") return undefined;
+    const failed = (body.run.attempts ?? []).flatMap((attempt) => {
+      const said = describeFailure(attempt.error);
+      return said === null ? [] : [said];
+    });
+    return { status: body.run.status, reason: failed.at(-1) ?? null };
   } catch {
     return undefined;
   }
@@ -164,9 +178,13 @@ export function ConversationChat({ conversationId }: { readonly conversationId: 
     if (reply === null || reply.settled) return;
     let cancelled = false;
     const timer = window.setInterval(() => {
-      void runStatus(reply.runId).then((status) => {
-        if (cancelled || status === undefined || !runSettled(status)) return;
-        setReply({ runId: reply.runId, settled: true, problem: replyOutcome(status) });
+      void runStatus(reply.runId).then((run) => {
+        if (cancelled || run === undefined || !runSettled(run.status)) return;
+        setReply({
+          runId: reply.runId,
+          settled: true,
+          problem: replyOutcome(run.status, run.reason),
+        });
         setVersion((current) => current + 1);
       });
     }, 700);

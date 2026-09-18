@@ -17,6 +17,8 @@ import {
   type StructuredControlDelta,
 } from "@zet-harness/scheduler";
 
+import { ModelTransportError } from "@zet-harness/models";
+
 import type { RuntimeHumanApprovals, RuntimeApprovalAuthority } from "./runtime-human-approvals.js";
 import { assertRunBudget, loopEnteredAtMs, RuntimeBudgetExceededError } from "./runtime-budget.js";
 import { applyControlDelta, controlFrontierOf } from "./runtime-control-frontier.js";
@@ -82,6 +84,8 @@ export interface RuntimeDispatchReport {
     | "RUNTIME_BUDGET_EXCEEDED"
     | "RUNTIME_PLAN_IDENTITY_CHANGED"
     | "PERMISSION_DENIED";
+  /** What the step itself reported, when that is safe to repeat. */
+  readonly cause?: { readonly code: string; readonly status?: number };
 }
 
 function freeze<T>(value: T): T {
@@ -192,9 +196,48 @@ function restore(frontier: RecoveredExecutionFrontier): PlainDagRestoreState {
   };
 }
 
+/** Step failures whose code is written here, and so says nothing a provider sent. */
+const AGENT_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "AGENT_CONFIG_INVALID",
+  "AGENT_CONVERSATION_NOT_FOUND",
+  "AGENT_NO_MODEL",
+  "AGENT_PROJECT_BUSY",
+  "AGENT_BUDGET_EXCEEDED",
+]);
+
+/**
+ * Why an attempt failed, in the little that is safe to keep.
+ *
+ * A run record is read back by anyone who can open this harness, so a failure
+ * carries no exception text: an endpoint's body may quote a key, a prompt or
+ * somebody's data. Two kinds of error say enough on their own — a model
+ * transport error, which is a fixed code plus the endpoint's HTTP status, and an
+ * agent step's own code — and nothing else is recorded. Without this, a run that
+ * failed because a key was refused looked exactly like every other failure.
+ */
+function safeCause(
+  error: unknown,
+): { readonly code: string; readonly status?: number } | undefined {
+  if (error instanceof ModelTransportError) {
+    return { code: error.code, ...(error.status === undefined ? {} : { status: error.status }) };
+  }
+  if (
+    error instanceof Error &&
+    error.name === "AgentStepError" &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    AGENT_FAILURE_CODES.has(error.code)
+  ) {
+    return { code: error.code };
+  }
+  return undefined;
+}
+
 function safeFailure(error: unknown): {
   readonly code: "PERMISSION_DENIED" | "RUNTIME_BUDGET_EXCEEDED" | "RUNTIME_EXECUTION_FAILED";
+  readonly cause?: { readonly code: string; readonly status?: number };
 } {
+  const cause = safeCause(error);
   return {
     code:
       error instanceof InvocationPermissionDeniedError
@@ -202,6 +245,7 @@ function safeFailure(error: unknown): {
         : error instanceof RuntimeBudgetExceededError
           ? "RUNTIME_BUDGET_EXCEEDED"
           : "RUNTIME_EXECUTION_FAILED",
+    ...(cause === undefined ? {} : { cause }),
   };
 }
 

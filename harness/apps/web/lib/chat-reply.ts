@@ -81,8 +81,17 @@ export function runSettled(status: string): boolean {
   return SETTLED.has(status);
 }
 
-/** What to tell a person about a reply that has settled, or nothing when it simply finished. */
-export function replyOutcome(status: string): string | null {
+/**
+ * What to tell a person about a reply that has settled, or nothing when it
+ * simply finished. `reason` is what the run itself reported, when it said.
+ */
+export function replyOutcome(status: string, reason?: string | null): string | null {
+  const outcome = replyStatusText(status);
+  if (outcome === null) return null;
+  return reason === null || reason === undefined ? outcome : `${outcome} ${reason}`;
+}
+
+function replyStatusText(status: string): string | null {
   switch (status) {
     case "completed":
       return null;

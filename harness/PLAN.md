@@ -86,6 +86,9 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
 - **Also just finished:** more than one workspace. The overview leads with New project, Models
   and Plugins and lists every folder the harness has worked in; opening one shows its projects
   (migration 23). A conversation also chooses which connected model answers it.
+- **Also just finished:** a failed run says why. A step's failure keeps the model's transport
+  code and HTTP status, or the step's own code, and the chat and the run page turn that into a
+  sentence; an endpoint's body and keys are still never recorded.
 - **Next:** 6.12 needs only a real Ollama or llama.cpp run through the Models page; then the
   optional items 11.4 and 11.6-11.9, each gated on a need the plan names.
 - **Still open elsewhere:** 6.12 (needs a real local model endpoint), 10.10 (WASI plugins),

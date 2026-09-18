@@ -1,3 +1,5 @@
+import { failureReason } from "./failure-words";
+
 /**
  * What the Models page sends when someone connects a model.
  *
@@ -305,30 +307,5 @@ export function describeCheck(check: unknown): { readonly ok: boolean; readonly 
   }
   const code = typeof record["code"] === "string" ? record["code"] : "MODEL_CHECK_FAILED";
   const status = typeof record["status"] === "number" ? record["status"] : undefined;
-  if (code === "MODEL_HTTP_ERROR" && status !== undefined) {
-    return { ok: false, text: httpReason(status) };
-  }
-  return { ok: false, text: CHECK_REASONS[code] ?? `It did not answer (${code}).` };
+  return { ok: false, text: failureReason(code, status) ?? `It did not answer (${code}).` };
 }
-
-function httpReason(status: number): string {
-  if (status === 401 || status === 403)
-    return `The endpoint refused the key (HTTP ${String(status)}).`;
-  if (status === 404) {
-    return "The endpoint answered 404: check the URL ends where the API starts (often /v1), and the model name.";
-  }
-  if (status === 429)
-    return "The endpoint is rate limiting this key (HTTP 429). Try again shortly.";
-  if (status >= 500) return `The endpoint had a server error (HTTP ${String(status)}).`;
-  return `The endpoint refused the request (HTTP ${String(status)}); check the model name.`;
-}
-
-const CHECK_REASONS: Readonly<Record<string, string>> = {
-  MODEL_CREDENTIAL_UNAVAILABLE:
-    "No key was available: store one, sign in again, or set the environment variable and restart the runtime.",
-  MODEL_NETWORK_ERROR: "The endpoint could not be reached. Is the server running at that URL?",
-  MODEL_TIMEOUT: "The endpoint took too long to answer.",
-  MODEL_RESPONSE_INVALID: "Something answered, but not in the Chat Completions format.",
-  MODEL_CONFIGURATION_INVALID: "The runtime could not use this endpoint URL.",
-  MODEL_NOT_REGISTERED: "The runtime has not loaded this model yet. Restart the runtime.",
-};

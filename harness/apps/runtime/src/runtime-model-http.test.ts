@@ -25,7 +25,7 @@ interface Reply {
 }
 
 /** A tiny OpenAI-compatible endpoint that records what it was asked. */
-async function fakeEndpoint(): Promise<{
+async function fakeEndpoint(status = 200): Promise<{
   readonly baseUrl: string;
   readonly authorizations: string[];
 }> {
@@ -34,6 +34,12 @@ async function fakeEndpoint(): Promise<{
     authorizations.push(request.headers.authorization ?? "");
     request.resume();
     request.on("end", () => {
+      if (status !== 200) {
+        response.writeHead(status, { "content-type": "application/json" });
+        // A provider's refusal may quote the key back; none of it may be recorded.
+        response.end(JSON.stringify({ error: { message: "No auth credentials found: sk-wrong" } }));
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
@@ -88,6 +94,38 @@ async function startDaemon() {
     return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   };
   return { daemon, send };
+}
+
+/** One agent step answering a conversation with the configured model. */
+function chatGraph(conversationId: string) {
+  return {
+    schemaVersion: 1,
+    graphId: "chat",
+    revisionId: "rev-1",
+    inputs: [],
+    outputs: [{ id: "result", schema: true, source: { nodeId: "think", port: "again" } }],
+    nodes: [
+      {
+        id: "think",
+        type: "harness.agent-model",
+        version: "1",
+        config: {
+          conversationId,
+          systemPrompt: "You are helpful.",
+          reserveOutputTokens: 256,
+          modelId: "local-llama",
+        },
+      },
+    ],
+    edges: [],
+    entrypoints: [{ id: "main", nodeId: "think" }],
+    policies: {
+      maxNodeExecutions: 5,
+      maxParallelism: 1,
+      capabilities: { required: [], optional: [], deny: [] },
+    },
+    options: { defaultEntrypoint: "main" },
+  };
 }
 
 const LOCAL_MODEL = {
@@ -215,36 +253,7 @@ describe("the models a person configures", () => {
       parts: [{ kind: "text", text: "Say pong." }],
     });
 
-    const created = await send("POST", "/api/runs", {
-      graph: {
-        schemaVersion: 1,
-        graphId: "chat",
-        revisionId: "rev-1",
-        inputs: [],
-        outputs: [{ id: "result", schema: true, source: { nodeId: "think", port: "again" } }],
-        nodes: [
-          {
-            id: "think",
-            type: "harness.agent-model",
-            version: "1",
-            config: {
-              conversationId,
-              systemPrompt: "You are helpful.",
-              reserveOutputTokens: 256,
-              modelId: "local-llama",
-            },
-          },
-        ],
-        edges: [],
-        entrypoints: [{ id: "main", nodeId: "think" }],
-        policies: {
-          maxNodeExecutions: 5,
-          maxParallelism: 1,
-          capabilities: { required: [], optional: [], deny: [] },
-        },
-        options: { defaultEntrypoint: "main" },
-      },
-    });
+    const created = await send("POST", "/api/runs", { graph: chatGraph(conversationId) });
     expect(created.status).toBe(201);
     const runId = String(created.body["runId"]);
 
@@ -271,6 +280,57 @@ describe("the models a person configures", () => {
     // And the key appears nowhere in what the run recorded.
     const events = await send("GET", `/api/runs/${runId}`);
     expect(JSON.stringify(events.body)).not.toContain("sk-agent-key");
+  });
+
+  it("records why a run failed, without repeating what the endpoint said", async () => {
+    const endpoint = await fakeEndpoint(401);
+    const { send } = await startDaemon();
+    await send("POST", "/api/models", {
+      ...LOCAL_MODEL,
+      profile: "custom",
+      baseUrl: endpoint.baseUrl,
+      credential: "stored",
+      apiKey: "sk-agent-key",
+    });
+
+    const project = await send("POST", "/api/projects", { name: "Chat" });
+    const projectId = (project.body["project"] as { readonly projectId: string }).projectId;
+    const started = await send("POST", `/api/projects/${projectId}/conversations`, {
+      title: "Hello",
+    });
+    const conversationId = (started.body["conversation"] as { readonly conversationId: string })
+      .conversationId;
+    await send("POST", `/api/conversations/${conversationId}/messages`, {
+      role: "user",
+      parts: [{ kind: "text", text: "Say pong." }],
+    });
+    const created = await send("POST", "/api/runs", { graph: chatGraph(conversationId) });
+    const runId = String(created.body["runId"]);
+
+    const deadline = Date.now() + 15_000;
+    let run: {
+      readonly status: string;
+      readonly attempts?: readonly { readonly error?: unknown }[];
+    } = { status: "" };
+    while (Date.now() < deadline) {
+      run = (await send("GET", `/api/runs/${runId}`)).body["run"] as typeof run;
+      if (["completed", "failed", "cancelled"].includes(run.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(run.status).toBe("failed");
+
+    // The failure says the endpoint refused the key, which is what a person can act on.
+    const failures = (run.attempts ?? []).flatMap((attempt) =>
+      attempt.error === null || attempt.error === undefined ? [] : [attempt.error],
+    );
+    expect(failures.at(-1)).toMatchObject({
+      code: "RUNTIME_EXECUTION_FAILED",
+      cause: { code: "MODEL_HTTP_ERROR", status: 401 },
+    });
+    // And nothing the endpoint wrote, or the key, is anywhere in the record.
+    const recorded = JSON.stringify((await send("GET", `/api/runs/${runId}`)).body);
+    expect(recorded).not.toContain("sk-agent-key");
+    expect(recorded).not.toContain("No auth credentials");
   });
 
   it("says what went wrong when an endpoint does not answer", async () => {

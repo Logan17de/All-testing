@@ -103,6 +103,11 @@ describe("following a reply", () => {
     expect(replyOutcome("completed")).toBeNull();
     expect(replyOutcome("failed")).toBe("The reply did not finish.");
     expect(replyOutcome("waiting")).toContain("approve");
+    // What the run itself said comes after, so a person knows what to fix.
+    expect(replyOutcome("failed", "The endpoint refused the key (HTTP 401).")).toBe(
+      "The reply did not finish. The endpoint refused the key (HTTP 401).",
+    );
+    expect(replyOutcome("completed", "ignored")).toBeNull();
   });
 
   it("opens the conversation's workflow in the editor", () => {
