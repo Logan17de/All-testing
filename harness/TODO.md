@@ -419,7 +419,7 @@ through `cmd.exe`, and a server cmd started outlived `npm start`: stopping it, o
 terminal, left the runtime and Next.js holding ports 3211 and 3000, and the next `npm start` failed
 with "another next dev server is already running". A server Node starts itself ends with it, a
 shutdown stops each whole process tree, and `npm start` now checks its ports first — naming the
-process that holds one, saying whether it is a Zet Harness, and offering `npm start -- --restart`
+process that holds one, saying whether it is a Zet Harness, and offering `npm run restart`
 to replace one. The runtime still runs from `apps/runtime`, so its data stays where it was.
 
 

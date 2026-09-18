@@ -71,7 +71,7 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
 - **Also just finished:** the editor no longer marks a half-drawn graph as wrong; pressing Run
   graph on an unfinished one is how you see what is missing.
 - **Also just finished:** `npm start` no longer leaves the runtime and Next.js running after it
-  stops on Windows, says which process holds a port it needs, and `npm start -- --restart`
+  stops on Windows, says which process holds a port it needs, and `npm run restart`
   replaces a harness that is already running.
 - **Also just finished:** simple workflows. A conversation is answered by **Chat** or **Chat
   with GitHub**, chosen on the chat page; GitHub is a first-party plugin whose component hands

@@ -11,8 +11,10 @@
  * held their ports, and the next `npm start` failed. A server Node starts itself
  * ends with it, and a normal shutdown still stops each whole process tree.
  *
- * `npm start -- --restart` first stops a harness that is already running on the
- * same ports — only one that answers as this harness; anything else is reported.
+ * `npm run restart` first stops a harness that is already running on the same
+ * ports — only one that answers as this harness; anything else is reported. It is
+ * its own script because npm claims `--restart` for itself, so a flag written
+ * after `--` never reaches this file.
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -172,9 +174,7 @@ async function checkPorts() {
   }
   const leftovers = busy.filter((entry) => entry.isHarness);
   if (leftovers.length > 0) {
-    console.error(
-      "\nStop the earlier harness and start again in one step:\n  npm start -- --restart",
-    );
+    console.error("\nStop the earlier harness and start again in one step:\n  npm run restart");
     const pids = leftovers.flatMap((entry) => (entry.pid === undefined ? [] : [entry.pid]));
     if (pids.length > 0) {
       console.error(

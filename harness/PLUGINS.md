@@ -29,7 +29,7 @@ If the ports are already taken, `npm start` says by which process and whether it
 and starts nothing. When it is an earlier harness you want to replace, run:
 
 ```sh
-npm start -- --restart
+npm run restart
 ```
 
 which stops that harness first. It only ever stops a process that answers as this harness;
