@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ja-JP">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f6f6f1">
+  <title>Vocab Recall</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <main>
+    <section id="homeView" class="view active">
+      <section class="panel">
+        <div class="section-head">
+          <div><h2>JLPT level</h2><p>Select one or mix levels.</p></div>
+          <button id="toggleAllLevels" class="text-btn">Select all</button>
+        </div>
+        <div id="levelGrid" class="level-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div><h2>Vocabulary deck</h2><p>Choose the memory states you want to study.</p></div>
+          <button id="toggleAllStates" class="text-btn">Select all</button>
+        </div>
+        <div id="stateGrid" class="state-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head simple"><div><h2>Session</h2><p>Choose a comfortable batch.</p></div></div>
+        <div id="batchGrid" class="segmented batch-grid">
+          <button data-batch="10">10</button><button data-batch="20" class="selected">20</button><button data-batch="50">50</button><button data-batch="all">All</button>
+        </div>
+        <label class="check-row"><input id="shuffleToggle" type="checkbox" checked><span>Shuffle</span></label>
+      </section>
+
+      <button id="startBtn" class="primary-btn">Start studying</button>
+      <div id="deckSummary" class="deck-summary"></div>
+
+      <section class="panel memory-panel">
+        <div class="section-head">
+          <div><h2>Your memory map</h2><p>Saved locally on this device.</p></div>
+          <button id="resetBtn" class="outline-danger">Reset memory</button>
+        </div>
+        <div id="overallStats" class="overall-stats"></div>
+        <div id="levelStats" class="level-stats"></div>
+      </section>
+
+      <div class="source-note">Vocabulary data: OpenJLPT · CC BY-SA 4.0</div>
+    </section>
+
+    <section id="studyView" class="view">
+      <div class="study-meta"><span id="studyLevels"></span><span id="studyCount"></span></div>
+      <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
+      <article class="flashcard">
+        <div id="cardLevel" class="level-pill">N5</div>
+        <div id="word" class="word" lang="ja"></div>
+        <div id="reading" class="reading" lang="ja"></div>
+        <div id="prompt" class="prompt">How well do you know this word?</div>
+        <div id="answer" class="answer hidden">
+          <div class="answer-section"><div class="micro-label">MEANING</div><div id="meanings" class="meanings"></div></div>
+          <div id="exampleBlock" class="answer-section hidden">
+            <div class="micro-label">EXAMPLE</div>
+            <div id="exampleJa" class="example-ja" lang="ja"></div>
+            <div id="exampleEn" class="example-en"></div>
+          </div>
+        </div>
+      </article>
+      <div id="studyStateGrid" class="study-state-grid"></div>
+      <button id="nextBtn" class="primary-btn hidden">Next word →</button>
+    </section>
+
+    <section id="finishView" class="view">
+      <section class="panel finish-panel">
+        <div class="finish-mark">✓</div>
+        <div class="eyebrow">SESSION COMPLETE</div>
+        <h1>Vocabulary mapped.</h1>
+        <p id="finishText"></p>
+        <div id="finishStats" class="finish-stats"></div>
+        <button id="finishHome" class="primary-btn">Back to deck builder</button>
+      </section>
+    </section>
+  </main>
+
+  <div id="confirmBackdrop" class="backdrop hidden">
+    <div class="dialog">
+      <h3 id="confirmTitle">Leave this session?</h3>
+      <p id="confirmText">Ratings already completed are saved.</p>
+      <div class="dialog-actions"><button id="confirmCancel" class="secondary-btn">Stay</button><button id="confirmOk" class="danger-btn">Leave</button></div>
+    </div>
+  </div>
+</div>
+<script src="data/vocab.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
