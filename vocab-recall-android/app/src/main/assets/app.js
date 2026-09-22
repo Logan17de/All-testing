@@ -31,7 +31,7 @@
   settings.batch=String(settings.batch||'20');
   settings.shuffle=settings.shuffle!==false;
 
-  let deck=[], index=0, current=null, rated=false;
+  let deck=[], index=0, current=null, revealed=false, selectedState=null;
   let sessionCounts=Object.fromEntries(STATES.map(s=>[s.id,0]));
   let confirmAction=null;
 
@@ -101,6 +101,7 @@
   }
 
   function countState(level,state){ return cards.filter(c=>(!level||c.level===level)&&stateFor(c)===state).length; }
+
   function renderMemoryMap(){
     $('overallStats').innerHTML=STATES.map(s=>`<div class="stat-box stat-${s.id}"><span class="stat-num">${countState(null,s.id).toLocaleString()}</span><span class="stat-label">${s.label}</span></div>`).join('');
     $('levelStats').innerHTML=LEVELS.map(level=>{
@@ -124,70 +125,157 @@
 
   function renderCard(){
     if(index>=deck.length){ finishSession(); return; }
-    current=deck[index]; rated=false;
+    current=deck[index];
+    revealed=false;
+    selectedState=null;
+
     $('cardLevel').textContent=current.level;
     $('word').textContent=current.word;
+    $('answerWord').textContent=current.word;
     $('reading').textContent=current.reading || current.word;
-    $('prompt').classList.remove('hidden'); $('answer').classList.add('hidden'); $('nextBtn').classList.add('hidden');
+    $('questionFace').classList.remove('hidden');
+    $('answer').classList.add('hidden');
+    $('nextBtn').classList.add('hidden');
+
     $('meanings').innerHTML=(current.meanings||[]).map(x=>`<div>${escapeHtml(x)}</div>`).join('');
     const ex=current.example||null;
     $('exampleBlock').classList.toggle('hidden',!ex);
-    $('exampleJa').textContent=ex?.ja||''; $('exampleEn').textContent=ex?.en||'';
+    $('exampleJa').textContent=ex?.ja||'';
+    $('exampleEn').textContent=ex?.en||'';
+
     $('studyLevels').textContent=settings.levels.join(' + ');
     $('studyCount').textContent=`${index+1} / ${deck.length}`;
     $('progressFill').style.width=`${index/deck.length*100}%`;
-    renderStudyStates(); window.scrollTo(0,0);
+
+    renderStudyStates();
+    window.scrollTo(0,0);
+  }
+
+  function revealCard(){
+    if(revealed) return;
+    revealed=true;
+    $('questionFace').classList.add('hidden');
+    $('answer').classList.remove('hidden');
+    $('flashcard').setAttribute('aria-label','Answer revealed');
   }
 
   function renderStudyStates(){
     const grid=$('studyStateGrid'); grid.innerHTML='';
     STATES.forEach(s=>{
-      const b=document.createElement('button'); b.className='study-state-btn';
+      const b=document.createElement('button');
+      b.className='study-state-btn'+(selectedState===s.id?' selected':'');
+      if(selectedState===s.id){
+        b.style.borderColor=s.color;
+        b.style.background=s.color+'12';
+      }
       b.innerHTML=`<span class="state-dot" style="background:${s.color}"></span><b>${s.label}</b>`;
-      b.onclick=()=>rateCurrent(s.id); grid.appendChild(b);
+      b.onclick=()=>selectState(s.id);
+      grid.appendChild(b);
     });
   }
 
-  function rateCurrent(state){
-    if(rated) return; rated=true;
+  function selectState(state){
+    if(!current) return;
+
+    if(selectedState && selectedState!==state){
+      sessionCounts[selectedState]=Math.max(0,(sessionCounts[selectedState]||0)-1);
+    }
+    if(selectedState!==state){
+      sessionCounts[state]=(sessionCounts[state]||0)+1;
+    }
+    selectedState=state;
+
     const prev=progress[current.id]||{};
     progress[current.id]={...prev,state,lastSeen:Date.now(),level:current.level,word:current.word,reading:current.reading};
-    saveProgress(); sessionCounts[state]=(sessionCounts[state]||0)+1;
-    $('prompt').classList.add('hidden'); $('answer').classList.remove('hidden'); $('studyStateGrid').innerHTML=''; $('nextBtn').classList.remove('hidden');
-    setTimeout(()=>$('answer').scrollIntoView({behavior:'smooth',block:'nearest'}),30);
+    saveProgress();
+
+    renderStudyStates();
+    $('nextBtn').classList.remove('hidden');
   }
 
   function finishSession(){
-    showView('finish'); const total=Object.values(sessionCounts).reduce((a,b)=>a+b,0);
+    showView('finish');
+    const total=Object.values(sessionCounts).reduce((a,b)=>a+b,0);
     $('finishText').textContent=`You mapped ${total.toLocaleString()} vocabulary words.`;
     $('finishStats').innerHTML=STATES.map(s=>`<div class="finish-mini stat-${s.id}"><b>${sessionCounts[s.id]||0}</b>${s.label}</div>`).join('');
   }
 
   function askLeave(){
     if(!studyView.classList.contains('active')) return false;
-    $('confirmBackdrop').classList.remove('hidden'); confirmAction=()=>showView('home'); return true;
+    $('confirmBackdrop').classList.remove('hidden');
+    confirmAction=()=>showView('home');
+    return true;
   }
 
   window.handleAndroidBack=()=>{
-    if(!$('confirmBackdrop').classList.contains('hidden')){ $('confirmBackdrop').classList.add('hidden'); confirmAction=null; return true; }
+    if(!$('confirmBackdrop').classList.contains('hidden')){
+      $('confirmBackdrop').classList.add('hidden');
+      confirmAction=null;
+      return true;
+    }
     if(studyView.classList.contains('active')) return askLeave();
     if(finishView.classList.contains('active')){ showView('home'); return true; }
     return false;
   };
 
-  $('toggleAllLevels').onclick=()=>{ settings.levels=settings.levels.length===LEVELS.length?['N5']:[...LEVELS]; saveSettings(); renderHome(); };
-  $('toggleAllStates').onclick=()=>{ settings.states=settings.states.length===FILTER_STATES.length?['new']:FILTER_STATES.map(s=>s.id); saveSettings(); renderHome(); };
-  document.querySelectorAll('[data-batch]').forEach(b=>b.onclick=()=>{settings.batch=b.dataset.batch;saveSettings();renderHome();});
-  $('shuffleToggle').onchange=e=>{settings.shuffle=e.target.checked;saveSettings();};
-  $('startBtn').onclick=startSession;
-  $('nextBtn').onclick=()=>{index++;renderCard();};
-  $('finishHome').onclick=()=>showView('home');
-  $('resetBtn').onclick=()=>{
-    $('confirmTitle').textContent='Reset all vocabulary memory?'; $('confirmText').textContent='This clears all vocabulary ratings on this device.'; $('confirmOk').textContent='Reset';
-    confirmAction=()=>{progress={};saveProgress();renderHome();}; $('confirmBackdrop').classList.remove('hidden');
+  $('flashcard').onclick=revealCard;
+  $('flashcard').onkeydown=e=>{
+    if(e.key==='Enter'||e.key===' '){
+      e.preventDefault();
+      revealCard();
+    }
   };
-  $('confirmCancel').onclick=()=>{$('confirmBackdrop').classList.add('hidden');confirmAction=null;$('confirmTitle').textContent='Leave this session?';$('confirmText').textContent='Ratings already completed are saved.';$('confirmOk').textContent='Leave';};
-  $('confirmOk').onclick=()=>{const fn=confirmAction;$('confirmBackdrop').classList.add('hidden');confirmAction=null;$('confirmTitle').textContent='Leave this session?';$('confirmText').textContent='Ratings already completed are saved.';$('confirmOk').textContent='Leave';if(fn)fn();};
+
+  $('toggleAllLevels').onclick=()=>{
+    settings.levels=settings.levels.length===LEVELS.length?['N5']:[...LEVELS];
+    saveSettings(); renderHome();
+  };
+
+  $('toggleAllStates').onclick=()=>{
+    settings.states=settings.states.length===FILTER_STATES.length?['new']:FILTER_STATES.map(s=>s.id);
+    saveSettings(); renderHome();
+  };
+
+  document.querySelectorAll('[data-batch]').forEach(b=>b.onclick=()=>{
+    settings.batch=b.dataset.batch;
+    saveSettings();
+    renderHome();
+  });
+
+  $('shuffleToggle').onchange=e=>{
+    settings.shuffle=e.target.checked;
+    saveSettings();
+  };
+
+  $('startBtn').onclick=startSession;
+  $('nextBtn').onclick=()=>{ index++; renderCard(); };
+  $('finishHome').onclick=()=>showView('home');
+
+  $('resetBtn').onclick=()=>{
+    $('confirmTitle').textContent='Reset all vocabulary memory?';
+    $('confirmText').textContent='This clears all vocabulary ratings on this device.';
+    $('confirmOk').textContent='Reset';
+    confirmAction=()=>{progress={};saveProgress();renderHome();};
+    $('confirmBackdrop').classList.remove('hidden');
+  };
+
+  $('confirmCancel').onclick=()=>{
+    $('confirmBackdrop').classList.add('hidden');
+    confirmAction=null;
+    $('confirmTitle').textContent='Leave this session?';
+    $('confirmText').textContent='Ratings already completed are saved.';
+    $('confirmOk').textContent='Leave';
+  };
+
+  $('confirmOk').onclick=()=>{
+    const fn=confirmAction;
+    $('confirmBackdrop').classList.add('hidden');
+    confirmAction=null;
+    $('confirmTitle').textContent='Leave this session?';
+    $('confirmText').textContent='Ratings already completed are saved.';
+    $('confirmOk').textContent='Leave';
+    if(fn)fn();
+  };
 
   renderHome();
 })();
