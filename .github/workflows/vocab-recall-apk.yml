@@ -1,0 +1,110 @@
+name: Build Vocab Recall APK
+
+on:
+  push:
+    branches:
+      - vocab-recall-apk-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build complete offline vocabulary database
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vocab-recall-android/app/src/main/assets/data
+          python3 - <<'PY'
+          import json, urllib.request, hashlib, pathlib, re
+
+          base = "https://raw.githubusercontent.com/evanclan/OpenJLPT/main/data/json/vocab/"
+          levels = ["n5","n4","n3","n2","n1"]
+          expected = {"N5":662,"N4":632,"N3":1784,"N2":1793,"N1":3463}
+          cards = []
+
+          for level_file in levels:
+              url = base + level_file + ".json"
+              with urllib.request.urlopen(url, timeout=60) as r:
+                  items = json.load(r)
+              level = level_file.upper()
+              assert len(items) == expected[level], (level, len(items))
+              for i, item in enumerate(items):
+                  word = (item.get("word") or "").strip()
+                  if not word:
+                      continue
+                  reading = (item.get("reading") or "").strip() or word
+                  meanings = [str(x).strip() for x in (item.get("meanings") or []) if str(x).strip()]
+                  examples = item.get("examples") or []
+                  ex = None
+                  if examples:
+                      first = examples[0]
+                      if first.get("ja") or first.get("en"):
+                          ex = {"ja": first.get("ja",""), "en": first.get("en","")}
+                  digest = hashlib.sha1((level+"\0"+word+"\0"+reading+"\0"+str(i)).encode("utf-8")).hexdigest()[:12]
+                  cards.append({
+                      "id": f"{level}:{digest}",
+                      "level": level,
+                      "word": word,
+                      "reading": reading,
+                      "meanings": meanings,
+                      "example": ex,
+                  })
+
+          assert len(cards) == 8334, len(cards)
+          kana_only = sum(1 for c in cards if not re.search(r"[一-龯々〆ヵヶ]", c["word"]))
+          mixed = sum(1 for c in cards if re.search(r"[一-龯々〆ヵヶ]", c["word"]) and re.search(r"[ぁ-ゖァ-ヺ]", c["word"]))
+          katakana_only = sum(1 for c in cards if re.fullmatch(r"[ァ-ヺー・]+", c["word"]))
+          assert kana_only > 500, kana_only
+          assert mixed > 100, mixed
+          assert katakana_only > 50, katakana_only
+          print("vocab cards:", len(cards), "kana-only:", kana_only, "mixed:", mixed, "katakana-only:", katakana_only)
+
+          out = pathlib.Path("vocab-recall-android/app/src/main/assets/data/vocab.js")
+          out.write_text("window.VOCAB_CARDS=" + json.dumps(cards, ensure_ascii=False, separators=(",",":")) + ";", encoding="utf-8")
+
+          notice = pathlib.Path("vocab-recall-android/app/src/main/assets/OPENJLPT_NOTICE.txt")
+          notice.write_text(
+              "Vocabulary data derived from OpenJLPT (https://github.com/evanclan/OpenJLPT).\n"
+              "OpenJLPT dataset is licensed under CC BY-SA 4.0.\n"
+              "Source attribution and upstream notices are available in the OpenJLPT repository.\n",
+              encoding="utf-8"
+          )
+          PY
+
+      - name: Build debug APK
+        working-directory: vocab-recall-android
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Verify APK and database
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=vocab-recall-android/app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK"
+          unzip -l "$APK" | grep -q 'assets/data/vocab.js'
+          unzip -l "$APK" | grep -q 'assets/OPENJLPT_NOTICE.txt'
+          SIZE=$(unzip -l "$APK" | awk '/assets\/data\/vocab.js/{print $1}')
+          echo "vocab.js uncompressed bytes: $SIZE"
+          test "$SIZE" -gt 500000
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vocab-Recall-APK
+          path: vocab-recall-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
