@@ -53,13 +53,25 @@
     <section id="studyView" class="view">
       <div class="study-meta"><span id="studyLevels"></span><span id="studyCount"></span></div>
       <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
-      <article class="flashcard">
+
+      <article id="flashcard" class="flashcard" role="button" tabindex="0" aria-label="Reveal reading and meaning">
         <div id="cardLevel" class="level-pill">N5</div>
-        <div id="word" class="word" lang="ja"></div>
-        <div id="reading" class="reading" lang="ja"></div>
-        <div id="prompt" class="prompt">How well do you know this word?</div>
+
+        <div id="questionFace">
+          <div id="word" class="word" lang="ja"></div>
+          <div class="prompt">Tap the card to reveal reading + meaning</div>
+        </div>
+
         <div id="answer" class="answer hidden">
-          <div class="answer-section"><div class="micro-label">MEANING</div><div id="meanings" class="meanings"></div></div>
+          <div class="answer-word" id="answerWord" lang="ja"></div>
+          <div class="answer-section">
+            <div class="micro-label">READING</div>
+            <div id="reading" class="reading" lang="ja"></div>
+          </div>
+          <div class="answer-section">
+            <div class="micro-label">MEANING</div>
+            <div id="meanings" class="meanings"></div>
+          </div>
           <div id="exampleBlock" class="answer-section hidden">
             <div class="micro-label">EXAMPLE</div>
             <div id="exampleJa" class="example-ja" lang="ja"></div>
@@ -67,6 +79,7 @@
           </div>
         </div>
       </article>
+
       <div id="studyStateGrid" class="study-state-grid"></div>
       <button id="nextBtn" class="primary-btn hidden">Next word →</button>
     </section>
