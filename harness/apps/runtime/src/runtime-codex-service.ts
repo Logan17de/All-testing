@@ -96,6 +96,12 @@ export class RuntimeCodexService extends EventEmitter {
           stdio: "pipe",
         });
       this.#child = child;
+      // Pipe errors also emit on the streams themselves; write callbacks alone do not consume EPIPE.
+      for (const stream of [child.stdin, child.stdout, child.stderr]) {
+        stream.on("error", () => {
+          if (this.#child === child) this.#stop();
+        });
+      }
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
         if (this.#child === child) this.#consume(chunk);

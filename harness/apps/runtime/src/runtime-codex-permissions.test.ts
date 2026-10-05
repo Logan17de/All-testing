@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -21,13 +21,30 @@ describe("native workspace-only permission subset", () => {
       await writeFile(file, "fixture");
       await mkdir(join(root, ".codex"));
       await writeFile(join(root, ".env"), "fixture");
-      await symlink(tmpdir(), join(root, "escape"));
+      await symlink(
+        tmpdir(),
+        join(root, "escape"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      const canonicalFile = await realpath(file);
+      // Windows accepts alternate drive-letter casing; the grant must retain canonical realpath output.
+      const requestedFile =
+        process.platform === "win32"
+          ? file.replace(
+              /^([a-z]):/iu,
+              (_, drive: string) =>
+                `${drive === drive.toUpperCase() ? drive.toLowerCase() : drive.toUpperCase()}:`,
+            )
+          : file;
       expect(
         await buildCodexWorkspacePermissionGrant(
           root,
-          request({ network: null, fileSystem: { read: [file, file], write: [file] } }),
+          request({
+            network: null,
+            fileSystem: { read: [requestedFile, file], write: [requestedFile] },
+          }),
         ),
-      ).toEqual({ fileSystem: { read: [file], write: [file] } });
+      ).toEqual({ fileSystem: { read: [canonicalFile], write: [canonicalFile] } });
       for (const profile of [
         { network: { enabled: true }, fileSystem: null },
         { network: null, fileSystem: { read: [root], write: null } },

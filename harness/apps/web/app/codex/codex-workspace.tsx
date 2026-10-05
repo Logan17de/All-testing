@@ -369,8 +369,8 @@ export function CodexWorkspace() {
             disabled={busy}
             onChange={(event) => setDynamicToolsEnabled(event.target.checked)}
           />{" "}
-          Enable experimental fixed read-only client tools for a new session (each invocation needs
-          approval)
+          Enable experimental fixed read-only client tools for a new session (Linux runtime only;
+          each invocation needs approval)
         </label>{" "}
         <button
           disabled={busy}

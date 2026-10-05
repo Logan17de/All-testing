@@ -12,6 +12,15 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   });
+  const rejected = {
+    success: false,
+    contentItems: [
+      {
+        type: "inputText",
+        text: "Workspace tool rejected the request or could not access the permitted resource.",
+      },
+    ],
+  };
   const read = (root: string, args: unknown) =>
     executeCodexDynamicTool(root, "zet_workspace_read_file", args);
   it("exposes only two fixed read-only tools and reads UTF-8", async () => {
@@ -21,10 +30,14 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
     ]);
     await mkdir(path.join(root, "src"));
     await writeFile(path.join(root, "src", "hello.ts"), "hello 🌍");
-    expect(await read(root, { path: "src/hello.ts" })).toEqual({
-      success: true,
-      contentItems: [{ type: "inputText", text: "hello 🌍" }],
-    });
+    expect(await read(root, { path: "src/hello.ts" })).toEqual(
+      process.platform === "linux"
+        ? {
+            success: true,
+            contentItems: [{ type: "inputText", text: "hello 🌍" }],
+          }
+        : rejected,
+    );
   });
   it("lists ordinary entries while hiding symlinks and credential names", async () => {
     await writeFile(path.join(root, "safe.ts"), "safe");
@@ -33,6 +46,10 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
     await mkdir(path.join(root, "src"));
     await symlink(path.join(root, "safe.ts"), path.join(root, "shortcut"));
     const result = await executeCodexDynamicTool(root, "zet_workspace_list", {});
+    if (process.platform !== "linux") {
+      expect(result).toEqual(rejected);
+      return;
+    }
     expect(result.success).toBe(true);
     expect(JSON.parse(result.contentItems[0]!.text)).toEqual({
       entries: [
@@ -89,13 +106,20 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
       expect((await read(root, { path: name })).success).toBe(false);
     }
     await writeFile(path.join(root, "limit"), "a".repeat(65536));
-    expect((await read(root, { path: "limit" })).success).toBe(true);
+    const result = await read(root, { path: "limit" });
+    if (process.platform === "linux") expect(result.success).toBe(true);
+    else expect(result).toEqual(rejected);
   });
   it("limits directory output to 200 entries", async () => {
     await Promise.all(
       Array.from({ length: 205 }, (_, index) => writeFile(path.join(root, `file-${index}`), "")),
     );
     const result = await executeCodexDynamicTool(root, "zet_workspace_list", {});
+    if (process.platform !== "linux") {
+      expect(result).toEqual(rejected);
+      return;
+    }
+    expect(result.success).toBe(true);
     const listing = JSON.parse(result.contentItems[0]!.text) as {
       entries: unknown[];
       truncated: boolean;
@@ -103,6 +127,20 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
     expect(listing.entries).toHaveLength(200);
     expect(listing.truncated).toBe(true);
   });
+  it.each(["win32", "darwin", "freebsd"])(
+    "fails closed on %s for otherwise valid reads and listings",
+    async (platform) => {
+      await writeFile(path.join(root, "safe.ts"), "private fixture content");
+      const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+      try {
+        Object.defineProperty(process, "platform", { ...original, value: platform });
+        expect(await read(root, { path: "safe.ts" })).toEqual(rejected);
+        expect(await executeCodexDynamicTool(root, "zet_workspace_list", {})).toEqual(rejected);
+      } finally {
+        Object.defineProperty(process, "platform", original);
+      }
+    },
+  );
   it.each([".ssh", ".codex"])("rejects %s selected as the workspace root", async (name) => {
     const credentials = path.join(root, name);
     await mkdir(credentials);

@@ -86,19 +86,38 @@ export async function buildCodexWorkspacePermissionGrant(
       )
         throw denied();
       const normalized = resolve(path);
+      // Canonical output can differ from lexical input on Windows (including drive-letter casing).
+      // Validate both paths against the root and keep lstat checks on every lexical component.
+      const canonicalTarget = await realpath(normalized);
+      const canonicalSuffix = relative(canonicalRoot, canonicalTarget);
+      if (
+        canonicalSuffix === ".." ||
+        canonicalSuffix.startsWith(`..${sep}`) ||
+        isAbsolute(canonicalSuffix)
+      )
+        throw denied();
       const suffix = relative(canonicalRoot, normalized);
       if (suffix === ".." || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) throw denied();
       const components = suffix.split(sep).filter(Boolean);
-      if (components.some(isBlockedCodexPathSegment)) throw denied();
+      if (
+        components.some(isBlockedCodexPathSegment) ||
+        (process.platform === "win32" && components.some((component) => component.includes(":")))
+      )
+        throw denied();
       let current = canonicalRoot;
       for (const component of components) {
         current = resolve(current, component);
         if ((await lstat(current)).isSymbolicLink()) throw denied();
       }
       const metadata = await lstat(normalized);
-      if ((await realpath(normalized)) !== normalized || !metadata.isFile() || metadata.nlink > 1)
+      if (
+        (await realpath(normalized)) !== canonicalTarget ||
+        !metadata.isFile() ||
+        metadata.nlink > 1
+      )
         throw denied();
-      results.push(normalized);
+      if (canonicalSuffix.split(sep).some(isBlockedCodexPathSegment)) throw denied();
+      results.push(canonicalTarget);
     }
     return [...new Set(results)];
   };

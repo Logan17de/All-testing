@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { RuntimeCodexService } from "./runtime-codex-service.js";
@@ -32,7 +34,7 @@ describe("Codex workspace scope boundary (fixture only)", () => {
       const before = service.snapshot();
       expect(before.pendingApprovals).toHaveLength(1);
       expect(before.events).toHaveLength(1);
-      cwd = "/tmp";
+      cwd = tmpdir();
       const after = service.snapshot();
       expect(after.available).toBe(false);
       expect(after.pendingApprovals).toEqual([]);
@@ -65,7 +67,7 @@ describe("Codex workspace scope boundary (fixture only)", () => {
       const resumed = (await service.action("thread/resume", { threadId: "old-thread" })) as {
         params: Record<string, unknown>;
       };
-      expect(resumed.params.cwd).toBe("/tmp");
+      expect(resumed.params.cwd).toBe(resolve(tmpdir()));
       expect(resumed.params.sandbox).toBe("read-only");
     } finally {
       service.close();
@@ -194,7 +196,7 @@ describe("Codex workspace scope boundary (fixture only)", () => {
     try {
       await service.action("model/list");
       const original = service.snapshot();
-      root = "/tmp";
+      root = tmpdir();
       service.snapshot();
       await service.action("model/list");
       const current = service.snapshot();

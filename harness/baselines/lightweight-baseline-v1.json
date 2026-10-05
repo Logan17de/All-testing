@@ -3,7 +3,19 @@
   "recordedFrom": {
     "workflowRunId": 34294622045,
     "nodeVersion": "24.20.0",
-    "vitestVersion": "4.1.11"
+    "vitestVersion": "4.1.11",
+    "runtimeRefresh": {
+      "ubuntu-latest": {
+        "workflowRunId": 37323221544,
+        "commitSha": "c0040de2557c2c297cf0e97f721c56dba6a39e92",
+        "metrics": ["startupMedianMs", "directRuntimeDependencies"]
+      },
+      "windows-latest": {
+        "workflowRunId": 37316460475,
+        "commitSha": "455482b7d4a00caf31d125886342eaa0daf3b89e",
+        "metrics": ["startupMedianMs", "directRuntimeDependencies"]
+      }
+    }
   },
   "policy": {
     "startupMedianMs": {
@@ -29,29 +41,47 @@
   },
   "platforms": {
     "ubuntu-latest": {
-      "startupMedianMs": 47.980472,
+      "startupMedianMs": 238.541,
       "idleRssMedianBytes": 67608576,
       "compilerMedianMs": 2.021568,
       "schedulerMedianMs": 0.243554,
       "sqliteMedianMs": 0.299057,
       "directRuntimeDependencies": {
-        "total": 2,
-        "workspace": 2,
+        "total": 8,
+        "workspace": 8,
         "external": 0,
-        "names": ["@zet-harness/db", "@zet-harness/scheduler"]
+        "names": [
+          "@zet-harness/core",
+          "@zet-harness/db",
+          "@zet-harness/github",
+          "@zet-harness/graph",
+          "@zet-harness/models",
+          "@zet-harness/plugin-api",
+          "@zet-harness/plugin-loader",
+          "@zet-harness/scheduler"
+        ]
       }
     },
     "windows-latest": {
-      "startupMedianMs": 106.8324,
+      "startupMedianMs": 420.417,
       "idleRssMedianBytes": 59318272,
       "compilerMedianMs": 2.0289,
       "schedulerMedianMs": 0.23525,
       "sqliteMedianMs": 2.70405,
       "directRuntimeDependencies": {
-        "total": 2,
-        "workspace": 2,
+        "total": 8,
+        "workspace": 8,
         "external": 0,
-        "names": ["@zet-harness/db", "@zet-harness/scheduler"]
+        "names": [
+          "@zet-harness/core",
+          "@zet-harness/db",
+          "@zet-harness/github",
+          "@zet-harness/graph",
+          "@zet-harness/models",
+          "@zet-harness/plugin-api",
+          "@zet-harness/plugin-loader",
+          "@zet-harness/scheduler"
+        ]
       }
     }
   }

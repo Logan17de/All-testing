@@ -177,12 +177,16 @@ describe("official Codex JSONL service (fixture only; no provider calls)", () =>
         execute: true,
         requestGeneration: generation,
       });
-      expect(await codex.action("model/list")).toMatchObject({
-        response: {
-          success: true,
-          contentItems: [{ type: "inputText", text: "safe fixture content" }],
-        },
-      });
+      expect(await codex.action("model/list")).toMatchObject(
+        process.platform === "linux"
+          ? {
+              response: {
+                success: true,
+                contentItems: [{ type: "inputText", text: "safe fixture content" }],
+              },
+            }
+          : { response: { success: false } },
+      );
       await expect(codex.action("thread/start", { dynamicToolsEnabled: "true" })).rejects.toThrow();
     } finally {
       codex.close();
@@ -362,6 +366,30 @@ describe("official Codex JSONL service (fixture only; no provider calls)", () =>
       ).rejects.toThrow("expired");
       expect(codex.snapshot().pendingApprovals).toEqual([]);
       expect(JSON.stringify(codex.snapshot())).not.toContain("private answer");
+    } finally {
+      codex.close();
+    }
+  });
+  it("consumes stream EPIPE errors and isolates errors from stopped transports", async () => {
+    let child: ReturnType<typeof spawn>;
+    const codex = new RuntimeCodexService({
+      cwd: process.cwd(),
+      spawnProcess: () => {
+        const spawned = spawn(process.execPath, ["-e", fixture], { stdio: "pipe" });
+        child = spawned;
+        return spawned;
+      },
+    });
+    try {
+      await codex.action("model/list");
+      const old = child!;
+      expect(
+        old.stdin!.emit("error", Object.assign(new Error("private stderr"), { code: "EPIPE" })),
+      ).toBe(true);
+      expect(codex.snapshot().available).toBe(false);
+      await codex.action("model/list");
+      old.stdin!.emit("error", new Error("late EPIPE"));
+      expect(codex.snapshot().available).toBe(true);
     } finally {
       codex.close();
     }
