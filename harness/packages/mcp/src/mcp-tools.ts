@@ -117,7 +117,8 @@ export function createMcpToolAdapter(
     async invoke(input: JsonObject, context: AdapterInvocationContext): Promise<ToolResult> {
       context.signal.throwIfAborted();
 
-      const result = await client.callTool(descriptor.name, { ...input });
+      const result = await client.callTool(descriptor.name, { ...input }, context.signal);
+      context.signal.throwIfAborted();
       const joined = result.content
         .map((block) => block.text ?? "")
         .filter((text) => text.length > 0)

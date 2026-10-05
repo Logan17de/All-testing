@@ -2,9 +2,9 @@ import { mkdtemp, mkdir, writeFile, symlink, link, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CODEX_DYNAMIC_TOOLS, executeCodexDynamicTool } from "./runtime-codex-dynamic-tools.js";
+import { executeWorkspaceReadTool } from "./runtime-workspace-read-tools.js";
 
-describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
+describe("confined workspace read tools (local fixtures)", () => {
   let root: string;
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), "zet-tools-"));
@@ -22,12 +22,8 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
     ],
   };
   const read = (root: string, args: unknown) =>
-    executeCodexDynamicTool(root, "zet_workspace_read_file", args);
+    executeWorkspaceReadTool(root, "harness.fs.read", args);
   it("exposes only two fixed read-only tools and reads UTF-8", async () => {
-    expect(CODEX_DYNAMIC_TOOLS.map((spec) => spec.name)).toEqual([
-      "zet_workspace_read_file",
-      "zet_workspace_list",
-    ]);
     await mkdir(path.join(root, "src"));
     await writeFile(path.join(root, "src", "hello.ts"), "hello 🌍");
     expect(await read(root, { path: "src/hello.ts" })).toEqual(
@@ -45,7 +41,7 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
     await mkdir(path.join(root, ".git"));
     await mkdir(path.join(root, "src"));
     await symlink(path.join(root, "safe.ts"), path.join(root, "shortcut"));
-    const result = await executeCodexDynamicTool(root, "zet_workspace_list", {});
+    const result = await executeWorkspaceReadTool(root, "harness.fs.list", {});
     if (process.platform !== "linux") {
       expect(result).toEqual(rejected);
       return;
@@ -91,9 +87,9 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
     await link(path.join(root, "safe.ts"), path.join(root, "hardlink"));
     for (const file of ["file-link", "dir-link/test", "hardlink", "."])
       expect((await read(root, { path: file })).success).toBe(false);
-    expect((await executeCodexDynamicTool(root, "zet_git_status", {})).success).toBe(false);
+    expect((await executeWorkspaceReadTool(root, "zet_git_status", {})).success).toBe(false);
     expect(
-      (await executeCodexDynamicTool(root, "zet_workspace_list", { path: "dir-link" })).success,
+      (await executeWorkspaceReadTool(root, "harness.fs.list", { path: "dir-link" })).success,
     ).toBe(false);
   });
   it("bounds file size and rejects binary and invalid UTF-8", async () => {
@@ -114,7 +110,7 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
     await Promise.all(
       Array.from({ length: 205 }, (_, index) => writeFile(path.join(root, `file-${index}`), "")),
     );
-    const result = await executeCodexDynamicTool(root, "zet_workspace_list", {});
+    const result = await executeWorkspaceReadTool(root, "harness.fs.list", {});
     if (process.platform !== "linux") {
       expect(result).toEqual(rejected);
       return;
@@ -135,7 +131,7 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
       try {
         Object.defineProperty(process, "platform", { ...original, value: platform });
         expect(await read(root, { path: "safe.ts" })).toEqual(rejected);
-        expect(await executeCodexDynamicTool(root, "zet_workspace_list", {})).toEqual(rejected);
+        expect(await executeWorkspaceReadTool(root, "harness.fs.list", {})).toEqual(rejected);
       } finally {
         Object.defineProperty(process, "platform", original);
       }
@@ -146,7 +142,7 @@ describe("fixed Codex dynamic workspace tools (local fixtures)", () => {
     await mkdir(credentials);
     await writeFile(path.join(credentials, "config"), "private host data");
     expect((await read(credentials, { path: "config" })).success).toBe(false);
-    expect((await executeCodexDynamicTool(credentials, "zet_workspace_list", {})).success).toBe(
+    expect((await executeWorkspaceReadTool(credentials, "harness.fs.list", {})).success).toBe(
       false,
     );
   });

@@ -31,3 +31,12 @@ The dependency comparison still fails for any additional/removed dependency, and
 startup multiplier still detects future regressions relative to the current implementation.
 Do not regenerate this reference automatically on every build or use CI failures as approval
 to bypass a guard. Benchmark artifacts retain five startup samples and measurement reports.
+
+## Standalone executor dependency
+
+The standalone architecture directly imports `@zet-harness/tools` in the runtime for
+workspace paths, file tools and bounded processes. It is now declared explicitly in
+`apps/runtime/package.json` and built before runtime compilation. The exact dependency
+snapshot is therefore nine workspace packages, zero external packages. The provider
+CLI dependency at the harness root is removed. This structural dependency update does
+not change any numeric reference or guard threshold.

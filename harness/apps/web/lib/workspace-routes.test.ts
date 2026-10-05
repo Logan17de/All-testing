@@ -42,14 +42,14 @@ describe("workspace proxy paths", () => {
       "/api/setup/workspaces/forget",
     );
     expect(runtimeWorkspacePath(["connections"], new URLSearchParams())).toBe("/api/connections");
-    expect(runtimeWorkspacePath(["codex"], new URLSearchParams("since=12&secret=forbidden"))).toBe(
-      "/api/codex?since=12",
+    expect(runtimeWorkspacePath(["agent"], new URLSearchParams("since=12&secret=forbidden"))).toBe(
+      "/api/agent?since=12",
     );
-    expect(runtimeWorkspacePath(["codex", "raw"], new URLSearchParams())).toBe(undefined);
+    expect(runtimeWorkspacePath(["agent", "raw"], new URLSearchParams())).toBe(undefined);
     for (const action of ["start", "complete", "sign-out", "models"]) {
       expect(
         runtimeWorkspacePath(["connections", "openrouter", action], new URLSearchParams()),
-      ).toBe(`/api/connections/openrouter/${action}`);
+      ).toBe(undefined);
     }
     expect(runtimeWorkspacePath(["connections", "openai", "start"], new URLSearchParams())).toBe(
       undefined,

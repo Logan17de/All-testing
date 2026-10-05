@@ -29,12 +29,10 @@ export default async function ModelsPage({
       </div>
 
       <p className="lede">
-        Connect OpenAI with an API key, or use a local model. For Codex subscription access and its
-        native coding agent, run the official CLI bridge:
-        <code>npm run codex -- help</code>, or open <Link href="/codex">Codex agent</Link>. Codex
-        owns its login, tools, approvals and sessions. Claude and Grok subscription OAuth are
-        unavailable here. Separately billed Claude/xAI API integration is inactive pending your
-        decision.
+        Models supply inference to the harness’s own agent loop, tools and sessions. Use an OpenAI
+        API key or a local model, then open <Link href="/agent">Coding workspace</Link>. Claude/xAI
+        billed integration remains inactive pending your decision. Provider subscription sign-in has
+        separate registration and approval requirements.
       </p>
 
       {!result.ok ? (

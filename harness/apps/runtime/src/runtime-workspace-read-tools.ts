@@ -3,37 +3,14 @@ import { open, realpath, opendir, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 
 const LIMIT = 64 * 1024;
-export const isBlockedCodexPathSegment = (name: string): boolean =>
+export const isBlockedWorkspacePathSegment = (name: string): boolean =>
   /^(?:\.env.*|\.git|\.git-credentials|\.zet-codex|\.bash_history|\.zsh_history|\.gcloud|\.codex|\.aws|\.ssh|\.azure|\.config|\.gnupg|\.kube|\.docker|\.npmrc|\.netrc|\.pypirc|auth\.json|credentials(?:\..*)?|secrets?(?:\..*)?|id_(?:rsa|dsa|ecdsa|ed25519)(?:\..*)?)$/i.test(
     name,
   ) ||
   /(?:\.(?:pem|key|p12|pfx|jks|keystore)$|(?:^|[._-])(?:token|password|private[._-]?key)(?:[._-]|$))/i.test(
     name,
   );
-export const CODEX_DYNAMIC_TOOLS = [
-  {
-    type: "function" as const,
-    name: "zet_workspace_read_file",
-    description: "Read a UTF-8 workspace file up to 64 KiB, excluding credentials and symlinks.",
-    inputSchema: {
-      type: "object",
-      properties: { path: { type: "string" } },
-      required: ["path"],
-      additionalProperties: false,
-    },
-  },
-  {
-    type: "function" as const,
-    name: "zet_workspace_list",
-    description: "List up to 200 workspace entries, excluding credentials and symlinks.",
-    inputSchema: {
-      type: "object",
-      properties: { path: { type: "string" } },
-      additionalProperties: false,
-    },
-  },
-];
-export interface CodexDynamicToolResult {
+export interface WorkspaceReadToolResult {
   contentItems: { type: "inputText"; text: string }[];
   success: boolean;
 }
@@ -54,7 +31,7 @@ function partsFor(args: unknown, reading: boolean): string[] {
   )
     throw new Error();
   const parts = value.split("/");
-  if (parts.some((part) => part === ".." || isBlockedCodexPathSegment(part))) throw new Error();
+  if (parts.some((part) => part === ".." || isBlockedWorkspacePathSegment(part))) throw new Error();
   const filtered = parts.filter((part) => part && part !== ".");
   if (reading && !filtered.length) throw new Error();
   return filtered;
@@ -68,7 +45,7 @@ async function confinedOpen(
 ): Promise<FileHandle> {
   if (process.platform !== "linux") throw new Error();
   const canonical = await realpath(root);
-  if (canonical.split(path.sep).some(isBlockedCodexPathSegment)) throw new Error();
+  if (canonical.split(path.sep).some(isBlockedWorkspacePathSegment)) throw new Error();
   let handle = await open(
     canonical,
     constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
@@ -90,7 +67,7 @@ async function confinedOpen(
         relative === ".." ||
         relative.startsWith(`..${path.sep}`) ||
         path.isAbsolute(relative) ||
-        relative.split(path.sep).some(isBlockedCodexPathSegment)
+        relative.split(path.sep).some(isBlockedWorkspacePathSegment)
       )
         throw new Error();
     }
@@ -100,15 +77,15 @@ async function confinedOpen(
     throw error;
   }
 }
-export async function executeCodexDynamicTool(
+export async function executeWorkspaceReadTool(
   root: string,
   tool: string,
   args: unknown,
-): Promise<CodexDynamicToolResult> {
+): Promise<WorkspaceReadToolResult> {
   let handle: FileHandle | undefined;
   try {
-    if (tool !== "zet_workspace_read_file" && tool !== "zet_workspace_list") throw new Error();
-    const reading = tool === "zet_workspace_read_file";
+    if (tool !== "harness.fs.read" && tool !== "harness.fs.list") throw new Error();
+    const reading = tool === "harness.fs.read";
     handle = await confinedOpen(root, partsFor(args, reading), !reading);
     let text: string;
     if (reading) {
@@ -131,7 +108,7 @@ export async function executeCodexDynamicTool(
           break;
         }
         if (
-          isBlockedCodexPathSegment(entry.name) ||
+          isBlockedWorkspacePathSegment(entry.name) ||
           entry.isSymbolicLink() ||
           (!entry.isFile() && !entry.isDirectory())
         )

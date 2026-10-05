@@ -92,6 +92,7 @@ interface PendingRequest {
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: unknown) => void;
   readonly timer: NodeJS.Timeout;
+  readonly cleanup: () => void;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -142,6 +143,7 @@ export class McpStdioClient {
   #failAllPending(error: McpError): void {
     for (const [, pending] of this.#pending) {
       clearTimeout(pending.timer);
+      pending.cleanup();
       pending.reject(error);
     }
     this.#pending.clear();
@@ -172,6 +174,7 @@ export class McpStdioClient {
     if (pending === undefined) return;
     this.#pending.delete(id);
     clearTimeout(pending.timer);
+    pending.cleanup();
 
     const error = message["error"];
     if (isRecord(error)) {
@@ -249,7 +252,8 @@ export class McpStdioClient {
     });
   }
 
-  #send(method: string, params: Record<string, unknown> | undefined): Promise<unknown> {
+  #send(method: string, params: Record<string, unknown> | undefined, signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted === true) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("MCP request cancelled."));
     const child = this.#child;
     if (child === undefined || this.#closed) {
       return Promise.reject(new McpError("transport-closed", "MCP server is not running."));
@@ -270,19 +274,27 @@ export class McpStdioClient {
     }
 
     return new Promise<unknown>((resolve, reject) => {
+      const cleanup = (): void => signal?.removeEventListener("abort", abort);
+      const settleError = (error: Error): void => {
+        if (!this.#pending.delete(id)) return;
+        clearTimeout(timer);
+        cleanup();
+        reject(error);
+      };
+      const abort = (): void => {
+        // Cancellation is best effort remotely. Settle locally without waiting
+        // for a server acknowledgement, and ignore any late response.
+        settleError(signal?.reason instanceof Error ? signal.reason : new Error("MCP request cancelled."));
+        this.#notify("notifications/cancelled", { requestId: id, reason: "Request cancelled" });
+      };
       const timer = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(new McpError("timeout", `MCP request '${method}' timed out.`));
+        settleError(new McpError("timeout", `MCP request '${method}' timed out.`));
       }, this.#config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
       timer.unref?.();
-
-      this.#pending.set(id, { resolve, reject, timer });
+      this.#pending.set(id, { resolve, reject, timer, cleanup });
+      signal?.addEventListener("abort", abort, { once: true });
       child.stdin?.write(`${payload}\n`, (error) => {
-        if (error) {
-          this.#pending.delete(id);
-          clearTimeout(timer);
-          reject(new McpError("transport-closed", "Could not write to the MCP server."));
-        }
+        if (error) settleError(new McpError("transport-closed", "Could not write to the MCP server."));
       });
     });
   }
@@ -352,12 +364,13 @@ export class McpStdioClient {
   }
 
   /** Invoke one tool. Arguments are passed through untouched. */
-  async callTool(name: string, args: Record<string, unknown>): Promise<McpCallResult> {
+  async callTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpCallResult> {
     if (!this.#initialized) {
       throw new McpError("not-initialized", "MCP client must be initialized before calling tools.");
     }
 
-    const result = await this.#send("tools/call", { name, arguments: args });
+    const result = await this.#send("tools/call", { name, arguments: args }, signal);
+    signal?.throwIfAborted();
     if (!isRecord(result)) {
       throw new McpError("protocol-error", "MCP tools/call returned a non-object result.");
     }

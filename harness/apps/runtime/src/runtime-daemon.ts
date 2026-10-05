@@ -1,6 +1,7 @@
 import { providerAwaitingDecision } from "./runtime-provider-policy.js";
 import { resolve } from "node:path";
-import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
+import { createChatGPTPlanModelAdapter, listChatGPTPlanModels } from "./runtime-chatgpt-model.js";
 
 import {
   DURABLE_CHECKPOINTS_MIGRATION,
@@ -61,7 +62,16 @@ import {
   type SuspendForApprovalInput,
 } from "./runtime-human-approvals.js";
 import { GITHUB_PLUGIN_ID, createGitHubPlugin } from "@zet-harness/github";
-import { RuntimeCodexService } from "./runtime-codex-service.js";
+import { ChatGPTLoginController } from "./runtime-chatgpt-auth-http.js";
+import { CodexSearchBridge } from "./runtime-codex-search.js";
+import { createRuntimeCodingSearchTool } from "./runtime-coding-search-tool.js";
+import { RuntimeCodingService } from "./runtime-coding-service.js";
+import type { ToolAdapter } from "@zet-harness/plugin-api";
+import { createRuntimeMutationTools } from "./runtime-coding-mutation-tools.js";
+import { createRuntimeCodingSubagentTool } from "./runtime-coding-subagents.js";
+import { createRuntimeCodingTools } from "./runtime-coding-tools.js";
+import { readConversation } from "@zet-harness/db/durable-conversation-records";
+import { readProject } from "@zet-harness/db/durable-project-records";
 import { readWorkspace } from "./runtime-setup-http.js";
 import { createAgentNodeExecutor } from "./runtime-agent-nodes.js";
 import { RuntimeModels } from "./runtime-models.js";
@@ -176,27 +186,28 @@ export class RuntimeDaemon {
   private pluginReport: RuntimePluginReport;
   private pluginSandboxes: readonly IsolatedPlugin[] = [];
   private models: RuntimeModels | undefined;
-  private readonly codex: RuntimeCodexService;
+  private readonly agent: RuntimeCodingService;
+  private readonly chatGPTLogin = new ChatGPTLoginController(
+    process.env["ZET_CHATGPT_HOST_ID"] ? { hostId: process.env["ZET_CHATGPT_HOST_ID"] } : {},
+  );
+  private chatGPTCatalogAccountKey: string | undefined;
+  private readonly codexSearch = process.env["ZET_CHATGPT_SEARCH_MODEL"]
+    ? new CodexSearchBridge({
+        model: process.env["ZET_CHATGPT_SEARCH_MODEL"],
+        accessToken: () => this.chatGPTLogin.auth.accessToken(),
+      })
+    : undefined;
+  private readonly chatGPTModels = new Map<
+    string,
+    { id: string; displayName: string; provider: string; model: string }
+  >();
+  private readonly childTools = new Map<string, ToolAdapter>();
   private pluginPolicies: ReadonlyMap<string, CapabilityPermissionPolicy> = new Map();
 
   constructor(options: RuntimeDaemonOptions = {}) {
     this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
     this.migrations = options.migrations ?? RUNTIME_DATABASE_MIGRATIONS;
     this.redaction = options.redaction ?? new RuntimeRedactionRegistry();
-    const database = this.database;
-    this.codex = new RuntimeCodexService({
-      get cwd() {
-        return readWorkspace(database)?.path ?? process.cwd();
-      },
-      command: process.execPath,
-      args: [
-        createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js"),
-        "app-server",
-        "--stdio",
-        "--config",
-        "sandbox_workspace_write.network_access=false",
-      ],
-    });
     // Plugins load in start(), after construction, so both of these read plugin
     // state when they are called rather than capturing it now. A host-supplied
     // authority or executor always takes precedence.
@@ -230,6 +241,28 @@ export class RuntimeDaemon {
             this.redaction,
             authority,
           );
+    const database = this.database;
+    this.agent = new RuntimeCodingService({
+      database,
+      workspace: () => readWorkspace(database)?.path ?? process.cwd(),
+      approvals: this.approvals,
+      sources: () => ({
+        ...(this.pluginHost === undefined ? {} : { host: this.pluginHost }),
+        sandboxes: this.pluginSandboxes,
+      }),
+      capabilityAuthority: () => authority ?? { evaluate: () => ({ decision: "deny" as const }) },
+      redact: (value) => this.redaction.redact(value),
+      dispatch: execution === undefined ? undefined : (runId) => this.dispatcher?.wake(runId),
+      modelCatalog: () => this.codingModelCatalog(),
+      providerIdentity: () => this.currentChatGPTAccountKey(),
+      isModelConfigured: (modelId) =>
+        this.configuredModelIds().has(modelId) &&
+        this.pluginHost?.models.has(modelId, "1") === true,
+      cancel: async (runId) => {
+        if (!this.dispatcher) throw new Error("No execution adapter configured.");
+        await this.dispatcher.cancelRun(runId);
+      },
+    });
     // Cron triggers are due at times kept in the database, so the schedule survives
     // a restart and the process only ever holds a short timer to the next check.
     this.triggerSchedule = new RuntimeTriggerScheduler({
@@ -278,7 +311,11 @@ export class RuntimeDaemon {
         projects: { database: this.database },
         memories: { database: this.database },
         setup: { database: this.database },
-        codex: this.codex,
+        agent: this.agent,
+        chatGPTAuth: {
+          controller: this.chatGPTLogin,
+          ...(this.codexSearch ? { search: this.codexSearch } : {}),
+        },
         connections: {
           database: this.database,
         },
@@ -598,9 +635,73 @@ export class RuntimeDaemon {
     // whatever models a person configured here, which carry their own authority.
     // Plugin tools reach a step only through a component wired into it, and only
     // tools whose plugin was granted what they need — first-party ones excepted.
+    const config = request.operation.config as Record<string, unknown>;
+    const conversation =
+      typeof config["conversationId"] === "string"
+        ? readConversation(this.database.connection(), config["conversationId"])
+        : undefined;
+    const project = conversation
+      ? readProject(this.database.connection(), conversation.projectId)
+      : undefined;
+    const codingTools = project?.workspacePath
+      ? createRuntimeCodingTools({ root: project.workspacePath })
+      : [];
+    const toolPolicy = this.agent.toolPolicy(request.runId);
+    const mutationTools =
+      project?.workspacePath && toolPolicy?.mutationConsent
+        ? createRuntimeMutationTools({
+            root: project.workspacePath,
+            approve: (tool, context) => this.agent.approveTool(tool, context),
+          })
+        : [];
+    if (
+      toolPolicy?.subagentsEnabled &&
+      !this.childTools.has(request.runId) &&
+      this.childTools.size < 1000
+    ) {
+      this.childTools.set(
+        request.runId,
+        createRuntimeCodingSubagentTool({
+          readTools: codingTools,
+          generate: async (childRequest, context) => {
+            if (!this.configuredModelIds().has(toolPolicy.modelId))
+              throw new Error("Selected child inference model unavailable.");
+            const adapter = host.models.getAdapter(toolPolicy.modelId, "1");
+            if (!adapter) throw new Error("Selected child inference model unavailable.");
+            const secrets = this.models?.secretsFor(toolPolicy.modelId);
+            return adapter.generate(childRequest, {
+              ...context,
+              ...(secrets === undefined ? {} : { secrets }),
+            });
+          },
+        }),
+      );
+    }
+    const childTool = toolPolicy?.subagentsEnabled ? this.childTools.get(request.runId) : undefined;
+    const searchTool =
+      toolPolicy?.searchEnabled &&
+      this.codexSearch &&
+      this.chatGPTLogin.status().state === "connected" &&
+      toolPolicy.providerIdentity === this.currentChatGPTAccountKey()
+        ? createRuntimeCodingSearchTool({
+            search: (query, signal) => {
+              const bridge = new CodexSearchBridge({
+                model: process.env["ZET_CHATGPT_SEARCH_MODEL"]!,
+                accessToken: () => this.accountBoundChatGPTToken(toolPolicy.providerIdentity),
+              });
+              return bridge.search(query, signal);
+            },
+          })
+        : undefined;
     return createAgentNodeExecutor({
       database: this.database,
       models: host.models,
+      tools: [
+        ...codingTools,
+        ...mutationTools,
+        ...(childTool ? [childTool] : []),
+        ...(searchTool ? [searchTool] : []),
+      ],
       componentTools: host.tools.listManifests().flatMap((manifest) => {
         const adapter = host.tools.getAdapter(manifest.id, manifest.version);
         if (adapter === undefined) return [];
@@ -612,7 +713,12 @@ export class RuntimeDaemon {
         );
         return granted ? [adapter] : [];
       }),
-      allows: (capability) => this.pluginAuthority(capability).decision === "allow",
+      allows: (capability) =>
+        (capability === "fs:read" && codingTools.length > 0) ||
+        (["fs:write", "process:exec"].includes(capability) && mutationTools.length > 0) ||
+        (capability === "agent:delegate" && childTool !== undefined) ||
+        (capability === "network:codex-search" && searchTool !== undefined) ||
+        this.pluginAuthority(capability).decision === "allow",
       configuredModels: () => this.configuredModelIds(),
       modelSecrets: (modelId) => this.models?.secretsFor(modelId),
       onStreamProgress: (progress) => {
@@ -622,10 +728,70 @@ export class RuntimeDaemon {
     })(request);
   }
 
+  private currentChatGPTAccountKey(): string | undefined {
+    const account = this.chatGPTLogin.auth.account();
+    return account
+      ? createHash("sha256")
+          .update(JSON.stringify([account.clientId, account.subject]))
+          .digest("hex")
+      : undefined;
+  }
+  private async accountBoundChatGPTToken(accountKey: string | undefined): Promise<string> {
+    if (!accountKey || this.currentChatGPTAccountKey() !== accountKey)
+      throw new Error("The selected ChatGPT account is no longer connected.");
+    const token = await this.chatGPTLogin.auth.accessToken();
+    if (this.currentChatGPTAccountKey() !== accountKey)
+      throw new Error("The selected ChatGPT account changed.");
+    return token;
+  }
+  private async codingModelCatalog() {
+    const host = this.pluginHost;
+    if (this.chatGPTLogin.status().state === "connected" && host) {
+      const accountKey = this.currentChatGPTAccountKey();
+      const discovered = await listChatGPTPlanModels({
+        accessToken: () => this.accountBoundChatGPTToken(accountKey),
+      });
+      if (!accountKey || this.currentChatGPTAccountKey() !== accountKey)
+        throw new Error("ChatGPT account changed while reading models.");
+      this.chatGPTCatalogAccountKey = accountKey;
+      this.chatGPTModels.clear();
+      for (const model of discovered.slice(0, 100)) {
+        const id = `chatgpt.${createHash("sha256")
+          .update(JSON.stringify([accountKey, model.slug]))
+          .digest("hex")
+          .slice(0, 24)}`;
+        if (!host.models.has(id, "1"))
+          host.models.register(
+            createChatGPTPlanModelAdapter({
+              id,
+              model: model.slug,
+              accessToken: () => this.accountBoundChatGPTToken(accountKey),
+            }),
+          );
+        this.chatGPTModels.set(id, {
+          id,
+          displayName: model.displayName,
+          provider: "chatgpt-plan",
+          model: model.slug,
+        });
+      }
+    } else this.chatGPTModels.clear();
+    const active = this.configuredModelIds();
+    return [
+      ...listModelConfigs(this.database.connection())
+        .filter((m) => active.has(m.modelId) && host?.models.has(m.modelId, "1") === true)
+        .map((m) => ({ id: m.modelId, displayName: m.title, provider: m.profile, model: m.model })),
+      ...this.chatGPTModels.values(),
+    ];
+  }
   /** Ids of the models a person configured in this harness. */
   private configuredModelIds(): ReadonlySet<string> {
-    return new Set(
-      listModelConfigs(this.database.connection())
+    return new Set([
+      ...(this.chatGPTLogin.status().state === "connected" &&
+      this.chatGPTCatalogAccountKey === this.currentChatGPTAccountKey()
+        ? [...this.chatGPTModels.keys()]
+        : []),
+      ...listModelConfigs(this.database.connection())
         .filter(
           (model) =>
             model.profile !== "openrouter" &&
@@ -633,7 +799,7 @@ export class RuntimeDaemon {
             !providerAwaitingDecision(model),
         )
         .map((model) => model.modelId),
-    );
+    ]);
   }
 
   /**
@@ -713,8 +879,12 @@ export class RuntimeDaemon {
   }
 
   private async stopOnce(): Promise<boolean> {
-    this.codex.close();
     const schedule = this.triggerSchedule.stop();
+    this.agent.close();
+    await this.agent.drainCancellations();
+    this.chatGPTLogin.close();
+    this.chatGPTModels.clear();
+    this.childTools.clear();
     const draining = this.dispatcher?.stop();
     const pluginCleanup = Promise.all([
       this.pluginHost?.dispose().catch(() => undefined),

@@ -1,5 +1,10 @@
-import { createCodexHttpHandler, isCodexHttpPath } from "./runtime-codex-http.js";
-import type { RuntimeCodexService } from "./runtime-codex-service.js";
+import {
+  createChatGPTAuthHttpHandler,
+  type ChatGPTLoginController,
+} from "./runtime-chatgpt-auth-http.js";
+import type { CodexSearchBridge } from "./runtime-codex-search.js";
+import { createCodingHttpHandler, isCodingHttpPath } from "./runtime-coding-http.js";
+import type { RuntimeCodingService } from "./runtime-coding-service.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import {
@@ -178,7 +183,8 @@ export class RuntimeHttpServer {
   private readonly memoryServices: RuntimeMemoryHttpServices | undefined;
   private readonly modelServices: RuntimeModelHttpServices | undefined;
   private readonly setupServices: RuntimeSetupHttpServices | undefined;
-  private readonly codexHandler: ReturnType<typeof createCodexHttpHandler> | undefined;
+  private readonly chatGPTAuthHandler: ReturnType<typeof createChatGPTAuthHttpHandler> | undefined;
+  private readonly codingHandler: ReturnType<typeof createCodingHttpHandler> | undefined;
   private readonly connectionHandler: ReturnType<typeof createConnectionHttpHandler> | undefined;
   private readonly triggerServices: RuntimeTriggerHttpServices | undefined;
   private readonly clientServices: RuntimeClientHttpServices | undefined;
@@ -225,7 +231,8 @@ export class RuntimeHttpServer {
       readonly models?: RuntimeModelHttpServices;
       readonly setup?: RuntimeSetupHttpServices;
       readonly connections?: RuntimeConnectionHttpServices;
-      readonly codex?: RuntimeCodexService;
+      readonly agent?: RuntimeCodingService;
+      readonly chatGPTAuth?: { controller: ChatGPTLoginController; search?: CodexSearchBridge };
       /** Standing reasons to start a run: manual, cron, webhook and api triggers. */
       readonly triggers?: RuntimeTriggerHttpServices;
       /** External clients: tokens issued locally, then used instead of a browser session. */
@@ -247,8 +254,12 @@ export class RuntimeHttpServer {
     this.setupServices = services.setup;
     this.connectionHandler =
       services.connections === undefined ? undefined : createConnectionHttpHandler();
-    this.codexHandler =
-      services.codex === undefined ? undefined : createCodexHttpHandler(services.codex);
+    this.chatGPTAuthHandler =
+      services.chatGPTAuth === undefined
+        ? undefined
+        : createChatGPTAuthHttpHandler(services.chatGPTAuth);
+    this.codingHandler =
+      services.agent === undefined ? undefined : createCodingHttpHandler(services.agent);
     this.triggerServices = services.triggers;
     this.clientServices = services.clients;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
@@ -423,12 +434,23 @@ export class RuntimeHttpServer {
         );
         return;
       }
-      if (isCodexHttpPath(url.pathname)) {
-        if (this.codexHandler === undefined) {
-          writeJson(response, 503, { error: { code: "CODEX_SERVICE_UNAVAILABLE" } });
+      if (/^\/api\/auth\/chatgpt(?:\/(?:login|cancel|search))?$/u.test(url.pathname)) {
+        if (!this.chatGPTAuthHandler) {
+          writeJson(response, 503, { error: "CHATGPT_AUTH_UNAVAILABLE" });
           return;
         }
-        void this.codexHandler(request, response, url, this.security).catch((error: unknown) => {
+        if (request.method !== "GET") this.security.checkMutation(request);
+        void this.chatGPTAuthHandler(request, response, url).catch((error: unknown) =>
+          writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (isCodingHttpPath(url.pathname)) {
+        if (this.codingHandler === undefined) {
+          writeJson(response, 503, { error: { code: "AGENT_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void this.codingHandler(request, response, url, this.security).catch((error: unknown) => {
           writeRuntimeApiError(response, error);
         });
         return;

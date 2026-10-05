@@ -1,54 +1,53 @@
-# Independent Codex integration acceptance review
+# Standalone acceptance
 
-Reviewed 2026-10-05 against this checkout and the pinned official `@openai/codex` **0.160.0** protocol. This checklist distinguishes implemented behavior, fixture evidence, real unauthenticated checks, and account-dependent execution. It does not certify complete Codex product parity.
+The earlier vendor-runtime checklist is retired with that architecture.
+Current independent acceptance targets are documented in
+[STANDALONE-ARCHITECTURE.md](STANDALONE-ARCHITECTURE.md).
 
-## Evidence categories
+Native filesystem/process effects and model calls are checked with temporary workspaces
+and scripted inference. These are offline integration tests, not live provider checks.
+No real login, provider credentials, paid inference or external deployment is performed.
 
-- **Implemented:** a concrete checked-in path exists; narrower supported subsets are stated.
-- **Fixture tested:** local protocol/provider fixtures or filesystem tests exercised it. This does not prove authenticated provider execution.
-- **Live unauthenticated:** the installed official CLI or real local UI was checked without login/inference. Catalog discovery and tool registration are not tool execution.
-- **User login blocked:** the authenticated acceptance check still requires the user's real official login/consent and account access. No developer test obtained credentials or requested paid inference.
-- **Proprietary unavailable:** this harness does not implement or grant access to a hosted/proprietary feature. Availability of an official product to an eligible account is a separate question.
+Official sign-in and search-only integration have separate account/preview requirements;
+see [provider documentation](standalone-provider-auth.md).
 
-## Feature checklist
+## Independent native acceptance evidence
 
-| Feature | Implemented and evidence | Fixture tested | Live unauthenticated | Remaining acceptance boundary |
-| --- | --- | --- | --- | --- |
-| Native coding agent loop | [Native service](apps/runtime/src/runtime-codex-service.ts), [CLI bridge](scripts/codex-bridge.mjs), [Codex UI](apps/web/app/codex/codex-workspace.tsx); graph loop separately in `runtime-agent-nodes.ts` | Native JSONL requests/events and bounded graph loop | Installed app-server initialization | **User login blocked:** actual native coding/tool turn |
-| Filesystem and shell | Native CLI tools under explicit sandbox; graph tools separately; optional client tools are read/list only | Path boundaries and client filesystem tools | Client filesystem tests use real temporary files, without a native model | Native model-driven shell/file execution requires login; Zet graph capability/allowlist policy is not an OS sandbox |
-| Sandbox and approvals | Read-only default; explicit workspace-write; every turn overrides cwd, sandbox and user approval policy; native workspace network/additional roots disabled | Command/file approval responses, parameter injection refusal | Protocol initialization, policy serialization | **User login blocked:** actual OS sandbox enforcement and provider-triggered approval |
-| Permission requests | [File-only validator](apps/runtime/src/runtime-codex-permissions.ts); explicit consent; scope `turn`, strict review; no network/session grants, directories, extra environments, symlinks or hardlinks | Canonical workspace paths, known credential-path refusal, unsupported shapes, absent consent and stale replies | Permission-profile discovery only | **User login blocked:** native permission request and grant enforcement; profile discovery is not selection or a grant |
-| Dynamic client tools | [Read-only Linux tools](apps/runtime/src/runtime-codex-dynamic-tools.ts): `zet_workspace_read_file`, `zet_workspace_list`; new-thread opt-in and explicit execution consent | Real temporary file reads/listing, credential/symlink/hardlink refusal, byte/entry limits; service opt-in refusal | Official experimental tool registration in an isolated ephemeral thread, no turn/tool invocation | **User login blocked:** provider-issued dynamic call; non-Linux systems fail closed; resumed threads need a new opted-in session |
-| Sessions/resume/archive | Scoped listing/pagination, start/resume/read, archive/restore; official storage remains separate from graph SQLite | Native request shapes, policy reapplication and invalidated authorization | Unauthenticated discovery/registration; real local UI controls | **User login blocked:** authenticated persisted history, active resume and archive behavior |
-| Streaming and cancellation | Bounded native event polling plus graph stream consumption; CLI signal forwarding; turn interruption | Native events, abort signals, lifecycle controls | Real UI/event rendering and installed protocol handshake | **User login blocked:** actual streamed provider turn and interruption |
-| Model/provider switching | Native model list/selection; direct API adapters separately; retired OpenRouter connection/profile | Model API validation, native bounded model override | Real official model catalog | Native selected model availability requires account access; native configuration retains its provider trust boundary |
-| Context handling | Native compaction action; graph budgets/summaries; native context events | Compaction request and graph context/budget behavior | UI controls; no real compaction turn | **User login blocked:** provider-backed native compaction and context accounting |
-| Instructions and skills | Native CLI owns instruction/skill discovery; graph system instructions are explicit | Graph context construction | CLI is installed; no comprehensive skill execution check | Automatic graph AGENTS.md/SKILL.md discovery is not claimed; native instruction behavior remains version/config dependent |
-| MCP questions/forms | Native user input and MCP form/URL requests; [shared form validator](packages/plugin-api/src/mcp-elicitation.ts), [request UI](apps/web/app/codex/codex-request.tsx) | Exact question IDs, primitive/enumerated forms, required/default/format bounds, rejected schemas, stale replies, explicit URL consent | Harness page checked; new form interactions need UI verification; no remote OAuth | Actual MCP server workflows require configured trusted servers and user interaction; no automatic OAuth/token exchange |
-| Subagents | Graph subgraphs exist; native Codex functionality delegated to installed CLI | Graph behavior | No native autonomous subagent check | **User login blocked:** supported native subagent execution; no proprietary agent orchestration entitlement claimed |
-| Browser/computer integration | Native configured MCP tools may supply browser functions; no built-in desktop/computer driver added | MCP package tests only | Local harness browser UI verified, which is not agent computer control | **Proprietary unavailable:** hosted connectors/desktop control are not implemented by this harness |
-| Git workflow | Existing graph Git tools and native CLI workspace tools; development checkpoints managed separately | Existing Git tool fixtures/policy checks | Actual repository development checks/commits are not proof of native agent Git execution | **User login blocked:** model-driven native Git; review remains required before push/merge |
-| Errors, bounds and stale authority | Generic private-safe transport errors; stderr suppressed; request/event/body bounds; workspace/process generations invalidate old replies | [Independent security fixtures](apps/runtime/src/runtime-codex-security.test.ts): workspace reset, stale child output, reused request IDs, aggregate pending payloads, grant/tool consent | Installed CLI isolated smoke; local API/UI | Native generated output/session history may contain private content; arbitrary output is not Zet-redacted |
-| Codex authentication | Official CLI/app-server ChatGPT login, explicit persistent-login consent, real user browser/device flow | Injected-token/OAuth bypass refusal and consent gates | Isolated official account read confirms unauthenticated state | **User login blocked:** real login, account entitlement and authenticated inference; no browser tokens/cookies imported |
-| Claude/Grok authentication | Documented API-key adapter paths retained but inactive pending the user's billing decision; retired OpenRouter shared OAuth | Inactive save/check/picker refusal; transport fixtures do not prove account access | No live Claude/xAI calls | No fabricated subscription OAuth. Claude third-party subscription access requires provider approval; no supported Grok subscription OAuth established |
-| Hosted Codex/cloud services | No hosting deployment or proprietary service implementation | None claimed | None claimed | **Proprietary unavailable:** cloud tasks, proprietary connectors and hosted service parity are not implemented |
+These categories describe inspected code and completed checks, not full Codex parity.
+The focused independent run passed **6 files / 19 tests**, and runtime typecheck passed.
+Provider and consent fixtures use scripted responses; they do not prove account entitlement.
 
-## Security review findings resolved
+| Capability | Implementation status | Verification | Remaining acceptance boundary |
+| --- | --- | --- | --- |
+| Native coding loop | Implemented using the existing graph model/tool loop, persisted conversations and run records | Scripted inference integration in `runtime-coding-service.test.ts` | Live configured provider inference requires user credentials and consent; no vendor CLI required |
+| Sessions, model selection, context | Native session list/read/resume/archive/restore and per-turn configured model; existing token/byte budgets and automatic summaries | Native service and existing context/summary fixtures | Resuming a session does not restore volatile mutation consent; no unlimited context claim |
+| Workspace read/list | Implemented with fixed credential-path exclusions, hardlink/symlink refusal and bounded descriptor-relative reads | Adapter security fixtures and workspace executor fixtures | Linux only; ordinary source text may contain secrets despite filename exclusions; no OS filesystem sandbox claim |
+| File changes | Partial: explicit turn opt-in plus exact per-call approval, atomic UTF-8 file replacement/create up to 64 KiB | Seven mutation fixtures, including refusal paths | Linux only, existing parent directories required; no general mkdir/delete/patch/Git commit/push tool; directory movement by a hostile concurrent actor remains outside the application confinement guarantee |
+| Process execution | Partial: fixed `node --version` and Git status inside a separate bubblewrap namespace; no host fallback | Sandbox boundary construction/failure fixtures | Live isolation is blocked by this cloud environment; Windows fails closed; general test/build/command execution is not implemented |
+| Tool consent | Implemented volatile host-only queue with generation, exact arguments, single settlement, cancellation and two-minute expiry | Independent `runtime-coding-approval-security.test.ts` verifies concurrent starts, stale/duplicate replies, cancellation, expiry and scope revocation | Restart denies outstanding consent; this is separate from the existing durable DAG approval primitive |
+| Child agents | Implemented separate explicit context, inherited fixed read tools, no recursive delegate tool, four children/run, two inference steps, three reads and a 30-second deadline | Five child-agent fixtures including noncooperative inference cancellation/deadline | Bounded depth-one delegated analysis; no unlimited autonomous/concurrent agent-team claim; live child inference untested |
+| Streaming and cancellation | Existing native progress events and abort signals; child waits reject locally on cancellation | Existing streaming fixtures and child tests | Cancellation does not reverse completed writes or guarantee a provider stops server-side work |
+| Instructions and skills | Bounded root `AGENTS.md` and local `.agents/skills` discovery | Instruction fixtures | Root-level discovery only; at most 20 skills and a 100-entry scan; workspace content does not grant permissions; not full Codex instruction discovery/precedence parity |
+| MCP | Standalone stdio tools adapter, explicit configured server trust/capabilities, bounded replies and cancellation notification | **29 MCP tests**, including real local stdio subprocess cancellation fixture; MCP typecheck/lint passed | Remote cancellation is advisory; no standalone client elicitation/auth/roots/sampling claim; MCP server processes remain a separate trusted configuration boundary |
+| OpenAI OAuth | Optional supported direct registration flow using documented dynamic client registration, PKCE/state/nonce, official JWKS signature/issuer/audience/expiry/subject/scope validation and volatile tokens | Mocked OAuth/controller tests; independent source and official-document review | No actual login/consent or persistent credentials created; requires stable host configuration and applicable account/preview availability |
+| OpenAI inference/search | Supported public Responses API boundary, authenticated with the documented OAuth token flow; search bridge permits web search only | Mocked transport/search tests; official endpoint and scope docs reviewed | Live inference/search and account model entitlement untested; search does not grant local coding tools; provider adapter integration continues separately |
+| Claude and Grok | Supported provider API authentication/configuration remains separate from OpenAI OAuth | Provider configuration/transport fixtures | No fabricated Claude/Grok subscription OAuth; user must provide supported credentials where required |
+| Proprietary services | Not accepted as implemented native capabilities | No supporting native execution evidence | Vendor cloud services and undocumented subscription flows are not implied by this harness |
 
-The independent review identified stale workspace authority, trailing old-child output, aggregate pending-request memory growth, response IDs reused after process restart, recursive directory grants, and known credential-path omissions. Regression checks cover the implemented boundaries. Workspace changes stop the previous process, invalidate thread/tool authority and pending requests, clear retained native events, and publish a generation change for the browser to clear old content. Response actions require the current request generation, including after asynchronous filesystem validation.
+## Authentication review references
 
-Permission grants are deliberately limited to existing regular workspace files. Directory grants would recursively expose descendants and cannot preserve the claimed credential-path exclusions with plain read/write arrays. Native permission enforcement still belongs to the official CLI; filesystem checks before approval cannot establish immunity to every concurrent filesystem change.
+The current official [registration documentation](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+explicitly supports open-source dynamic registration with the application's actual name,
+a stable host identifier, a subsequently issued client ID, and user authorization.
+The [inference documentation](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
+specifies the public `https://api.openai.com/v1/responses` endpoint, OAuth bearer tokens,
+`store:false` and `stream:true`. This supports the implemented flow; it does not establish
+that any particular account is entitled or that a mocked login is a successful real login.
+The [MCP cancellation specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/cancellation)
+allows receivers to ignore cancellation and requires clients not to cancel initialization.
+The client exposes cancellation only for tool requests and ignores their late responses.
 
-The client tools anchor Linux traversal using file descriptors and `O_NOFOLLOW`, refuse hardlinked reads, and bound read/output sizes to 64 KiB. They exclude known credential paths, not arbitrary secret content hidden in ordinary source files. Configured remote MCP services and native hooks retain their own authority; an OS sandbox around local commands cannot constrain remote service side effects.
-
-Sensitive MCP field-name/title rejection is a heuristic, not proof a form cannot solicit secrets. Servers must obey the official prohibition on sensitive data in form mode, and users must review the requesting server, fields and target hostname. URL consent precedes navigation and acknowledges consent only: completion/authentication is verified by the remote server. The harness never retrieves external credentials.
-
-The shared MCP form subset follows the pinned generated primitive schema. Unsupported `pattern` constraints, nested objects, arbitrary JSON Schema/ref evaluation and unrecognized fields fail closed. The broader MCP specification includes `pattern`; that does not make it supported by this pinned harness adapter. External token refresh, attestation and legacy server approvals remain unsupported and fail closed.
-
-## Reproducible evidence
-
-Independent targeted review run: **7 files, 51 tests passed**, covering the bridge, native service/HTTP, permission validator, dynamic tools, shared MCP validator and independent security regressions. Runtime TypeScript checking passed. Re-run the focused suite with `npm exec -- vitest run apps/runtime/src/runtime-codex- scripts/codex-bridge.test.ts packages/plugin-api/src/mcp-elicitation.test.ts`, and the real isolated protocol check with `npm run test:codex`. The checked-in [isolated official smoke](scripts/codex-app-server-smoke.mjs) checks experimental initialization, unauthenticated account read, model catalog, permission-profile discovery and fixed dynamic-tool registration without a turn, grant, tool invocation, login or inference. Root's full repository/UI checks are recorded separately in [capabilities](CODEX-CAPABILITIES.md); these results must not be relabeled as live authenticated provider checks.
-
-The next acceptance step is the user's official login/consent, followed by a bounded authenticated native turn, real approval/decline, interruption, resume and compaction check. No secret or private session data should be committed as evidence.
-
-Sources: [official Codex source](https://github.com/openai/codex), [Codex authentication](https://developers.openai.com/codex/auth/), [MCP elicitation specification](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation), [Claude Agent SDK policy](https://code.claude.com/docs/en/agent-sdk/overview), [xAI API documentation](https://docs.x.ai/overview).
+The independent security review found no credential serialization or raw token logging in
+the reviewed optional auth module. Tokens, refresh state and authorization attempts remain
+private and volatile; official token/JWKS requests refuse redirects and have bounded responses.
+No cookies, official-client impersonation or vendor-private backend endpoint is used.

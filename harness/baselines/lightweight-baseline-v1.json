@@ -15,6 +15,11 @@
         "commitSha": "455482b7d4a00caf31d125886342eaa0daf3b89e",
         "metrics": ["startupMedianMs", "directRuntimeDependencies"]
       }
+    },
+    "standaloneDependencyChange": {
+      "source": "apps/runtime/package.json",
+      "package": "@zet-harness/tools",
+      "reason": "Native coding executor directly imports workspace path, filesystem and bounded process adapters; provider CLI dependency removed. Numeric references and policies unchanged."
     }
   },
   "policy": {
@@ -47,8 +52,8 @@
       "schedulerMedianMs": 0.243554,
       "sqliteMedianMs": 0.299057,
       "directRuntimeDependencies": {
-        "total": 8,
-        "workspace": 8,
+        "total": 9,
+        "workspace": 9,
         "external": 0,
         "names": [
           "@zet-harness/core",
@@ -58,7 +63,8 @@
           "@zet-harness/models",
           "@zet-harness/plugin-api",
           "@zet-harness/plugin-loader",
-          "@zet-harness/scheduler"
+          "@zet-harness/scheduler",
+          "@zet-harness/tools"
         ]
       }
     },
@@ -69,8 +75,8 @@
       "schedulerMedianMs": 0.23525,
       "sqliteMedianMs": 2.70405,
       "directRuntimeDependencies": {
-        "total": 8,
-        "workspace": 8,
+        "total": 9,
+        "workspace": 9,
         "external": 0,
         "names": [
           "@zet-harness/core",
@@ -80,7 +86,8 @@
           "@zet-harness/models",
           "@zet-harness/plugin-api",
           "@zet-harness/plugin-loader",
-          "@zet-harness/scheduler"
+          "@zet-harness/scheduler",
+          "@zet-harness/tools"
         ]
       }
     }

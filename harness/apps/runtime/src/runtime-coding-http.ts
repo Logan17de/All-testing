@@ -1,17 +1,23 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RuntimeApiSecurity } from "./runtime-api-security.js";
 import { writeRuntimeJson } from "./runtime-approval-http.js";
-import type { RuntimeCodexService } from "./runtime-codex-service.js";
-export function isCodexHttpPath(path: string): boolean {
-  return path === "/api/codex";
+import type { RuntimeCodingService } from "./runtime-coding-service.js";
+export function isCodingHttpPath(path: string): boolean {
+  return path === "/api/agent" || path === "/api/codex";
 }
-export function createCodexHttpHandler(service: RuntimeCodexService) {
+export function createCodingHttpHandler(service: RuntimeCodingService) {
   return async (
     request: IncomingMessage,
     response: ServerResponse,
     url: URL,
     security: RuntimeApiSecurity,
   ): Promise<void> => {
+    if (url.pathname === "/api/codex") {
+      writeRuntimeJson(response, 410, {
+        error: { code: "CODEX_SERVICE_RETIRED", reason: "Use the built-in agent at /api/agent." },
+      });
+      return;
+    }
     if (request.method === "GET") {
       const since = Number(url.searchParams.get("since") ?? 0);
       if (!Number.isSafeInteger(since) || since < 0) {
@@ -59,11 +65,11 @@ export function createCodexHttpHandler(service: RuntimeCodexService) {
         result: await service.action(action, params as Record<string, unknown>),
       });
     } catch {
-      writeRuntimeJson(response, 502, {
+      writeRuntimeJson(response, 400, {
         error: {
-          code: "CODEX_REQUEST_FAILED",
+          code: "AGENT_REQUEST_FAILED",
           reason:
-            "Codex request failed. Check CLI installation, authentication, and request parameters.",
+            "Native agent request failed. Check the configured model, selected session, and run status.",
         },
       });
     }
