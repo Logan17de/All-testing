@@ -252,8 +252,15 @@ export class McpStdioClient {
     });
   }
 
-  #send(method: string, params: Record<string, unknown> | undefined, signal?: AbortSignal): Promise<unknown> {
-    if (signal?.aborted === true) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("MCP request cancelled."));
+  #send(
+    method: string,
+    params: Record<string, unknown> | undefined,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    if (signal?.aborted === true)
+      return Promise.reject(
+        signal.reason instanceof Error ? signal.reason : new Error("MCP request cancelled."),
+      );
     const child = this.#child;
     if (child === undefined || this.#closed) {
       return Promise.reject(new McpError("transport-closed", "MCP server is not running."));
@@ -284,7 +291,9 @@ export class McpStdioClient {
       const abort = (): void => {
         // Cancellation is best effort remotely. Settle locally without waiting
         // for a server acknowledgement, and ignore any late response.
-        settleError(signal?.reason instanceof Error ? signal.reason : new Error("MCP request cancelled."));
+        settleError(
+          signal?.reason instanceof Error ? signal.reason : new Error("MCP request cancelled."),
+        );
         this.#notify("notifications/cancelled", { requestId: id, reason: "Request cancelled" });
       };
       const timer = setTimeout(() => {
@@ -294,7 +303,8 @@ export class McpStdioClient {
       this.#pending.set(id, { resolve, reject, timer, cleanup });
       signal?.addEventListener("abort", abort, { once: true });
       child.stdin?.write(`${payload}\n`, (error) => {
-        if (error) settleError(new McpError("transport-closed", "Could not write to the MCP server."));
+        if (error)
+          settleError(new McpError("transport-closed", "Could not write to the MCP server."));
       });
     });
   }
@@ -364,7 +374,11 @@ export class McpStdioClient {
   }
 
   /** Invoke one tool. Arguments are passed through untouched. */
-  async callTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpCallResult> {
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<McpCallResult> {
     if (!this.#initialized) {
       throw new McpError("not-initialized", "MCP client must be initialized before calling tools.");
     }

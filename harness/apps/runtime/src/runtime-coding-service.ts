@@ -32,6 +32,7 @@ export interface RuntimeCodingServices extends RuntimeGraphHttpServices {
     readonly { id: string; displayName: string; provider: string; model: string }[]
   >;
   isModelConfigured?: (modelId: string) => boolean;
+  browserGeneration?: () => number | undefined;
   providerIdentity?: () => string | undefined;
 }
 /** Coding sessions are durable conversations; turns are ordinary recoverable graph runs. */
@@ -49,6 +50,8 @@ export class RuntimeCodingService {
       mutationConsent: boolean;
       subagentsEnabled: boolean;
       searchEnabled: boolean;
+      browserEnabled: boolean;
+      browserGeneration: number | undefined;
       modelId: string;
       providerIdentity: string | undefined;
     }
@@ -290,6 +293,7 @@ export class RuntimeCodingService {
         "mutationConsent",
         "subagentsEnabled",
         "searchEnabled",
+        "browserEnabled",
       ],
       "tool-approval/respond": ["id", "decision", "requestGeneration"],
     };
@@ -405,7 +409,7 @@ export class RuntimeCodingService {
       )
     )
       throw new Error("This session already has an unfinished turn.");
-    for (const key of ["mutationConsent", "subagentsEnabled", "searchEnabled"])
+    for (const key of ["mutationConsent", "subagentsEnabled", "searchEnabled", "browserEnabled"])
       if (params[key] !== undefined && typeof params[key] !== "boolean")
         throw new Error("Invalid turn consent.");
     const prompt = text("text", 24_000)!;
@@ -453,6 +457,9 @@ export class RuntimeCodingService {
       mutationConsent: params.mutationConsent === true,
       subagentsEnabled: params.subagentsEnabled === true,
       searchEnabled: params.searchEnabled === true,
+      browserEnabled: params.browserEnabled === true,
+      browserGeneration:
+        params.browserEnabled === true ? this.services.browserGeneration?.() : undefined,
       modelId,
       providerIdentity: this.services.providerIdentity?.(),
     });

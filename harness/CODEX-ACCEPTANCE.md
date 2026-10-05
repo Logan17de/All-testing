@@ -51,3 +51,11 @@ The independent security review found no credential serialization or raw token l
 the reviewed optional auth module. Tokens, refresh state and authorization attempts remain
 private and volatile; official token/JWKS requests refuse redirects and have bounded responses.
 No cookies, official-client impersonation or vendor-private backend endpoint is used.
+
+## Native browser and local desktop checks (2026-10-05)
+
+Scoped browser policy/driver/session/service/HTTP fixtures passed 71 tests. Native browser tools require an armed task and per-turn opt-in; inputs require exact human consent. The real sandbox-required browser probe refused launch because the system Chromium SUID helper is misconfigured. The official Chromium CDN download returned HTTP 403. No sandbox bypass, browser profile, login or external page was used.
+
+Desktop controller, Windows bridge and consent UI use offline fixtures and synthetic PNGs. The default runtime status was verified disabled through the real guarded local HTTP server. Whole-monitor capture, Windows input and model image transmission remain unverified; export explicitly reports `transmission: not-sent`.
+
+Final local repository suite: 216 files passed, 1818 tests passed and two skipped on Linux (one existing platform skip and the Windows-only compilation smoke). Full typecheck, lint, format, build, plugin smoke, runtime/web startup and numeric performance guards passed. Exact commit CI is tracked separately.

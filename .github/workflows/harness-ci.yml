@@ -60,6 +60,9 @@ jobs:
         id: format
         run: npm run format:check
 
+      - name: Model message inventory
+        run: npm run inventory:check
+
       - name: Format failure diff
         if: failure() && steps.format.outcome == 'failure' && runner.os == 'Linux'
         run: |

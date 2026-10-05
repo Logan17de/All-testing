@@ -1,4 +1,11 @@
 import {
+  createDesktopHttpHandler,
+  isDesktopHttpPath,
+  type RuntimeDesktopController,
+} from "./runtime-desktop-http.js";
+import { createBrowserHttpHandler, isBrowserHttpPath } from "./runtime-browser-http.js";
+import type { RuntimeBrowserService } from "./runtime-browser-service.js";
+import {
   createChatGPTAuthHttpHandler,
   type ChatGPTLoginController,
 } from "./runtime-chatgpt-auth-http.js";
@@ -184,6 +191,8 @@ export class RuntimeHttpServer {
   private readonly modelServices: RuntimeModelHttpServices | undefined;
   private readonly setupServices: RuntimeSetupHttpServices | undefined;
   private readonly chatGPTAuthHandler: ReturnType<typeof createChatGPTAuthHttpHandler> | undefined;
+  private readonly desktopHandler: ReturnType<typeof createDesktopHttpHandler> | undefined;
+  private readonly browserHandler: ReturnType<typeof createBrowserHttpHandler> | undefined;
   private readonly codingHandler: ReturnType<typeof createCodingHttpHandler> | undefined;
   private readonly connectionHandler: ReturnType<typeof createConnectionHttpHandler> | undefined;
   private readonly triggerServices: RuntimeTriggerHttpServices | undefined;
@@ -232,6 +241,8 @@ export class RuntimeHttpServer {
       readonly setup?: RuntimeSetupHttpServices;
       readonly connections?: RuntimeConnectionHttpServices;
       readonly agent?: RuntimeCodingService;
+      readonly browser?: RuntimeBrowserService;
+      readonly desktop?: RuntimeDesktopController;
       readonly chatGPTAuth?: { controller: ChatGPTLoginController; search?: CodexSearchBridge };
       /** Standing reasons to start a run: manual, cron, webhook and api triggers. */
       readonly triggers?: RuntimeTriggerHttpServices;
@@ -258,6 +269,8 @@ export class RuntimeHttpServer {
       services.chatGPTAuth === undefined
         ? undefined
         : createChatGPTAuthHttpHandler(services.chatGPTAuth);
+    this.desktopHandler = services.desktop ? createDesktopHttpHandler(services.desktop) : undefined;
+    this.browserHandler = services.browser ? createBrowserHttpHandler(services.browser) : undefined;
     this.codingHandler =
       services.agent === undefined ? undefined : createCodingHttpHandler(services.agent);
     this.triggerServices = services.triggers;
@@ -441,6 +454,26 @@ export class RuntimeHttpServer {
         }
         if (request.method !== "GET") this.security.checkMutation(request);
         void this.chatGPTAuthHandler(request, response, url).catch((error: unknown) =>
+          writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (isDesktopHttpPath(url.pathname)) {
+        if (!this.desktopHandler) {
+          writeJson(response, 503, { error: { code: "DESKTOP_UNAVAILABLE" } });
+          return;
+        }
+        void this.desktopHandler(request, response, url, this.security).catch((error: unknown) =>
+          writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (isBrowserHttpPath(url.pathname)) {
+        if (!this.browserHandler) {
+          writeJson(response, 503, { error: { code: "BROWSER_UNAVAILABLE" } });
+          return;
+        }
+        void this.browserHandler(request, response, url, this.security).catch((error: unknown) =>
           writeRuntimeApiError(response, error),
         );
         return;

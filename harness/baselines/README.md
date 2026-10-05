@@ -40,3 +40,5 @@ workspace paths, file tools and bounded processes. It is now declared explicitly
 snapshot is therefore nine workspace packages, zero external packages. The provider
 CLI dependency at the harness root is removed. This structural dependency update does
 not change any numeric reference or guard threshold.
+
+The scoped native browser adapter adds pinned `playwright-core` 1.63.0 as one external runtime dependency. The exact dependency snapshot is now 10 total (9 workspace, 1 external); measured numeric baselines and regression thresholds are unchanged. Chromium installation and OS sandbox availability remain host prerequisites.

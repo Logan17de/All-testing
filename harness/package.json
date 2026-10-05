@@ -25,7 +25,10 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "agent": "node scripts/agent-cli.mjs"
+    "agent": "node scripts/agent-cli.mjs",
+    "browser": "node scripts/browser-cli.mjs",
+    "inventory:refresh": "node scripts/refresh-model-message-inventory.mjs",
+    "inventory:check": "node scripts/refresh-model-message-inventory.mjs --check"
   },
   "devDependencies": {
     "@eslint/js": "~9.39.5",

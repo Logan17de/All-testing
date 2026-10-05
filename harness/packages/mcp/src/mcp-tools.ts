@@ -10,7 +10,13 @@ import type {
 } from "@zet-harness/plugin-api";
 import { PLUGIN_API_VERSION } from "@zet-harness/plugin-api";
 
-import { McpStdioClient, type McpServerConfig, type McpToolDescriptor } from "./mcp-client.js";
+import {
+  McpError,
+  McpStdioClient,
+  type McpCallResult,
+  type McpServerConfig,
+  type McpToolDescriptor,
+} from "./mcp-client.js";
 
 /**
  * Capability demanded by every MCP tool.
@@ -117,7 +123,16 @@ export function createMcpToolAdapter(
     async invoke(input: JsonObject, context: AdapterInvocationContext): Promise<ToolResult> {
       context.signal.throwIfAborted();
 
-      const result = await client.callTool(descriptor.name, { ...input }, context.signal);
+      let result: McpCallResult;
+      try {
+        result = await client.callTool(descriptor.name, { ...input }, context.signal);
+      } catch (error) {
+        context.signal.throwIfAborted();
+        // Remote diagnostic text can contain credentials. Keep it outside the
+        // adapter boundary, where the agent persists and repeats Error.message.
+        if (error instanceof McpError) throw new McpError(error.code, "MCP tool request failed.");
+        throw new Error("MCP tool request failed.");
+      }
       context.signal.throwIfAborted();
       const joined = result.content
         .map((block) => block.text ?? "")

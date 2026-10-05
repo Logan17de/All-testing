@@ -7,7 +7,9 @@ import { McpStdioClient } from "./mcp-client.js";
 it("settles cancellation promptly, notifies stdio server, and ignores late responses", async () => {
   const root = await mkdtemp(join(tmpdir(), "zet-mcp-cancel-"));
   const script = join(root, "server.cjs");
-  await writeFile(script, `
+  await writeFile(
+    script,
+    `
 const readline = require('node:readline');
 const send = (id, result) => process.stdout.write(JSON.stringify({jsonrpc:'2.0',id,result})+'\\n');
 let cancelled = false;
@@ -20,8 +22,13 @@ readline.createInterface({input:process.stdin}).on('line', line => {
   else send(m.id,{content:[{type:'text',text:String(cancelled)}]});
  }
 });
-`);
-  const client = new McpStdioClient({ command: process.execPath, args: [script], requestTimeoutMs: 5_000 });
+`,
+  );
+  const client = new McpStdioClient({
+    command: process.execPath,
+    args: [script],
+    requestTimeoutMs: 5_000,
+  });
   try {
     client.start();
     await client.initialize();

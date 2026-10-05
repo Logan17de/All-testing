@@ -38,6 +38,7 @@ export function AgentWorkspace() {
   const [mutationConsent, setMutationConsent] = useState(false);
   const [subagentsEnabled, setSubagentsEnabled] = useState(false);
   const [searchEnabled, setSearchEnabled] = useState(false);
+  const [browserEnabled, setBrowserEnabled] = useState(false);
   const [runs, setRuns] = useState<Record<string, AgentRun>>({});
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
@@ -80,6 +81,7 @@ export function AgentWorkspace() {
           setMutationConsent(false);
           setSubagentsEnabled(false);
           setSearchEnabled(false);
+          setBrowserEnabled(false);
           setRuns({});
           setArchived(false);
           setError("");
@@ -297,6 +299,7 @@ export function AgentWorkspace() {
                   mutationConsent,
                   subagentsEnabled,
                   searchEnabled,
+                  browserEnabled,
                   ...(instructions.trim() ? { instructions } : {}),
                 }),
               );
@@ -311,6 +314,7 @@ export function AgentWorkspace() {
               setMutationConsent(false);
               setSubagentsEnabled(false);
               setSearchEnabled(false);
+              setBrowserEnabled(false);
             });
           }}
         >
@@ -372,6 +376,27 @@ export function AgentWorkspace() {
               Only search queries and findings are exchanged. This research helper receives no
               coding, filesystem or shell permissions.
             </small>
+          </p>
+          <p>
+            <label>
+              <input
+                type="checkbox"
+                disabled={busy || active}
+                checked={browserEnabled}
+                onChange={(event) => setBrowserEnabled(event.target.checked)}
+              />{" "}
+              Allow tools from an explicitly armed isolated browser session for the next task. Every
+              browser input still needs approval.
+            </label>
+          </p>
+          <p>
+            <Link
+              href={currentRun ? `/desktop?task=${encodeURIComponent(currentRun.id)}` : "/desktop"}
+            >
+              Open a separate local desktop session
+            </Link>
+            . Desktop capture and input are disabled until explicitly armed and are not enabled by
+            this browser checkbox.
           </p>
           <p role="status">
             {currentRun ? `Task ${currentRun.status}.` : "Ready for a task."}

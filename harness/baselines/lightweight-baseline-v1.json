@@ -52,9 +52,9 @@
       "schedulerMedianMs": 0.243554,
       "sqliteMedianMs": 0.299057,
       "directRuntimeDependencies": {
-        "total": 9,
+        "total": 10,
         "workspace": 9,
-        "external": 0,
+        "external": 1,
         "names": [
           "@zet-harness/core",
           "@zet-harness/db",
@@ -64,7 +64,8 @@
           "@zet-harness/plugin-api",
           "@zet-harness/plugin-loader",
           "@zet-harness/scheduler",
-          "@zet-harness/tools"
+          "@zet-harness/tools",
+          "playwright-core"
         ]
       }
     },
@@ -75,9 +76,9 @@
       "schedulerMedianMs": 0.23525,
       "sqliteMedianMs": 2.70405,
       "directRuntimeDependencies": {
-        "total": 9,
+        "total": 10,
         "workspace": 9,
-        "external": 0,
+        "external": 1,
         "names": [
           "@zet-harness/core",
           "@zet-harness/db",
@@ -87,7 +88,8 @@
           "@zet-harness/plugin-api",
           "@zet-harness/plugin-loader",
           "@zet-harness/scheduler",
-          "@zet-harness/tools"
+          "@zet-harness/tools",
+          "playwright-core"
         ]
       }
     }

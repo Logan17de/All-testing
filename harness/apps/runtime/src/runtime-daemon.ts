@@ -1,3 +1,7 @@
+import { configuredDesktopController } from "./runtime-desktop-http.js";
+import { createRuntimeBrowserTools } from "./runtime-browser-tools.js";
+import { RuntimeBrowserService } from "./runtime-browser-service.js";
+import { createPlaywrightBrowserDriver } from "./runtime-browser-driver.js";
 import { providerAwaitingDecision } from "./runtime-provider-policy.js";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
@@ -187,6 +191,8 @@ export class RuntimeDaemon {
   private pluginSandboxes: readonly IsolatedPlugin[] = [];
   private models: RuntimeModels | undefined;
   private readonly agent: RuntimeCodingService;
+  private readonly desktop = configuredDesktopController();
+  private readonly browser: RuntimeBrowserService;
   private readonly chatGPTLogin = new ChatGPTLoginController(
     process.env["ZET_CHATGPT_HOST_ID"] ? { hostId: process.env["ZET_CHATGPT_HOST_ID"] } : {},
   );
@@ -242,6 +248,13 @@ export class RuntimeDaemon {
             authority,
           );
     const database = this.database;
+    this.browser = new RuntimeBrowserService({
+      cwd: () => readWorkspace(database)?.path ?? process.cwd(),
+      createDriver: async (options) => {
+        const { chromium } = await import("playwright-core");
+        return createPlaywrightBrowserDriver({ ...options, engine: chromium });
+      },
+    });
     this.agent = new RuntimeCodingService({
       database,
       workspace: () => readWorkspace(database)?.path ?? process.cwd(),
@@ -254,6 +267,10 @@ export class RuntimeDaemon {
       redact: (value) => this.redaction.redact(value),
       dispatch: execution === undefined ? undefined : (runId) => this.dispatcher?.wake(runId),
       modelCatalog: () => this.codingModelCatalog(),
+      browserGeneration: () => {
+        const state = this.browser.snapshot();
+        return state.armed ? state.generation : undefined;
+      },
       providerIdentity: () => this.currentChatGPTAccountKey(),
       isModelConfigured: (modelId) =>
         this.configuredModelIds().has(modelId) &&
@@ -312,6 +329,8 @@ export class RuntimeDaemon {
         memories: { database: this.database },
         setup: { database: this.database },
         agent: this.agent,
+        browser: this.browser,
+        desktop: this.desktop,
         chatGPTAuth: {
           controller: this.chatGPTLogin,
           ...(this.codexSearch ? { search: this.codexSearch } : {}),
@@ -693,12 +712,17 @@ export class RuntimeDaemon {
             },
           })
         : undefined;
+    const browserTools =
+      toolPolicy?.browserEnabled && toolPolicy.browserGeneration !== undefined
+        ? createRuntimeBrowserTools(this.browser, toolPolicy.browserGeneration)
+        : [];
     return createAgentNodeExecutor({
       database: this.database,
       models: host.models,
       tools: [
         ...codingTools,
         ...mutationTools,
+        ...browserTools,
         ...(childTool ? [childTool] : []),
         ...(searchTool ? [searchTool] : []),
       ],
@@ -714,6 +738,7 @@ export class RuntimeDaemon {
         return granted ? [adapter] : [];
       }),
       allows: (capability) =>
+        (capability === "browser:task" && browserTools.length > 0) ||
         (capability === "fs:read" && codingTools.length > 0) ||
         (["fs:write", "process:exec"].includes(capability) && mutationTools.length > 0) ||
         (capability === "agent:delegate" && childTool !== undefined) ||
@@ -880,6 +905,8 @@ export class RuntimeDaemon {
 
   private async stopOnce(): Promise<boolean> {
     const schedule = this.triggerSchedule.stop();
+    this.desktop.close();
+    await this.browser.close();
     this.agent.close();
     await this.agent.drainCancellations();
     this.chatGPTLogin.close();
