@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -28,13 +28,20 @@ it("exposes only read tools and refuses credentials and lexical escape through a
   try {
     await writeFile(join(root, "safe.ts"), "export const value = 1;");
     await writeFile(join(root, ".env"), "fixture-secret");
+    await mkdir(join(root, "nested/.claude"), { recursive: true });
+    await writeFile(join(root, "nested/.claude/.credentials.json"), "fixture-secret");
+    await writeFile(join(root, ".secrets.json"), "fixture-secret");
     const tools = createRuntimeCodingTools({ root });
     expect(tools.map((tool) => tool.manifest.id)).toEqual(["harness.fs.read", "harness.fs.list"]);
     expect(tools.every((tool) => tool.manifest.behavior.effect === "external-read")).toBe(true);
     const read = tools[0]!;
     await expect(read.invoke({ path: "../outside" }, context())).rejects.toThrow("rejected");
     await expect(read.invoke({ path: ".env" }, context())).rejects.toThrow("rejected");
-    if (process.platform === "linux") {
+    await expect(
+      read.invoke({ path: "nested/.claude/.credentials.json" }, context()),
+    ).rejects.toThrow("rejected");
+    await expect(read.invoke({ path: ".secrets.json" }, context())).rejects.toThrow("rejected");
+    if (process.platform === "linux" || process.platform === "win32") {
       expect(await read.invoke({ path: "safe.ts" }, context())).toEqual({
         value: { content: "export const value = 1;" },
       });
@@ -44,7 +51,7 @@ it("exposes only read tools and refuses credentials and lexical escape through a
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 75_000);
 
 it("rejects an already cancelled coding invocation without returning workspace data", async () => {
   const root = await mkdtemp(join(tmpdir(), "zet-coding-cancel-"));

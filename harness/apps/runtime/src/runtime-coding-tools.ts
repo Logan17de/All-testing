@@ -7,6 +7,7 @@ import type {
 } from "@zet-harness/plugin-api";
 import { createWorkspacePathResolver } from "@zet-harness/tools";
 
+import { executeWindowsCodingOperation } from "./runtime-windows-coding.js";
 import { executeWorkspaceReadTool } from "./runtime-workspace-read-tools.js";
 
 export interface RuntimeCodingToolOptions {
@@ -16,8 +17,9 @@ export interface RuntimeCodingToolOptions {
 
 /**
  * Provider-neutral, read-only coding tools. The shared descriptor-relative
- * workspace executor does not call Codex or any provider. Linux is required;
- * other platforms fail closed because path preflight alone is not a sandbox.
+ * workspace executors do not call Codex or any provider. Linux uses descriptor
+ * traversal; Windows uses verified no-reparse handles and sharing locks. Other
+ * platforms fail closed. These filesystem tools are not an OS process sandbox.
  * Writes and processes are deliberately absent until the host can suspend and
  * resume a durable approval bound to the exact tool call.
  */
@@ -34,8 +36,8 @@ export function createRuntimeCodingTools(
           title: operation === "read" ? "Read workspace file" : "List workspace directory",
           description:
             operation === "read"
-              ? "Read one UTF-8 workspace file up to 64 KiB. Credential names, symlinks and hardlinks are refused. Requires Linux."
-              : "List up to 200 workspace entries, excluding credential names and symlinks. Requires Linux.",
+              ? "Read one UTF-8 workspace file up to 64 KiB. Credential names, symlinks and hardlinks are refused. Requires Linux or Windows."
+              : "List up to 200 workspace entries, excluding credential names and symlinks. Requires Linux or Windows.",
           inputSchema: {
             type: "object",
             additionalProperties: false,
@@ -61,6 +63,26 @@ export function createRuntimeCodingTools(
             if (typeof input.path === "string") resolver.resolveLexical(input.path);
           } catch {
             throw new Error("Workspace tool rejected the request.");
+          }
+          if (process.platform === "win32") {
+            if (
+              Object.keys(input).some((key) => key !== "path") ||
+              (input.path !== undefined && typeof input.path !== "string")
+            )
+              throw new Error("Workspace tool rejected the request.");
+            if (operation === "read" && typeof input.path !== "string")
+              throw new Error("Workspace tool rejected the request.");
+            try {
+              const value = await executeWindowsCodingOperation(
+                { operation, root: resolver.root, path: (input.path as string) ?? "." },
+                context.signal,
+              );
+              context.signal.throwIfAborted();
+              return { value };
+            } catch {
+              context.signal.throwIfAborted();
+              throw new Error("Workspace tool rejected the request.");
+            }
           }
           const result = await executeWorkspaceReadTool(
             resolver.root,

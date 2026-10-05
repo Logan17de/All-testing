@@ -15,6 +15,7 @@ describe("standalone coding CLI", () => {
         mutationConsent: false,
         subagentsEnabled: false,
         browserEnabled: false,
+        desktopEnabled: false,
         searchEnabled: false,
       },
     });
@@ -38,6 +39,8 @@ describe("standalone coding CLI", () => {
         "yes",
         "--browser",
         "yes",
+        "--desktop",
+        "yes",
         "--search",
         "yes",
       ]).body?.params,
@@ -45,13 +48,15 @@ describe("standalone coding CLI", () => {
       mutationConsent: true,
       subagentsEnabled: true,
       browserEnabled: true,
+      desktopEnabled: true,
       searchEnabled: true,
     });
-    for (const key of ["consent", "subagents", "browser", "search"]) {
+    for (const key of ["consent", "subagents", "browser", "desktop", "search"]) {
       expect(parseAgentCommand([...base, `--${key}`, "no"]).body?.params).toMatchObject({
         mutationConsent: false,
         subagentsEnabled: false,
         browserEnabled: false,
+        desktopEnabled: false,
         searchEnabled: false,
       });
       for (const value of ["true", "YES", "1", "auto"])

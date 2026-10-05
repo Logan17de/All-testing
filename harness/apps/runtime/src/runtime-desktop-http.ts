@@ -1,3 +1,8 @@
+import type {
+  CodingImageAuthority,
+  RuntimeCodingImageStore,
+} from "./runtime-coding-image-store.js";
+import type { ModelImagePart } from "@zet-harness/plugin-api";
 import { randomUUID } from "node:crypto";
 import { open } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -110,13 +115,8 @@ export class RuntimeDesktopController {
       );
       return { requested: true };
     }
-    if (action === "export") {
-      only(params, ["generation", "artifactId", "confirmTransmission"]);
-      if (typeof params.artifactId !== "string" || params.confirmTransmission !== true)
-        throw new Error("Explicit image transmission consent required.");
-      await this.session.approveTransmission(generationOf(params), params.artifactId, true);
-      return { authorized: true, artifactId: params.artifactId, transmission: "not-sent" };
-    }
+    if (action === "export")
+      throw new Error("Use an active coding turn's scoped screenshot sharing tool.");
     if (action === "approval/respond") {
       only(params, ["id", "generation", "decision"]);
       if (
@@ -136,12 +136,71 @@ export class RuntimeDesktopController {
     }
     throw new Error("Unknown desktop action.");
   }
+  /** Trusted native tool bridge. HTTP cannot supply or forge turn/model/account authority. */
+  async approveTurnImage(
+    input: { authority: CodingImageAuthority; artifactId: string; maxUses: number },
+    store: RuntimeCodingImageStore,
+    signal: AbortSignal,
+  ): Promise<ModelImagePart> {
+    signal.throwIfAborted();
+    const authority = Object.freeze({ ...input.authority });
+    const current = this.session.status();
+    if (
+      !store.authorized(authority) ||
+      current.state !== "armed" ||
+      current.generation !== authority.desktopGeneration
+    )
+      throw new Error("Desktop turn scope expired.");
+    const stopped = () => this.close();
+    signal.addEventListener("abort", stopped, { once: true });
+    let bytes: Buffer | undefined;
+    try {
+      await this.session.approveTransmission(authority.desktopGeneration, input.artifactId, true, {
+        runId: authority.runId,
+        sessionId: authority.sessionId,
+        modelId: authority.modelId,
+        accountId: authority.accountId,
+        maxUses: input.maxUses,
+        expiresAtMs: current.expiresAt!,
+      });
+      signal.throwIfAborted();
+      if (!store.authorized(authority)) throw new Error("Desktop turn scope expired.");
+      bytes = await this.preview(authority.desktopGeneration, input.artifactId);
+      signal.throwIfAborted();
+      const scope = this.session.status();
+      if (
+        scope.state !== "armed" ||
+        scope.generation !== authority.desktopGeneration ||
+        scope.expiresAt === undefined
+      )
+        throw new Error("Desktop turn scope expired.");
+      const image = this.session.previewArtifact(authority.desktopGeneration, input.artifactId);
+      if (
+        bytes.length < 24 ||
+        bytes.readUInt32BE(16) !== image.width ||
+        bytes.readUInt32BE(20) !== image.height
+      )
+        throw new Error("Screenshot dimensions mismatch.");
+      return store.createApprovedLease({
+        authority,
+        bytes,
+        artifactId: input.artifactId,
+        expiresAt: scope.expiresAt,
+        maxUses: input.maxUses,
+        approved: true,
+      });
+    } finally {
+      bytes?.fill(0);
+      signal.removeEventListener("abort", stopped);
+    }
+  }
   async preview(generation: number, artifactId: string): Promise<Buffer> {
     const capture = this.session.previewArtifact(generation, artifactId);
     const file = await open(capture.localPath, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
     try {
       const stat = await file.stat();
-      if (!stat.isFile() || stat.size > 32 * 1024 * 1024) throw new Error("Invalid local preview.");
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size > 32 * 1024 * 1024)
+        throw new Error("Invalid local preview.");
       const buffer = Buffer.alloc(32 * 1024 * 1024 + 1);
       let length = 0;
       while (length < buffer.length) {

@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import type { DesktopDriver } from "./runtime-desktop-session.js";
 const fake = vi.hoisted(() => ({
   growth: true,
+  nlink: 1,
   closed: false,
   readLengths: [] as number[],
   hook: (): void => undefined,
@@ -11,7 +12,7 @@ vi.mock("node:fs/promises", async (original) => ({
   ...(await original<typeof FilePromises>()),
   open: () =>
     Promise.resolve({
-      stat: () => Promise.resolve({ isFile: () => true, size: 8 }),
+      stat: () => Promise.resolve({ isFile: () => true, size: 8, nlink: fake.nlink }),
       readFile: () => {
         throw new Error("Unbounded read must never run.");
       },
@@ -33,6 +34,7 @@ vi.mock("node:fs/promises", async (original) => ({
 import { RuntimeDesktopController } from "./runtime-desktop-http.js";
 async function fixture() {
   fake.closed = false;
+  fake.nlink = 1;
   fake.readLengths = [];
   fake.hook = () => undefined;
   const driver: DesktopDriver = {
@@ -69,4 +71,18 @@ it("revokes preview when the desktop generation changes during file read", async
   fake.hook = () => f.controller.close();
   await expect(f.controller.preview(f.generation, f.artifactId)).rejects.toThrow("inactive");
   expect(fake.closed).toBe(true);
+});
+
+it("refuses a multiply linked local capture before reading pixels", async () => {
+  const f = await fixture();
+  fake.nlink = 2;
+  try {
+    await expect(f.controller.preview(f.generation, f.artifactId)).rejects.toThrow(
+      "Invalid local preview",
+    );
+    expect(fake.readLengths).toEqual([]);
+    expect(fake.closed).toBe(true);
+  } finally {
+    f.controller.close();
+  }
 });

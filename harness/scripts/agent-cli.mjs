@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 
-const HELP = `Zet native coding agent\nUsage: npm run agent -- <status|models|sessions|start|read|exec|cancel|archive|restore> [options]\nOptions: --runtime http://127.0.0.1:3211 --session ID --turn ID --model ID --prompt TEXT --title TEXT --cwd WORKSPACE_RELATIVE_DIRECTORY\nInstruction selection (exec only): --skill-mode full|catalog --skills NAME,NAME\nPer-turn opt-ins (exec only): --consent yes|no --subagents yes|no --browser yes|no --search yes|no\nAll opt-ins default to no. --consent yes allows mutation requests, never automatic approval; review exact pending requests in the UI. Browser requires an independently armed scope; search requires configured authentication.\nSelect the workspace and configure inference in the local UI first.\nTool execution stays in the harness; this CLI never launches a provider CLI or grants approvals.`;
+const HELP = `Zet native coding agent\nUsage: npm run agent -- <status|models|sessions|start|read|exec|cancel|archive|restore> [options]\nOptions: --runtime http://127.0.0.1:3211 --session ID --turn ID --model ID --prompt TEXT --title TEXT --cwd WORKSPACE_RELATIVE_DIRECTORY\nInstruction selection (exec only): --skill-mode full|catalog --skills NAME,NAME\nPer-turn opt-ins (exec only): --consent yes|no --subagents yes|no --browser yes|no --desktop yes|no --search yes|no\nAll opt-ins default to no. --consent yes allows mutation requests, never automatic approval; review exact pending requests in the UI. Browser and desktop require independently armed scopes; desktop screenshot transmission requires separate exact-destination consent; search requires configured authentication.\nSelect the workspace and configure inference in the local UI first.\nTool execution stays in the harness; this CLI never launches a provider CLI or grants approvals.`;
 
 export function parseAgentCommand(argv) {
   const [command = "help", ...rest] = argv;
@@ -15,6 +15,7 @@ export function parseAgentCommand(argv) {
     "consent",
     "subagents",
     "browser",
+    "desktop",
     "search",
     "cwd",
     "skill-mode",
@@ -51,7 +52,7 @@ export function parseAgentCommand(argv) {
       skillNames.some((name) => !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u.test(name)))
   )
     throw new Error("Select at most 20 unique workspace skill names.");
-  const optIns = ["consent", "subagents", "browser", "search"];
+  const optIns = ["consent", "subagents", "browser", "desktop", "search"];
   for (const key of optIns) {
     if (key in options && (command !== "exec" || !["yes", "no"].includes(options[key])))
       throw new Error(`--${key} is an exec-only option accepting exactly yes or no.`);
@@ -91,6 +92,7 @@ export function parseAgentCommand(argv) {
         mutationConsent: options.consent === "yes",
         subagentsEnabled: options.subagents === "yes",
         browserEnabled: options.browser === "yes",
+        desktopEnabled: options.desktop === "yes",
         searchEnabled: options.search === "yes",
       },
     }),

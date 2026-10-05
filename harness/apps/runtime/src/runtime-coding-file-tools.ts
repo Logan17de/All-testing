@@ -4,6 +4,8 @@ import { lstat, mkdir, open, realpath, rename, rm, type FileHandle } from "node:
 import path from "node:path";
 import type { AdapterInvocationContext, JsonObject, ToolAdapter } from "@zet-harness/plugin-api";
 import { isBlockedWorkspacePathSegment } from "./runtime-workspace-read-tools.js";
+import { createWorkspacePathResolver } from "@zet-harness/tools";
+import { executeWindowsCodingOperation } from "./runtime-windows-coding.js";
 import type { RuntimeMutationToolOptions } from "./runtime-coding-mutation-tools.js";
 const MAX_BYTES = 65_536;
 const refused = (): Error => new Error("Workspace file operation rejected the request.");
@@ -13,7 +15,8 @@ function parts(value: unknown): string[] {
     value.length > 4096 ||
     value.includes("\\") ||
     value.includes("\0") ||
-    path.isAbsolute(value)
+    path.isAbsolute(value) ||
+    Buffer.from(value, "utf8").toString("utf8") !== value
   )
     throw refused();
   const result = value.split("/");
@@ -26,7 +29,12 @@ function parts(value: unknown): string[] {
   return result;
 }
 function text(value: unknown): string {
-  if (typeof value !== "string" || value.includes("\0") || Buffer.byteLength(value) > MAX_BYTES)
+  if (
+    typeof value !== "string" ||
+    value.includes("\0") ||
+    Buffer.byteLength(value) > MAX_BYTES ||
+    Buffer.from(value, "utf8").toString("utf8") !== value
+  )
     throw refused();
   return value;
 }
@@ -163,22 +171,67 @@ async function makeDirectory(root: string, filePath: string, signal: AbortSignal
     await parent.close();
   }
 }
-/** Narrow structured patches and single-directory creation; exact consent precedes every effect. */
+type FileOperation = "apply_patch" | "mkdir" | "write" | "rename" | "delete";
+function operationSnapshot(
+  operation: FileOperation,
+  input: JsonObject,
+): { snapshot: JsonObject; before?: string; after?: string } {
+  if (operation === "apply_patch") return patch(input);
+  const fields =
+    operation === "mkdir"
+      ? ["path"]
+      : operation === "write"
+        ? ["path", "expectedContent", "content"]
+        : operation === "rename"
+          ? ["path", "to", "expectedContent"]
+          : ["path", "expectedContent"];
+  if (Object.keys(input).some((key) => !fields.includes(key))) throw refused();
+  parts(input.path);
+  if (operation === "mkdir") return { snapshot: Object.freeze({ path: input.path! }) };
+  if (operation === "write") {
+    if (!Object.hasOwn(input, "expectedContent")) throw refused();
+    return {
+      snapshot: Object.freeze({
+        path: input.path!,
+        expectedContent: input.expectedContent === null ? null : text(input.expectedContent),
+        content: text(input.content),
+      }),
+    };
+  }
+  const expectedContent = text(input.expectedContent);
+  if (operation === "rename") parts(input.to);
+  return {
+    snapshot: Object.freeze({
+      path: input.path!,
+      expectedContent,
+      ...(operation === "rename" ? { to: input.to! } : {}),
+    }),
+  };
+}
+/** Exact consent precedes every effect; Windows mutations require locked expected content. */
 export function createRuntimeCodingFileTools(
   options: RuntimeMutationToolOptions,
 ): readonly ToolAdapter[] {
-  return (["apply_patch", "mkdir"] as const).map((operation): ToolAdapter => ({
+  const resolver = createWorkspacePathResolver({ root: options.root });
+  const operations: readonly FileOperation[] =
+    process.platform === "win32"
+      ? ["apply_patch", "mkdir", "write", "rename", "delete"]
+      : ["apply_patch", "mkdir"];
+  return operations.map((operation): ToolAdapter => ({
     manifest: {
       id: `harness.fs.${operation}`,
       version: "1",
-      title:
-        operation === "apply_patch"
-          ? "Apply exact workspace edits after consent"
-          : "Create workspace directory after consent",
+      title: `Workspace ${operation} after consent`,
       description:
         operation === "apply_patch"
-          ? "Apply up to 20 ordered unique exact-text replacements to one existing UTF-8 file. Supply full expectedContent; mismatches/ambiguous edits fail without writing. Linux only, 64 KiB files, credentials/links refused. This is a structured patch, not unified diff."
-          : "Create one new directory under existing workspace parents after explicit consent. Linux only; credentials and links refused. Does not recursively create parents.",
+          ? "Apply up to 20 unique ordered exact-text replacements to one 64 KiB UTF-8 file. Supply full expectedContent; ambiguous edits or mismatches fail. Structured patch, not unified diff. Linux atomic replacement; Windows exclusive in-place write with best-effort rollback, not crash atomic."
+          : operation === "mkdir"
+            ? "Create one new directory under existing workspace parents. Linux/Windows; credentials and links refused. No recursive parents."
+            : operation === "write"
+              ? "Create or replace a Windows UTF-8 file up to 64 KiB. expectedContent:null requires a new file; exact string requires matching existing content. Exclusive write with best-effort rollback, not crash atomic."
+              : operation === "rename"
+                ? "Rename one existing Windows regular UTF-8 file under workspace parents to a NEW destination. Exact expectedContent required; no overwrite, directory rename, credentials or links."
+                : "Delete one existing Windows regular UTF-8 file up to 64 KiB by its locked handle. Exact expectedContent required; no directory or recursive deletion, credentials or links.",
       inputSchema:
         operation === "apply_patch"
           ? {
@@ -207,8 +260,26 @@ export function createRuntimeCodingFileTools(
           : {
               type: "object",
               additionalProperties: false,
-              required: ["path"],
-              properties: { path: { type: "string" } },
+              required:
+                operation === "mkdir"
+                  ? ["path"]
+                  : operation === "write"
+                    ? ["path", "expectedContent", "content"]
+                    : operation === "rename"
+                      ? ["path", "to", "expectedContent"]
+                      : ["path", "expectedContent"],
+              properties: {
+                path: { type: "string" },
+                ...(operation === "mkdir"
+                  ? {}
+                  : {
+                      expectedContent: {
+                        type: operation === "write" ? ["string", "null"] : "string",
+                      },
+                    }),
+                ...(operation === "write" ? { content: { type: "string" } } : {}),
+                ...(operation === "rename" ? { to: { type: "string" } } : {}),
+              },
             },
       outputSchema: { type: "object" },
       behavior: {
@@ -223,34 +294,73 @@ export function createRuntimeCodingFileTools(
     },
     async invoke(input: JsonObject, context: AdapterInvocationContext) {
       context.signal.throwIfAborted();
-      if (process.platform !== "linux") throw refused();
-      const edit = operation === "apply_patch" ? patch(input) : undefined;
-      if (!edit && Object.keys(input).some((key) => key !== "path")) throw refused();
-      parts(input.path);
-      const snapshot = edit?.snapshot ?? Object.freeze({ path: input.path! });
-      if (
-        !(await options.approve(
+      if (process.platform !== "linux" && process.platform !== "win32") throw refused();
+      const planned = operationSnapshot(operation, input);
+      const snapshot = planned.snapshot;
+      try {
+        resolver.resolveLexical(snapshot.path as string);
+        if (operation === "rename") resolver.resolveLexical(snapshot.to as string);
+      } catch {
+        throw refused();
+      }
+      let approved = false;
+      try {
+        approved = await options.approve(
           Object.freeze({ tool: `harness.fs.${operation}`, args: snapshot }),
           context,
-        ))
-      )
+        );
+      } catch {
+        context.signal.throwIfAborted();
         throw refused();
+      }
+      if (!approved) throw refused();
       context.signal.throwIfAborted();
       try {
-        if (edit)
-          await replace(
-            options.root,
-            snapshot.path as string,
-            edit.before,
-            edit.after,
+        if (process.platform === "win32") {
+          const value = await executeWindowsCodingOperation(
+            {
+              operation: operation === "apply_patch" ? "write" : operation,
+              root: resolver.root,
+              path: snapshot.path as string,
+              ...(operation === "apply_patch"
+                ? { expectedContent: planned.before!, content: planned.after! }
+                : operation === "write"
+                  ? {
+                      expectedContent: snapshot.expectedContent as string | null,
+                      content: snapshot.content as string,
+                    }
+                  : operation === "rename"
+                    ? {
+                        expectedContent: snapshot.expectedContent as string,
+                        to: snapshot.to as string,
+                      }
+                    : operation === "delete"
+                      ? { expectedContent: snapshot.expectedContent as string }
+                      : {}),
+            },
             context.signal,
           );
-        else await makeDirectory(options.root, snapshot.path as string, context.signal);
+          context.signal.throwIfAborted();
+          return { value };
+        }
+        if (operation === "apply_patch")
+          await replace(
+            resolver.root,
+            snapshot.path as string,
+            planned.before!,
+            planned.after!,
+            context.signal,
+          );
+        else if (operation === "mkdir")
+          await makeDirectory(resolver.root, snapshot.path as string, context.signal);
+        else throw refused();
         return {
           value: {
             path: snapshot.path!,
             operation,
-            ...(edit ? { writtenBytes: Buffer.byteLength(edit.after) } : {}),
+            ...(planned.after === undefined
+              ? {}
+              : { writtenBytes: Buffer.byteLength(planned.after) }),
           },
         };
       } catch {

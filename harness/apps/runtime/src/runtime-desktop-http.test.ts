@@ -91,7 +91,7 @@ describe("desktop HTTP consent broker (mock driver only)", () => {
       await f.close();
     }
   });
-  it("stop aborts pending input; screenshot preview is local and export separately confirmed once", async () => {
+  it("stop aborts pending input; local preview never authorizes destinationless export", async () => {
     const f = await fixture();
     try {
       let generation = f.controller.snapshot().generation;
@@ -115,31 +115,14 @@ describe("desktop HTTP consent broker (mock driver only)", () => {
       await expect(
         f.controller.action("export", { generation, artifactId: capture.artifactId }),
       ).rejects.toThrow();
-      const exported = f.controller.action("export", {
-        generation,
-        artifactId: capture.artifactId,
-        confirmTransmission: true,
-      });
-      await new Promise((resolve) => setImmediate(resolve));
-      const consent = f.controller.snapshot().pendingConsents[0]!;
-      expect(consent.purpose).toBe("transmission");
-      await f.controller.action("approval/respond", {
-        id: consent.id,
-        generation,
-        decision: "approved",
-      });
-      expect(await exported).toEqual({
-        authorized: true,
-        artifactId: capture.artifactId,
-        transmission: "not-sent",
-      });
       await expect(
         f.controller.action("export", {
           generation,
           artifactId: capture.artifactId,
           confirmTransmission: true,
         }),
-      ).rejects.toThrow();
+      ).rejects.toThrow("active coding turn");
+      expect(f.controller.snapshot().pendingConsents).toEqual([]);
       await f.controller.action("stop", {});
       await expect(f.controller.preview(generation, capture.artifactId)).rejects.toThrow();
     } finally {

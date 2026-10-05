@@ -64,6 +64,11 @@ export interface McpToolAnnotations {
   readonly openWorldHint?: boolean;
 }
 
+export interface McpDescriptorDiagnostic {
+  readonly toolIndex: number;
+  readonly reason: "invalid-descriptor" | "missing-input-schema";
+}
+
 export interface McpToolDescriptor {
   readonly name: string;
   readonly description?: string;
@@ -340,6 +345,11 @@ export class McpStdioClient {
     this.#notify("notifications/initialized", undefined);
   }
 
+  #descriptorDiagnostics: readonly McpDescriptorDiagnostic[] = Object.freeze([]);
+  get descriptorDiagnostics(): readonly McpDescriptorDiagnostic[] {
+    return this.#descriptorDiagnostics;
+  }
+
   /** List the tools a server offers. */
   async listTools(): Promise<readonly McpToolDescriptor[]> {
     if (!this.#initialized) {
@@ -352,12 +362,22 @@ export class McpStdioClient {
     }
 
     const tools: McpToolDescriptor[] = [];
-    for (const entry of result["tools"] as readonly unknown[]) {
-      if (!isRecord(entry)) continue;
+    const diagnostics: McpDescriptorDiagnostic[] = [];
+    for (const [toolIndex, entry] of (result["tools"] as readonly unknown[]).entries()) {
+      if (!isRecord(entry)) {
+        diagnostics.push(Object.freeze({ toolIndex, reason: "invalid-descriptor" }));
+        continue;
+      }
       const name = entry["name"];
       const inputSchema = entry["inputSchema"];
-      if (typeof name !== "string" || name.length === 0) continue;
-      if (!isRecord(inputSchema)) continue;
+      if (typeof name !== "string" || name.length === 0) {
+        diagnostics.push(Object.freeze({ toolIndex, reason: "invalid-descriptor" }));
+        continue;
+      }
+      if (!isRecord(inputSchema)) {
+        diagnostics.push(Object.freeze({ toolIndex, reason: "missing-input-schema" }));
+        continue;
+      }
 
       const description = entry["description"];
       const annotations = entry["annotations"];
@@ -370,6 +390,7 @@ export class McpStdioClient {
         }),
       );
     }
+    this.#descriptorDiagnostics = Object.freeze(diagnostics);
     return Object.freeze(tools);
   }
 

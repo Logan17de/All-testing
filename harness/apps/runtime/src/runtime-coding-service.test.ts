@@ -219,7 +219,11 @@ describe("standalone coding service (scripted inference only)", () => {
     );
     dispatcher.start();
     let selected = root;
+    const revokeRun = vi.fn();
     const services = {
+      desktopGeneration: () => 7,
+      providerIdentity: () => "fixture-account",
+      revokeRun,
       database: db,
       workspace: () => selected,
       toolCatalog: () => [
@@ -255,7 +259,16 @@ describe("standalone coding service (scripted inference only)", () => {
         text: "Inspect the project",
         modelId: "fixture.model",
       })) as TurnResult;
+      expect(coding.toolPolicy(turn.turn.id)).toMatchObject({
+        desktopEnabled: false,
+        desktopGeneration: undefined,
+        explicitModelSelection: true,
+        sessionId,
+        modelId: "fixture.model",
+      });
       const report = await dispatcher.waitForIdle(turn.turn.id);
+      expect(coding.toolPolicy(turn.turn.id)).toBeUndefined();
+      expect(revokeRun).toHaveBeenCalledWith(turn.turn.id);
       expect(report.status).toBe("completed");
       expect(requests[0]?.messages[0]).toBeDefined();
       expect(JSON.stringify(requests)).toContain("focused native graph tools");
@@ -319,7 +332,15 @@ describe("standalone coding service (scripted inference only)", () => {
         text: "New graph snapshot",
         modelId: "fixture.second",
         instructions: "changed instructions",
+        desktopEnabled: true,
       })) as TurnResult;
+      expect(coding.toolPolicy(switched.turn.id)).toMatchObject({
+        desktopEnabled: true,
+        desktopGeneration: 7,
+        providerIdentity: "fixture-account",
+        modelId: "fixture.second",
+        sessionId,
+      });
       expect((await dispatcher.waitForIdle(switched.turn.id)).status).toBe("completed");
       const nextGraph = (await coding.action("session/graph", { sessionId })) as typeof firstGraph;
       expect(nextGraph.graphId).toBe(firstGraph.graphId);

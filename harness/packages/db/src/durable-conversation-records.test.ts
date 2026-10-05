@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
@@ -427,4 +430,103 @@ describe("durable conversations", () => {
       ).toThrow(/FOREIGN KEY/u);
     });
   });
+});
+
+it("persists bounded opaque state in order while rejecting plaintext additions and wrong roles", () => {
+  withDatabase(({ connection, ids, projectId }) => {
+    const conversation = createConversation(connection, {
+      conversationId: ids.next(),
+      projectId,
+      nowMs: 10,
+    });
+    const state = {
+      kind: "provider-state" as const,
+      provider: "openai-responses" as const,
+      model: "gpt-test",
+      scope: "a".repeat(64),
+      id: "rs_fixture",
+      encryptedContent: "opaque-fixture",
+    };
+    const stored = appendMessage(connection, {
+      messageId: ids.next(),
+      conversationId: conversation.conversationId,
+      role: "assistant",
+      parts: [
+        state,
+        { kind: "tool-call", callId: "call_fixture", name: "harness.fs.list", arguments: {} },
+      ],
+      nowMs: 10,
+    });
+    expect(readMessagePath(connection, stored.messageId).at(-1)?.parts).toEqual(stored.parts);
+    for (const part of [
+      { ...state, summary: "not retained" },
+      { ...state, scope: "bad" },
+      { ...state, encryptedContent: "x".repeat(65537) },
+    ])
+      expect(() =>
+        appendMessage(connection, {
+          messageId: ids.next(),
+          conversationId: conversation.conversationId,
+          role: "assistant",
+          parts: [part] as DurableMessagePart[],
+          nowMs: 10,
+        }),
+      ).toThrow();
+    expect(() =>
+      appendMessage(connection, {
+        messageId: ids.next(),
+        conversationId: conversation.conversationId,
+        role: "user",
+        parts: [state],
+        nowMs: 10,
+      }),
+    ).toThrow();
+  });
+});
+
+it("reloads encrypted state and tool ordering from an actual closed SQLite checkpoint", () => {
+  const directory = mkdtempSync(join(tmpdir(), "zet-opaque-reload-"));
+  const file = join(directory, "session.sqlite");
+  let head = "";
+  let parts: readonly DurableMessagePart[] = [];
+  try {
+    withDatabase(({ connection, ids, projectId }) => {
+      const conversation = createConversation(connection, {
+        conversationId: ids.next(),
+        projectId,
+        nowMs: 10,
+      });
+      const stored = appendMessage(connection, {
+        messageId: ids.next(),
+        conversationId: conversation.conversationId,
+        role: "assistant",
+        nowMs: 10,
+        parts: [
+          {
+            kind: "provider-state",
+            provider: "openai-responses",
+            model: "gpt-test",
+            scope: "a".repeat(64),
+            id: "rs_disk",
+            encryptedContent: "opaque-disk-fixture",
+          },
+          { kind: "tool-call", callId: "disk-call", name: "harness.fs.list", arguments: {} },
+        ],
+      });
+      head = stored.messageId;
+      parts = stored.parts;
+      connection.prepare("VACUUM INTO ?").run(file);
+    });
+    const reopened = new DatabaseSync(file, {
+      allowExtension: false,
+      enableForeignKeyConstraints: true,
+    });
+    try {
+      expect(readMessagePath(reopened, head).at(-1)?.parts).toEqual(parts);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

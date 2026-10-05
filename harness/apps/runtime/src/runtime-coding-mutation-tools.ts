@@ -185,7 +185,11 @@ export function createRuntimeMutationTools(
               throw refused();
             snapshot = Object.freeze({ command: input.command as string });
           }
-          if (process.platform !== "linux") throw refused();
+          if (
+            process.platform !== "linux" &&
+            !(process.platform === "win32" && operation === "exec")
+          )
+            throw refused();
           let approved = false;
           try {
             approved = await options.approve(Object.freeze({ tool: id, args: snapshot }), context);

@@ -1,3 +1,4 @@
+import type { ManagedWorktreeSandboxScope } from "./runtime-coding-worktrees.js";
 import { randomUUID } from "node:crypto";
 import { classifySafeGitArgs } from "./runtime-git-command.js";
 import { tmpdir } from "node:os";
@@ -36,11 +37,63 @@ export async function runSandboxedProcess(
   request: ProcessRunRequest,
   runner: typeof runBoundedProcess = runBoundedProcess,
   platform: string = process.platform,
+  managedScope?: ManagedWorktreeSandboxScope,
 ): Promise<ProcessRunResult> {
   request.signal?.throwIfAborted();
+  if (platform === "win32" && runner === runBoundedProcess) {
+    const nodeVersion =
+      request.command === process.execPath && JSON.stringify(request.args) === '["--version"]';
+    const gitStatus =
+      request.command === "git" && JSON.stringify(request.args) === JSON.stringify(GIT_ARGS);
+    if (!nodeVersion && !gitStatus)
+      throw new Error("Windows command unsupported by native sandbox.");
+    const { executeWindowsSandboxedProjectCommand } =
+      await import("./runtime-windows-process-sandbox.js");
+    const trustedGitRoot = process.env["ZET_WINDOWS_GIT_ROOT"];
+    return executeWindowsSandboxedProjectCommand(
+      {
+        cwd: request.cwd,
+        command: nodeVersion ? "node-version" : "git-status",
+        ...(request.signal ? { signal: request.signal } : {}),
+      },
+      trustedGitRoot ? { trustedGitRoot } : {},
+    );
+  }
   const node =
     request.command === process.execPath && JSON.stringify(request.args) === '["--version"]';
-  const gitMode = request.command === "git" ? classifySafeGitArgs(request.args) : undefined;
+  const managed = managedScope ? await import("./runtime-coding-worktrees.js") : undefined;
+  const managedMode = managed?.classifyManagedWorktreeArgs(request.args);
+  if (managedScope && (request.command !== "git" || !managedMode || platform !== "linux"))
+    throw new Error("Managed worktree sandbox request refused.");
+  if (managedScope && managed) {
+    if (managedMode === "write") {
+      const permittedCreate =
+        managedScope.pendingCreation &&
+        JSON.stringify(request.args) ===
+          JSON.stringify(
+            managed.buildManagedWorktreeCommand("create", managedScope.pendingCreation),
+          );
+      const permittedRemove =
+        !managedScope.pendingCreation &&
+        managedScope.records.some(
+          (record) =>
+            record.phase === "owned" &&
+            JSON.stringify(request.args) ===
+              JSON.stringify(managed.buildManagedWorktreeCommand("remove", { name: record.name })),
+        );
+      if (!permittedCreate && !permittedRemove)
+        throw new Error("Managed worktree action exceeds scoped ownership.");
+    }
+    const current = await managed.verifyManagedWorktreeOwnership(
+      request.cwd,
+      managedScope.journalPath,
+      managedScope.pendingCreation,
+    );
+    if (JSON.stringify(current) !== JSON.stringify(managedScope))
+      throw new Error("Managed worktree ownership changed.");
+  }
+  const gitMode =
+    managedMode ?? (request.command === "git" ? classifySafeGitArgs(request.args) : undefined);
   const git =
     request.command === "git" &&
     (gitMode !== undefined || JSON.stringify(request.args) === JSON.stringify(GIT_ARGS));
@@ -57,6 +110,18 @@ export async function runSandboxedProcess(
   );
   const held: Awaited<ReturnType<typeof open>>[] = [rootHandle];
   const rootSource = `/proc/${process.pid}/fd/${rootHandle.fd}`;
+  const workspaceTarget = managedScope ? root : "/workspace";
+  if (managedScope) {
+    const stat = await rootHandle.stat({ bigint: true });
+    if (
+      managedScope.root.path !== root ||
+      String(stat.dev) !== managedScope.root.dev ||
+      String(stat.ino) !== managedScope.root.ino
+    ) {
+      await rootHandle.close();
+      throw new Error("Managed workspace identity changed.");
+    }
+  }
   try {
     const args = [
       "--unshare-all",
@@ -78,9 +143,9 @@ export async function runSandboxedProcess(
       "/tmp",
       "--ro-bind",
       rootSource,
-      "/workspace",
+      workspaceTarget,
       "--chdir",
-      "/workspace",
+      workspaceTarget,
     );
     if (gitMode === "write") {
       const gitHandle = await open(
@@ -88,7 +153,30 @@ export async function runSandboxedProcess(
         constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
       );
       held.push(gitHandle);
-      args.push("--bind", `/proc/${process.pid}/fd/${gitHandle.fd}`, "/workspace/.git");
+      if (managedScope) {
+        const stat = await gitHandle.stat({ bigint: true });
+        if (String(stat.dev) !== managedScope.git.dev || String(stat.ino) !== managedScope.git.ino)
+          throw new Error("Managed Git identity changed.");
+      }
+      args.push("--bind", `/proc/${process.pid}/fd/${gitHandle.fd}`, `${workspaceTarget}/.git`);
+    }
+    if (managedScope) {
+      const container = await open(
+        join(rootSource, ".zet-worktrees"),
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      );
+      held.push(container);
+      const stat = await container.stat({ bigint: true });
+      if (
+        String(stat.dev) !== managedScope.container.dev ||
+        String(stat.ino) !== managedScope.container.ino
+      )
+        throw new Error("Managed container identity changed.");
+      args.push(
+        managedMode === "write" ? "--bind" : "--ro-bind",
+        `/proc/${process.pid}/fd/${container.fd}`,
+        `${workspaceTarget}/.zet-worktrees`,
+      );
     }
     // Hide known credential paths, including descendants. Too large a scan fails closed.
     let entriesSeen = 0;
@@ -96,7 +184,8 @@ export async function runSandboxedProcess(
       for await (const entry of await opendir(directory)) {
         if (++entriesSeen > 2000) throw new Error("Workspace exceeds process sandbox scan limit.");
         const local = join(directory, entry.name);
-        const target = `/workspace/${relative}${entry.name}`;
+        const target = `${workspaceTarget}/${relative}${entry.name}`;
+        if (managedScope && relative === "" && entry.name === ".zet-worktrees") continue;
         if (entry.name === "node_modules") {
           if (entry.isSymbolicLink() || !entry.isDirectory())
             throw new Error("Linked dependency path cannot be sandboxed.");
@@ -138,12 +227,21 @@ export async function runSandboxedProcess(
     }))
       args.push("--setenv", key, value);
     args.push("--", node ? "/zet-node" : "/usr/bin/git", ...request.args);
+    if (managedScope && managed) {
+      const current = await managed.verifyManagedWorktreeOwnership(
+        root,
+        managedScope.journalPath,
+        managedScope.pendingCreation,
+      );
+      if (JSON.stringify(current) !== JSON.stringify(managedScope))
+        throw new Error("Managed worktree ownership changed before execution.");
+    }
     const result = await runner({
       command: "/usr/bin/bwrap",
       args,
       cwd: root,
       env: {},
-      limits: { timeoutMs: 10000, maxOutputBytes: 65536, killGraceMs: 250 },
+      limits: { timeoutMs: managedScope ? 30000 : 10000, maxOutputBytes: 65536, killGraceMs: 250 },
       ...(request.signal ? { signal: request.signal } : {}),
     });
     request.signal?.throwIfAborted();
@@ -483,4 +581,12 @@ export async function readProjectSnapshotBytes(
   )
     throw new Error("Project changed during snapshot.");
   return buffer.subarray(0, length);
+}
+
+/** Approved managed worktree effects get only their owned container and Git metadata writable. */
+export async function runSandboxedManagedWorktree(
+  request: ProcessRunRequest,
+  scope: ManagedWorktreeSandboxScope,
+): Promise<ProcessRunResult> {
+  return runSandboxedProcess(request, runBoundedProcess, process.platform, scope);
 }

@@ -203,7 +203,7 @@ describe.runIf(process.platform === "linux")(
     });
   },
 );
-it.runIf(process.platform !== "linux")(
+it.runIf(process.platform !== "linux" && process.platform !== "win32")(
   "fails closed before consent without descriptor support",
   async () => {
     const approve = vi.fn(() => Promise.resolve(true));
@@ -212,3 +212,81 @@ it.runIf(process.platform !== "linux")(
     expect(approve).not.toHaveBeenCalled();
   },
 );
+
+it("offers Windows expected-content mutations and dispatches exact approved snapshots (mock bridge)", async () => {
+  const windows = await import("./runtime-windows-coding.js");
+  const bridge = vi
+    .spyOn(windows, "executeWindowsCodingOperation")
+    .mockResolvedValue({ operation: "fixture" });
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+  const root = await fixture();
+  try {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const approve = vi.fn(() => Promise.resolve(true));
+    const tools = createRuntimeCodingFileTools({ root, approve });
+    expect(tools.map((tool) => tool.manifest.id)).toEqual([
+      "harness.fs.apply_patch",
+      "harness.fs.mkdir",
+      "harness.fs.write",
+      "harness.fs.rename",
+      "harness.fs.delete",
+    ]);
+    await tools[0]!.invoke(request, context());
+    expect(bridge.mock.calls[0]![0]).toEqual({
+      operation: "write",
+      root,
+      path: "script.sh",
+      expectedContent: "alpha\nbeta\n",
+      content: "alpha\ngamma\n",
+    });
+    await tools[2]!.invoke({ path: "new.ts", expectedContent: null, content: "new" }, context());
+    await tools[3]!.invoke(
+      { path: "old.ts", to: "renamed.ts", expectedContent: "exact" },
+      context(),
+    );
+    await tools[4]!.invoke({ path: "delete.ts", expectedContent: "exact" }, context());
+    expect(bridge.mock.calls[2]![0]).toMatchObject({
+      operation: "rename",
+      path: "old.ts",
+      to: "renamed.ts",
+      expectedContent: "exact",
+    });
+    expect(bridge.mock.calls[3]![0]).toMatchObject({
+      operation: "delete",
+      path: "delete.ts",
+      expectedContent: "exact",
+    });
+    expect(approve).toHaveBeenCalledTimes(4);
+    expect(approve.mock.calls.length).toBe(4);
+  } finally {
+    Object.defineProperty(process, "platform", descriptor);
+    bridge.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+it("Windows mutations reject missing expected state and never execute denied consent (mock bridge)", async () => {
+  const windows = await import("./runtime-windows-coding.js");
+  const bridge = vi.spyOn(windows, "executeWindowsCodingOperation").mockResolvedValue({});
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+  const root = await fixture();
+  try {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const approve = vi.fn(() => Promise.resolve(false));
+    const tools = createRuntimeCodingFileTools({ root, approve });
+    await expect(tools[2]!.invoke({ path: "new", content: "x" }, context())).rejects.toThrow(
+      "rejected",
+    );
+    await expect(tools[3]!.invoke({ path: "old", to: "new" }, context())).rejects.toThrow(
+      "rejected",
+    );
+    expect(approve).not.toHaveBeenCalled();
+    await expect(
+      tools[2]!.invoke({ path: "new", expectedContent: null, content: "x" }, context()),
+    ).rejects.toThrow("rejected");
+    expect(bridge).not.toHaveBeenCalled();
+  } finally {
+    Object.defineProperty(process, "platform", descriptor);
+    bridge.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
+});

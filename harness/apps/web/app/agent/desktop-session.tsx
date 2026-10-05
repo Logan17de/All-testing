@@ -1,6 +1,12 @@
 "use client";
 
 import Image from "next/image";
+import { DesktopImageConsentCard } from "./desktop-image-consent";
+import {
+  desktopImageConsents,
+  desktopScreenshotScope,
+  desktopImageScope,
+} from "./desktop-image-consent-view";
 import { DesktopConsentCard } from "./desktop-consent";
 import { useEffect, useRef, useState } from "react";
 import { workspaceRequest } from "../../lib/workspace-client";
@@ -26,7 +32,6 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
   const [monitorId, setMonitorId] = useState("");
   const [windowId, setWindowId] = useState("");
   const [armConsent, setArmConsent] = useState(false);
-  const [transmissionConsent, setTransmissionConsent] = useState(false);
   const [capture, setCapture] = useState<Capture | null>(null);
   const [kind, setKind] = useState("click");
   const [x, setX] = useState("");
@@ -52,7 +57,6 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
       !desktopSessionActive(next, Date.now())
     ) {
       setCapture(null);
-      setTransmissionConsent(false);
       setTypedText("");
     }
     if (currentGeneration.current !== null && currentGeneration.current !== next.generation)
@@ -133,6 +137,7 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
         action budget. The companion asks for host consent before each input or focus action. No
         credentials or clipboard contents are read here.
       </p>
+      <p className="muted">{desktopScreenshotScope(status)}</p>
       <button
         disabled={busy || !status || status.state === "disabled"}
         onClick={() => {
@@ -157,6 +162,7 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
         <label>
           Monitor{" "}
           <select
+            style={{ maxWidth: "100%" }}
             disabled={busy || armed}
             value={monitorId}
             onChange={(event) => {
@@ -176,6 +182,7 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
         <label>
           Window{" "}
           <select
+            style={{ maxWidth: "100%" }}
             disabled={busy || armed}
             value={windowId}
             onChange={(event) => setWindowId(event.target.value)}
@@ -235,7 +242,6 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
           void run(async () => {
             acceptStatus(await action("stop"));
             setCapture(null);
-            setTransmissionConsent(false);
           });
         }}
       >
@@ -268,7 +274,6 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
                 height: result.height,
                 generation: status!.generation,
               });
-              setTransmissionConsent(false);
             });
           }}
         >
@@ -289,33 +294,12 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
             This preview stays between your browser and the local runtime. It is not attached to a
             model request automatically.
           </p>
-          <label>
-            <input
-              type="checkbox"
-              checked={transmissionConsent}
-              disabled={busy}
-              onChange={(event) => setTransmissionConsent(event.target.checked)}
-            />{" "}
-            I authorize one provider transfer of this exact screenshot after separate host consent.
-          </label>{" "}
-          <button
-            disabled={busy || !transmissionConsent}
-            onClick={() => {
-              void run(async () => {
-                await action("export", {
-                  generation: capture.generation,
-                  artifactId: capture.artifactId,
-                  confirmTransmission: true,
-                });
-                setTransmissionConsent(false);
-                setMessage(
-                  "Transmission consent requested. No image is sent automatically by this page.",
-                );
-              });
-            }}
-          >
-            Request screenshot transmission consent
-          </button>
+          <button disabled>Manual screenshot transfer is unavailable</button>
+          <p>
+            To share an exact screenshot, enable desktop tools for a coding task and review its
+            destination-bound screenshot request here. This page never sends the preview
+            automatically.
+          </p>
         </div>
       ) : null}
       <fieldset disabled={busy || !canAct}>
@@ -399,10 +383,27 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
           Request host-approved action
         </button>
       </fieldset>
-      {desktopConsents(pendingConsents, status).map((request) => (
-        <DesktopConsentCard
+      {desktopConsents(pendingConsents, status)
+        .filter((request) => request.purpose === "input")
+        .map((request) => (
+          <DesktopConsentCard
+            key={`${request.generation}:${request.id}`}
+            request={request}
+            respond={async (decision) => {
+              await action("approval/respond", {
+                id: request.id,
+                generation: request.generation,
+                decision,
+              });
+            }}
+          />
+        ))}
+      {desktopImageConsents(pendingConsents, status, receivedAt).map((request) => (
+        <DesktopImageConsentCard
           key={`${request.generation}:${request.id}`}
           request={request}
+          scope={desktopImageScope(request)}
+          {...(status?.expiresAt === undefined ? {} : { taskExpiresAt: status.expiresAt })}
           respond={async (decision) => {
             await action("approval/respond", {
               id: request.id,

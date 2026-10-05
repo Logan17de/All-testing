@@ -47,15 +47,36 @@ it("captures complete selected monitor locally and requires separate one-use tra
       "private-fixture-path",
     );
     await expect(
-      session.approveTransmission(armed.generation, capture.artifactId, false),
+      session.approveTransmission(armed.generation, capture.artifactId, false, {
+        runId: "run",
+        sessionId: "session",
+        modelId: "model",
+        accountId: null,
+        maxUses: 2,
+        expiresAtMs: armed.expiresAt!,
+      }),
     ).rejects.toThrow("consent");
-    await session.approveTransmission(armed.generation, capture.artifactId, true);
+    await session.approveTransmission(armed.generation, capture.artifactId, true, {
+      runId: "run",
+      sessionId: "session",
+      modelId: "model",
+      accountId: null,
+      maxUses: 2,
+      expiresAtMs: armed.expiresAt!,
+    });
     expect(approve).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: "transmission", task: "Inspect screen" }),
       expect.any(AbortSignal),
     );
     await expect(
-      session.approveTransmission(armed.generation, capture.artifactId, true),
+      session.approveTransmission(armed.generation, capture.artifactId, true, {
+        runId: "run",
+        sessionId: "session",
+        modelId: "model",
+        accountId: null,
+        maxUses: 2,
+        expiresAtMs: armed.expiresAt!,
+      }),
     ).rejects.toThrow("consent");
   } finally {
     session.stop();

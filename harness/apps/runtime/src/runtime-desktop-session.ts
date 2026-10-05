@@ -39,12 +39,30 @@ export interface DesktopDriver {
   act(action: DesktopAction, signal: AbortSignal): Promise<void>;
   removeCapture(capture: DesktopCapture): Promise<void>;
 }
+export interface DesktopTransmissionDestination {
+  readonly runId: string;
+  readonly sessionId: string;
+  readonly modelId: string;
+  readonly accountId: string | null;
+  readonly maxUses: number;
+  readonly expiresAtMs: number;
+}
+export interface DesktopCaptureScope {
+  readonly monitorId: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly windowId?: string;
+}
 export interface DesktopConsentRequest {
   task: string;
   generation: number;
   purpose: "input" | "transmission";
   action?: DesktopAction;
   artifactId?: string;
+  destination?: DesktopTransmissionDestination;
+  captureScope?: DesktopCaptureScope;
 }
 
 /** Explicitly armed local session. A screenshot never reaches inference through this controller. */
@@ -71,6 +89,7 @@ export class RuntimeDesktopSession {
       }
     | undefined;
   #artifacts = new Map<string, DesktopCapture>();
+  #artifactScopes = new Map<string, DesktopCaptureScope>();
   #inventory: { monitors: DesktopMonitor[]; windows: DesktopWindow[] } = {
     monitors: [],
     windows: [],
@@ -173,6 +192,7 @@ export class RuntimeDesktopSession {
     for (const capture of this.#artifacts.values())
       void this.options.driver?.removeCapture(capture).catch(() => undefined);
     this.#artifacts.clear();
+    this.#artifactScopes.clear();
     this.#released.clear();
     return this.status();
   }
@@ -226,14 +246,30 @@ export class RuntimeDesktopSession {
       this.#session(generation, false);
       const artifactId = randomUUID();
       this.#artifacts.set(artifactId, capture);
+      this.#artifactScopes.set(
+        artifactId,
+        Object.freeze({
+          monitorId: session.monitor.id,
+          x: session.monitor.x,
+          y: session.monitor.y,
+          width: session.monitor.width,
+          height: session.monitor.height,
+          ...(session.windowId ? { windowId: session.windowId } : {}),
+        }),
+      );
       this.#record("local-capture");
       return { artifactId, width: capture.width, height: capture.height };
     } finally {
       this.#busy = false;
     }
   }
-  async act(generation: number, action: DesktopAction): Promise<void> {
+  async act(
+    generation: number,
+    action: DesktopAction,
+    authorized: () => boolean = () => true,
+  ): Promise<void> {
     const session = this.#session(generation);
+    if (!authorized()) throw new Error("Desktop invocation scope expired.");
     if (this.#busy) throw new Error("Desktop session is busy.");
     const snapshot = structuredClone(action);
     const keys =
@@ -295,6 +331,7 @@ export class RuntimeDesktopSession {
       )
         throw new Error("Desktop input declined.");
       this.#session(generation);
+      if (!authorized()) throw new Error("Desktop invocation scope expired.");
       this.#record("input-approved", snapshot.kind);
       session.remaining--;
       if (session.windowId && (snapshot.kind === "key" || snapshot.kind === "text"))
@@ -304,6 +341,7 @@ export class RuntimeDesktopSession {
             session.controller.signal,
           ),
         );
+      if (!authorized()) throw new Error("Desktop invocation scope expired.");
       await this.#bounded(session.controller.signal, () =>
         this.options.driver!.act(snapshot, session.controller.signal),
       );
@@ -323,15 +361,51 @@ export class RuntimeDesktopSession {
     generation: number,
     artifactId: string,
     confirmTransmission: boolean,
+    destination?: DesktopTransmissionDestination,
   ): Promise<DesktopCapture> {
     const session = this.#session(generation, false);
     const artifact = this.#artifacts.get(artifactId);
+    if (
+      !destination ||
+      Object.keys(destination).some(
+        (key) =>
+          !["runId", "sessionId", "modelId", "accountId", "maxUses", "expiresAtMs"].includes(key),
+      ) ||
+      ![destination.runId, destination.sessionId, destination.modelId].every(
+        (value) =>
+          typeof value === "string" &&
+          value.length > 0 &&
+          value.length <= 200 &&
+          !/[\x00-\x1f\x7f]/.test(value),
+      ) ||
+      !(
+        destination.accountId === null ||
+        (typeof destination.accountId === "string" &&
+          destination.accountId.length > 0 &&
+          destination.accountId.length <= 200)
+      ) ||
+      !Number.isInteger(destination.maxUses) ||
+      destination.maxUses < 1 ||
+      destination.maxUses > 8 ||
+      !Number.isSafeInteger(destination.expiresAtMs) ||
+      destination.expiresAtMs <= this.#now() ||
+      destination.expiresAtMs > session.expiresAt
+    )
+      throw new Error("Explicit current-turn screenshot destination required.");
+    const destinationSnapshot = Object.freeze({ ...destination });
     if (confirmTransmission !== true || !artifact || this.#released.has(artifactId))
       throw new Error("Explicit screenshot transmission consent required.");
     if (
       !(await this.#bounded(session.controller.signal, () =>
         this.options.approve(
-          { task: session.task, generation, purpose: "transmission", artifactId },
+          {
+            task: session.task,
+            generation,
+            purpose: "transmission",
+            artifactId,
+            destination: destinationSnapshot,
+            captureScope: this.#artifactScopes.get(artifactId)!,
+          },
           session.controller.signal,
         ),
       ))

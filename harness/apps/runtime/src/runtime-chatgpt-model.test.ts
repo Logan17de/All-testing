@@ -223,6 +223,47 @@ describe("host-authorized image input (mock provider; no desktop bridge)", () =>
       }),
     };
   }
+  it("preserves original invocation identity and refuses revocation during credential refresh", async () => {
+    const f = setup([completed([message])]);
+    const original = context();
+    let authorized = true;
+    let release!: (value: string) => void;
+    const accessToken = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const validate = vi.fn((received: AdapterInvocationContext) => {
+      expect(received).toBe(original);
+      if (!authorized) throw new Error("private revoked authority");
+    });
+    const resolver = vi.fn((_ref: string, received: AdapterInvocationContext) => {
+      expect(received).toBe(original);
+      return Promise.resolve({ bytes: png, mediaType: "image/png" as const });
+    });
+    const adapter = createChatGPTPlanModelAdapter({
+      id: "fixture",
+      model: "gpt-test",
+      accessToken,
+      fetch: f.fetch,
+      resolveImage: resolver,
+      validateImageAuthority: validate,
+    });
+    const pending = adapter.generate(imageRequest(), original);
+    await vi.waitFor(() => expect(accessToken).toHaveBeenCalledOnce());
+    authorized = false;
+    release("volatile-secret");
+    await expect(pending).rejects.toMatchObject({ code: "MODEL_REQUEST_UNSUPPORTED" });
+    expect(validate).toHaveBeenCalledTimes(2);
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+  it("accepts host-authorized image bytes above the old thumbnail limit within the 8MiB cap", async () => {
+    const bytes = Buffer.concat([png, Buffer.alloc(600_000)]);
+    const f = imageSetup(() => Promise.resolve({ bytes, mediaType: "image/png" }));
+    await f.adapter.generate(imageRequest(), context());
+    expect(f.fetch).toHaveBeenCalledOnce();
+  });
   it("encodes only trusted user image bytes as public input_image without persisting the artifact ref", async () => {
     const resolver = vi.fn<
       NonNullable<Parameters<typeof createChatGPTPlanModelAdapter>[0]["resolveImage"]>
@@ -279,7 +320,7 @@ describe("host-authorized image input (mock provider; no desktop bridge)", () =>
     expect(f.fetch).not.toHaveBeenCalled();
   });
   it("rejects MIME/magic mismatch and limits raw bytes before base64/provider submission", async () => {
-    for (const bytes of [Buffer.from("not an image"), Buffer.alloc(524_289)]) {
+    for (const bytes of [Buffer.from("not an image"), Buffer.alloc(8_388_609)]) {
       const f = imageSetup(() => Promise.resolve({ bytes, mediaType: "image/png" }));
       await expect(f.adapter.generate(imageRequest(), context())).rejects.toHaveProperty("code");
       expect(f.fetch).not.toHaveBeenCalled();
@@ -328,4 +369,207 @@ describe("host-authorized image input (mock provider; no desktop bridge)", () =>
       code: "MODEL_REQUEST_UNSUPPORTED",
     });
   });
+});
+describe("opaque encrypted reasoning state (mock Responses)", () => {
+  const scope = "a".repeat(64);
+  const reasoning = {
+    type: "reasoning",
+    id: "rs_fixture",
+    encrypted_content: "opaque-fixture-ciphertext",
+    summary: [{ type: "summary_text", text: "not retained" }],
+  };
+  function stateSetup(events: unknown[], stateScope = scope, model = "gpt-test") {
+    const f = setup(events);
+    return {
+      ...f,
+      adapter: createChatGPTPlanModelAdapter({
+        id: "chatgpt.fixture",
+        model,
+        stateScope,
+        accessToken: f.accessToken,
+        fetch: f.fetch,
+      }),
+    };
+  }
+  it("preserves only opaque encrypted item in output order and replays after JSON reload", async () => {
+    const first = stateSetup([completed([reasoning, message])]);
+    const output = await first.adapter.generate(request, context());
+    expect(output.message.parts[0]).toEqual({
+      kind: "provider-state",
+      provider: "openai-responses",
+      model: "gpt-test",
+      scope,
+      id: "rs_fixture",
+      encryptedContent: "opaque-fixture-ciphertext",
+    });
+    expect(JSON.stringify(output)).not.toContain("not retained");
+    const persisted = JSON.parse(JSON.stringify(output.message)) as typeof output.message;
+    const resumed = stateSetup([completed([message])]);
+    await resumed.adapter.generate(
+      {
+        messages: [
+          ...request.messages,
+          persisted,
+          { role: "user", parts: [{ kind: "text", text: "continue" }] },
+        ],
+      },
+      context(),
+    );
+    const body = JSON.parse(resumed.fetch.mock.calls[0]![1]!.body as string) as {
+      input: unknown[];
+    };
+    expect(body.input[2]).toEqual({
+      type: "reasoning",
+      id: "rs_fixture",
+      encrypted_content: "opaque-fixture-ciphertext",
+      summary: [],
+    });
+    expect(JSON.stringify(body)).not.toContain(scope);
+  });
+  it("refuses account/model/provider mismatch and user-injected state before credentials", async () => {
+    const output = await stateSetup([completed([reasoning])]).adapter.generate(request, context());
+    for (const f of [stateSetup([], "b".repeat(64)), stateSetup([], scope, "another-model")]) {
+      await expect(
+        f.adapter.generate({ messages: [output.message] }, context()),
+      ).rejects.toMatchObject({ code: "MODEL_REQUEST_UNSUPPORTED" });
+      expect(f.accessToken).not.toHaveBeenCalled();
+      expect(f.fetch).not.toHaveBeenCalled();
+    }
+    const f = stateSetup([]);
+    await expect(
+      f.adapter.generate({ messages: [{ ...output.message, role: "user" }] }, context()),
+    ).rejects.toMatchObject({ code: "MODEL_REQUEST_UNSUPPORTED" });
+  });
+  it("fails closed for absent scope, missing ciphertext, duplicate IDs and oversized state", async () => {
+    await expect(
+      setup([completed([reasoning])]).adapter.generate(request, context()),
+    ).rejects.toMatchObject({ code: "MODEL_RESPONSE_INVALID" });
+    for (const items of [
+      [{ ...reasoning, encrypted_content: undefined }],
+      [reasoning, reasoning],
+      [{ ...reasoning, encrypted_content: "x".repeat(65_537) }],
+    ])
+      await expect(
+        stateSetup([completed(items)]).adapter.generate(request, context()),
+      ).rejects.toHaveProperty("code");
+  });
+});
+it("replays encrypted reasoning before its tool call and corresponding result across a persisted step", async () => {
+  const scope = "c".repeat(64);
+  const f = setup([]);
+  let encodedName = "";
+  f.fetch.mockImplementationOnce((_url, init) => {
+    const body = JSON.parse(init!.body as string) as { tools: { tools: { name: string }[] }[] };
+    encodedName = body.tools[0]!.tools[0]!.name;
+    return Promise.resolve(
+      new Response(
+        `data: ${JSON.stringify(
+          completed([
+            {
+              type: "reasoning",
+              id: "rs_tool",
+              encrypted_content: "opaque-tool-state",
+              summary: [],
+            },
+            {
+              type: "function_call",
+              namespace: "harness",
+              name: encodedName,
+              call_id: "call_state",
+              arguments: "{}",
+            },
+          ]),
+        )}\n\n`,
+        { headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+  });
+  const options = {
+    id: "chatgpt.fixture",
+    model: "gpt-test",
+    stateScope: scope,
+    accessToken: f.accessToken,
+    fetch: f.fetch,
+  };
+  const first = await createChatGPTPlanModelAdapter(options).generate(
+    { ...request, tools: [{ name: "harness.fs.list", inputSchema: { type: "object" } }] },
+    context(),
+  );
+  const reloaded = JSON.parse(JSON.stringify(first.message)) as typeof first.message;
+  f.fetch.mockImplementationOnce(() =>
+    Promise.resolve(
+      new Response(`data: ${JSON.stringify(completed([message]))}\n\n`, {
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    ),
+  );
+  await createChatGPTPlanModelAdapter(options).generate(
+    {
+      messages: [
+        ...request.messages,
+        reloaded,
+        {
+          role: "tool",
+          parts: [{ kind: "tool-result", callId: "call_state", value: { entries: [] } }],
+        },
+      ],
+    },
+    context(),
+  );
+  const body = JSON.parse(f.fetch.mock.calls[1]![1]!.body as string) as {
+    input: { type?: string; call_id?: string }[];
+  };
+  expect(body.input.slice(2).map((item) => item.type)).toEqual([
+    "reasoning",
+    "function_call",
+    "function_call_output",
+  ]);
+  expect(body.input[3]?.call_id).toBe("call_state");
+  expect(body.input[4]?.call_id).toBe("call_state");
+});
+
+it("allows only explicit incompatible state omission, retaining call/result order and safe count", async () => {
+  const f = setup([completed([message])]);
+  const adapter = createChatGPTPlanModelAdapter({
+    id: "chatgpt.fixture",
+    model: "gpt-test",
+    stateScope: "b".repeat(64),
+    accessToken: f.accessToken,
+    fetch: f.fetch,
+  });
+  const result = await adapter.generate(
+    {
+      providerStatePolicy: "omit-incompatible",
+      messages: [
+        {
+          role: "assistant",
+          parts: [
+            {
+              kind: "provider-state",
+              provider: "openai-responses",
+              model: "gpt-test",
+              scope: "a".repeat(64),
+              id: "rs_old",
+              encryptedContent: "opaque-old",
+            },
+            { kind: "tool-call", callId: "old-call", name: "harness.fs.list", arguments: {} },
+          ],
+        },
+        {
+          role: "tool",
+          parts: [{ kind: "tool-result", callId: "old-call", value: { entries: [] } }],
+        },
+      ],
+    },
+    context(),
+  );
+  expect(result.droppedProviderStateCount).toBe(1);
+  const body = JSON.parse(f.fetch.mock.calls[0]![1]!.body as string) as {
+    input: { type?: string }[];
+  };
+  expect(JSON.stringify(body)).not.toContain("opaque-old");
+  expect(body.input.slice(1).map((item) => item.type)).toEqual([
+    "function_call",
+    "function_call_output",
+  ]);
 });

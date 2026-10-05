@@ -53,8 +53,18 @@ export interface ModelToolResultPart {
   readonly value: JsonValue;
   readonly isError?: boolean;
 }
+/** Opaque provider-authored encrypted state. Never text, tools, secrets or authority. */
+export interface ModelProviderStatePart {
+  readonly kind: "provider-state";
+  readonly provider: "openai-responses";
+  readonly model: string;
+  /** Host account/client identity digest; credentials are never stored here. */
+  readonly scope: string;
+  readonly id: string;
+  readonly encryptedContent: string;
+}
 export type ModelMessagePart =
-  ModelTextPart | ModelImagePart | ModelToolCallPart | ModelToolResultPart;
+  ModelTextPart | ModelImagePart | ModelToolCallPart | ModelToolResultPart | ModelProviderStatePart;
 export interface ModelMessage {
   readonly role: "system" | "developer" | "user" | "assistant" | "tool";
   readonly parts: readonly ModelMessagePart[];
@@ -66,6 +76,8 @@ export interface ModelToolSpecification {
 }
 export interface ModelRequest {
   readonly messages: readonly ModelMessage[];
+  /** Trusted host explicit switch policy; default requires matching opaque state. */
+  readonly providerStatePolicy?: "require" | "omit-incompatible";
   readonly model?: string;
   readonly maxOutputTokens?: number;
   readonly tools?: readonly ModelToolSpecification[];
@@ -86,6 +98,7 @@ export interface ModelResult {
   readonly finishReason: "stop" | "length" | "tool-calls" | "content-filter" | "other";
   readonly usage?: AdapterUsage;
   readonly providerRequestId?: string;
+  readonly droppedProviderStateCount?: number;
 }
 /** Transient transport events. The completed result, not every delta, is the durable output. */
 export type ModelStreamEvent =
@@ -95,6 +108,12 @@ export type ModelStreamEvent =
   | { readonly type: "completed"; readonly result: ModelResult };
 
 export interface ModelAdapterManifest {
+  /** Private replay identity, not an account grant or executable authority. */
+  readonly providerStateIdentity?: {
+    readonly provider: "openai-responses";
+    readonly model: string;
+    readonly scope: string;
+  };
   readonly id: string;
   readonly version: Version;
   readonly title: string;

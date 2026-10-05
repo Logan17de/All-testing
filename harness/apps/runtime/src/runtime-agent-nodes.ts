@@ -38,6 +38,7 @@ import type {
   JsonValue,
   ModelMessage,
   ModelMessagePart,
+  ModelImagePart,
   ModelRequest,
   ModelResult,
   ToolAdapter,
@@ -76,7 +77,9 @@ export type AgentStepErrorCode =
   | "AGENT_NO_MODEL"
   | "AGENT_PROJECT_BUSY"
   | "AGENT_BUDGET_EXCEEDED"
-  | "AGENT_INPUT_MISSING";
+  | "AGENT_INPUT_MISSING"
+  | "AGENT_OPAQUE_CONTEXT_LOST"
+  | "AGENT_PROVIDER_STATE_MISMATCH";
 
 export class AgentStepError extends Error {
   readonly code: AgentStepErrorCode;
@@ -118,6 +121,17 @@ export interface AgentNodeExecutorOptions {
    */
   readonly configuredModels?: () => ReadonlySet<string>;
   /** The credential accessor for a configured model, when it has one. */
+  /** Trusted ephemeral user image attachments for this main model step; never stored or summarized. */
+  readonly providerStatePolicy?: (
+    context: AdapterInvocationContext,
+    conversationId: string,
+    modelId: string,
+  ) => "require" | "omit-incompatible";
+  readonly modelUserParts?: (
+    context: AdapterInvocationContext,
+    conversationId: string,
+    modelId: string,
+  ) => readonly ModelImagePart[];
   readonly modelSecrets?: (modelId: string) => NodeSecretAccessor | undefined;
   /** UTC epoch milliseconds. Defaults to the system clock. */
   readonly now?: () => number;
@@ -186,6 +200,9 @@ function toModelMessage(message: DurableMessageRecord): ModelMessage | undefined
   const parts: ModelMessagePart[] = [];
   for (const part of message.parts) {
     switch (part.kind) {
+      case "provider-state":
+        parts.push({ ...part });
+        break;
       case "text":
         parts.push({ kind: "text", text: part.text });
         break;
@@ -219,6 +236,8 @@ function toModelMessage(message: DurableMessageRecord): ModelMessage | undefined
 function toStoredParts(message: ModelMessage): DurableMessagePart[] {
   const parts = message.parts.flatMap((part): DurableMessagePart[] => {
     switch (part.kind) {
+      case "provider-state":
+        return [{ ...part }];
       case "text":
         return [{ kind: "text", text: part.text }];
       case "image":
@@ -651,6 +670,7 @@ export function createAgentNodeExecutor(
     folded: readonly DurableMessageRecord[],
     maxOutputTokens: number,
     secrets: NodeSecretAccessor | undefined,
+    foldedMessages?: readonly ModelMessage[],
   ): Promise<DurableConversationSummaryRecord | undefined> => {
     const last = folded[folded.length - 1];
     if (last === undefined) return undefined;
@@ -659,9 +679,10 @@ export function createAgentNodeExecutor(
         messages: [
           { role: "system", parts: [{ kind: "text", text: SUMMARY_SYSTEM_PROMPT }] },
           ...(previous === undefined ? [] : [summaryMessage(previous)]),
-          ...folded
-            .map((message) => toModelMessage(message))
-            .filter((message): message is ModelMessage => message !== undefined),
+          ...(foldedMessages ??
+            folded
+              .map((message) => toModelMessage(message))
+              .filter((message): message is ModelMessage => message !== undefined)),
         ],
         maxOutputTokens,
       },
@@ -752,9 +773,47 @@ export function createAgentNodeExecutor(
     }
     const secrets = options.modelSecrets?.(manifest.id);
 
+    const stepContext = {
+      ...invocationContext(execution, execution.logicalEffectId, secrets),
+      toolScope: Object.freeze(tools.map((tool) => tool.manifest.id)),
+    };
+    const statePolicy =
+      options.providerStatePolicy?.(stepContext, conversation.conversationId, manifest.id) ??
+      "require";
+    if (!["require", "omit-incompatible"].includes(statePolicy))
+      throw new AgentStepError("AGENT_CONFIG_INVALID", "Invalid provider state switch policy.");
+    const identity = manifest.providerStateIdentity;
+    const compatibleState = (part: DurableMessagePart) =>
+      part.kind !== "provider-state" ||
+      (identity &&
+        part.provider === identity.provider &&
+        part.model === identity.model &&
+        part.scope === identity.scope);
+    let droppedProviderStateCount = 0;
+    const selectedMessage = (message: DurableMessageRecord): ModelMessage | undefined => {
+      const converted = toModelMessage(message);
+      if (!converted) return undefined;
+      if (statePolicy === "require") return converted;
+      const parts = converted.parts.filter(
+        (part) => part.kind !== "provider-state" || compatibleState(part),
+      );
+      return parts.length ? { role: converted.role, parts } : undefined;
+    };
     const latest = latestMessage(conversation.conversationId);
     const path =
       latest === undefined ? [] : readMessagePath(database.connection(), latest.messageId);
+    droppedProviderStateCount = path.reduce(
+      (count, message) =>
+        count +
+        message.parts.filter((part) => part.kind === "provider-state" && !compatibleState(part))
+          .length,
+      0,
+    );
+    if (statePolicy === "require" && droppedProviderStateCount)
+      throw new AgentStepError(
+        "AGENT_PROVIDER_STATE_MISMATCH",
+        "Encrypted provider context belongs to another model/account. Explicitly authorize a context reset or start a fresh branch.",
+      );
     const memory = memorySummary(conversation.projectId, maxMemories);
     const budget = contextBudgetForModel(manifest, {
       reserveOutputTokens,
@@ -768,6 +827,15 @@ export function createAgentNodeExecutor(
       path.map((message) => message.messageId),
     );
     let tail = path.slice((summary?.index ?? -1) + 1);
+    const hasOpaque = (messages: readonly DurableMessageRecord[]) =>
+      messages.some((message) =>
+        message.parts.some((part) => part.kind === "provider-state" && compatibleState(part)),
+      );
+    if (summary && hasOpaque(path.slice(0, summary.index + 1)))
+      throw new AgentStepError(
+        "AGENT_OPAQUE_CONTEXT_LOST",
+        "Encrypted provider context was summarized. Start a fresh branch with explicit context.",
+      );
     const build = (): ReturnType<typeof buildModelContext> =>
       buildModelContext({
         sections: [
@@ -785,7 +853,7 @@ export function createAgentNodeExecutor(
           {
             id: "conversation",
             messages: tail
-              .map((message) => toModelMessage(message))
+              .map((message) => selectedMessage(message))
               .filter((message): message is ModelMessage => message !== undefined),
           },
         ],
@@ -797,6 +865,11 @@ export function createAgentNodeExecutor(
     const overflow =
       context.sections.find((section) => section.id === "conversation")?.droppedMessages ?? 0;
     let wroteSummary = false;
+    if (overflow > 0 && hasOpaque(tail))
+      throw new AgentStepError(
+        "AGENT_OPAQUE_CONTEXT_LOST",
+        "Encrypted provider context exceeds the budget and cannot be silently compacted. Start a fresh branch with explicit context.",
+      );
     if (overflow > 0) {
       const folded = tail.slice(0, overflow);
       const last = folded[folded.length - 1];
@@ -809,6 +882,9 @@ export function createAgentNodeExecutor(
           folded,
           summaryMaxOutputTokens,
           secrets,
+          folded
+            .map(selectedMessage)
+            .filter((message): message is ModelMessage => message !== undefined),
         );
         if (written !== undefined) {
           summary = { summary: written, index: (summary?.index ?? -1) + folded.length };
@@ -819,14 +895,35 @@ export function createAgentNodeExecutor(
       }
     }
 
+    const userParts =
+      options.modelUserParts?.(stepContext, conversation.conversationId, manifest.id) ?? [];
+    if (userParts.some((part) => part.kind !== "image") || userParts.length > 1)
+      throw new AgentStepError("AGENT_CONFIG_INVALID", "Invalid host image attachment.");
     const result = await generate(
       adapter,
       {
-        messages: context.messages,
+        messages: [
+          ...(droppedProviderStateCount
+            ? [
+                {
+                  role: "developer" as const,
+                  parts: [
+                    {
+                      kind: "text" as const,
+                      text: "Encrypted provider context omitted for an explicitly authorized model/account switch. Use the retained visible conversation and actual tool results.",
+                    },
+                  ],
+                },
+              ]
+            : []),
+          ...context.messages,
+          ...(userParts.length ? [{ role: "user" as const, parts: userParts }] : []),
+        ],
+        providerStatePolicy: statePolicy,
         ...(tools.length > 0 ? { tools: actionToolSpecifications(tools) } : {}),
         ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
       },
-      invocationContext(execution, execution.logicalEffectId, secrets),
+      stepContext,
     );
     execution.signal.throwIfAborted();
 
@@ -837,6 +934,14 @@ export function createAgentNodeExecutor(
     };
     const usage = {
       toolCatalog: agentToolCatalog(tools, owner),
+      providerState: {
+        droppedProviderStateCount:
+          droppedProviderStateCount + (result.droppedProviderStateCount ?? 0),
+        notice:
+          droppedProviderStateCount || result.droppedProviderStateCount
+            ? "Encrypted provider context omitted for an explicitly authorized model/account switch."
+            : null,
+      },
       model: { id: manifest.id, version: manifest.version },
       selectionRule: decision.selectionRule,
       context: {

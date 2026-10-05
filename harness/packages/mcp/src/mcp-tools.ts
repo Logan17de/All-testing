@@ -149,7 +149,20 @@ export function createMcpToolAdapter(
   });
 }
 
+export interface McpConnectionDiagnostic {
+  readonly toolName?: string;
+  readonly toolIndex?: number;
+  readonly reason:
+    | "invalid-descriptor"
+    | "missing-input-schema"
+    | "invalid-tool-name"
+    | "duplicate-tool-name"
+    | "unsupported-input-schema";
+}
+
 export interface McpConnection {
+  /** Sanitized quarantine reasons; never remote descriptions or schema contents. */
+  readonly diagnostics: readonly McpConnectionDiagnostic[];
   readonly client: McpStdioClient;
   readonly adapters: readonly ToolAdapter[];
   readonly close: () => Promise<void>;
@@ -176,19 +189,35 @@ export async function connectMcpServer(
     const descriptors = await client.listTools();
 
     const adapters: ToolAdapter[] = [];
+    const diagnostics: McpConnectionDiagnostic[] = [...client.descriptorDiagnostics];
     const seen = new Set<string>();
     for (const descriptor of descriptors) {
       // A hostile or buggy server must not be able to shadow another tool or
       // smuggle separators into a harness-visible identifier.
-      if (!TOOL_NAME_PATTERN.test(descriptor.name)) continue;
-      if (seen.has(descriptor.name)) continue;
+      if (!TOOL_NAME_PATTERN.test(descriptor.name)) {
+        diagnostics.push(Object.freeze({ reason: "invalid-tool-name" }));
+        continue;
+      }
+      if (seen.has(descriptor.name)) {
+        diagnostics.push(
+          Object.freeze({ toolName: descriptor.name, reason: "duplicate-tool-name" }),
+        );
+        continue;
+      }
       seen.add(descriptor.name);
-      adapters.push(createMcpToolAdapter(client, registration, descriptor));
+      try {
+        adapters.push(createMcpToolAdapter(client, registration, descriptor));
+      } catch {
+        diagnostics.push(
+          Object.freeze({ toolName: descriptor.name, reason: "unsupported-input-schema" }),
+        );
+      }
     }
 
     return Object.freeze({
       client,
       adapters: Object.freeze(adapters),
+      diagnostics: Object.freeze(diagnostics),
       close: () => client.close(),
     });
   } catch (error: unknown) {

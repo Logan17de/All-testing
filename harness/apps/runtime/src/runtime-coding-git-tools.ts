@@ -6,6 +6,7 @@ import { buildGitCommand, gitPaths } from "./runtime-git-command.js";
 
 export interface RuntimeGitToolOptions {
   readonly root: string;
+  readonly managedJournalPath?: string | undefined;
   readonly approve?: (
     request: { tool: string; args: JsonObject },
     context: AdapterInvocationContext,
@@ -14,7 +15,7 @@ export interface RuntimeGitToolOptions {
   readonly sandbox?: typeof runSandboxedProcess;
 }
 const refuse = () => new Error("Scoped Git tool rejected the request.");
-async function validateRepository(root: string): Promise<string> {
+async function validateRepository(root: string, journalPath?: string): Promise<string> {
   const canonical = await realpath(root);
   const metadata = join(canonical, ".git");
   if (!(await lstat(metadata)).isDirectory() || (await realpath(metadata)) !== metadata)
@@ -31,6 +32,11 @@ async function validateRepository(root: string): Promise<string> {
         (!stat.isDirectory() && !stat.isFile())
       )
         throw refuse();
+      if (entry.name === "worktrees" && file === join(metadata, "worktrees") && journalPath) {
+        const { verifyManagedWorktreeOwnership } = await import("./runtime-coding-worktrees.js");
+        await verifyManagedWorktreeOwnership(canonical, journalPath);
+        continue;
+      }
       if (["alternates", "commondir", "gitdir", "worktrees"].includes(entry.name)) throw refuse();
       if (stat.isDirectory()) await scan(file);
     }
@@ -117,7 +123,7 @@ export function createRuntimeGitTools(options: RuntimeGitToolOptions): readonly 
               ? gitPaths(snapshot.paths)
               : [];
           try {
-            const canonical = await validateRepository(root);
+            const canonical = await validateRepository(root, options.managedJournalPath);
             await validateFiles(canonical, paths);
             if (
               write &&
@@ -125,7 +131,8 @@ export function createRuntimeGitTools(options: RuntimeGitToolOptions): readonly 
             )
               throw refuse();
             context.signal.throwIfAborted();
-            if ((await validateRepository(root)) !== canonical) throw refuse();
+            if ((await validateRepository(root, options.managedJournalPath)) !== canonical)
+              throw refuse();
             await validateFiles(canonical, paths);
             const run = (argv: readonly string[]) =>
               sandbox({

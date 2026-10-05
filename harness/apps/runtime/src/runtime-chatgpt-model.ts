@@ -35,6 +35,10 @@ export interface ChatGPTModelOptions {
   fetch?: typeof globalThis.fetch;
   /** Absent by default. Never accepts arbitrary paths/URLs or adds model tool authority. */
   resolveImage?: ChatGPTImageResolver;
+  /** Nonsecret stable SHA-256 account/client identity digest supplied by the host. */
+  stateScope?: string;
+  /** Host rechecks current run/account/desktop consent at the last synchronous outbound boundary. */
+  validateImageAuthority?: (context: AdapterInvocationContext) => void;
 }
 const unsupported = (): never => {
   throw new ModelTransportError("MODEL_REQUEST_UNSUPPORTED");
@@ -47,7 +51,15 @@ async function prepare(
   model: string,
   context: AdapterInvocationContext,
   resolveImage?: ChatGPTImageResolver,
-): Promise<{ body: string; offered: Map<string, string> }> {
+  stateScope?: string,
+  validateImageAuthority?: (context: AdapterInvocationContext) => void,
+  authorityContext: AdapterInvocationContext = context,
+): Promise<{
+  body: string;
+  offered: Map<string, string>;
+  droppedProviderStateCount: number;
+  imageCount: number;
+}> {
   if (request.model !== undefined && request.model !== model) unsupported();
   if (request.outputSchema !== undefined || request.options !== undefined) unsupported();
   // Plan route forbids max_output_tokens. The local postresponse gate below does not
@@ -57,6 +69,12 @@ async function prepare(
     (!Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens < 1)
   )
     unsupported();
+  if (
+    request.providerStatePolicy !== undefined &&
+    !["require", "omit-incompatible"].includes(request.providerStatePolicy)
+  )
+    unsupported();
+  let droppedProviderStateCount = 0;
   const offered = new Map<string, string>();
   const tools = (request.tools ?? []).map((tool) => {
     if (!tool.name || tool.name.length > 256 || offered.has(toolName(tool.name))) unsupported();
@@ -71,7 +89,10 @@ async function prepare(
     };
   });
   const input: unknown[] = [];
+  let stateBytes = 0;
+  const stateIds = new Set<string>();
   let imageBytes = 0;
+  const maxImageBytes = 8_388_608;
   let imageCount = 0;
   const priorCalls = new Set<string>();
   const priorResults = new Set<string>();
@@ -117,6 +138,35 @@ async function prepare(
           call_id: part.callId,
           output: JSON.stringify(part.value),
         });
+      } else if (part.kind === "provider-state") {
+        flush();
+        if (
+          message.role !== "assistant" ||
+          part.provider !== "openai-responses" ||
+          !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u.test(part.model) ||
+          !/^[a-f0-9]{64}$/u.test(part.scope) ||
+          !/^[A-Za-z0-9_.:-]{1,200}$/u.test(part.id) ||
+          stateIds.has(part.id) ||
+          typeof part.encryptedContent !== "string" ||
+          !part.encryptedContent ||
+          /[\x00-\x20\x7f]/u.test(part.encryptedContent)
+        )
+          unsupported();
+        const size = Buffer.byteLength(part.encryptedContent);
+        if (size > 65_536) throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
+        if (part.model !== model || !stateScope || part.scope !== stateScope) {
+          if (request.providerStatePolicy !== "omit-incompatible") unsupported();
+          droppedProviderStateCount++;
+          continue;
+        }
+        stateIds.add(part.id);
+        if ((stateBytes += size) > 262_144) throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
+        input.push({
+          type: "reasoning",
+          id: part.id,
+          encrypted_content: part.encryptedContent,
+          summary: [],
+        });
       } else if (part.kind === "image") {
         flush();
         if (
@@ -126,11 +176,14 @@ async function prepare(
           !["image/png", "image/jpeg", "image/webp"].includes(part.mediaType)
         )
           unsupported();
-        if (++imageCount > 4) throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
+        if (++imageCount > 1) throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
         context.signal.throwIfAborted();
         let artifact: ChatGPTImageArtifact;
         try {
-          artifact = await abortable(resolveImage!(part.artifactRef, context), context.signal);
+          artifact = await abortable(
+            resolveImage!(part.artifactRef, authorityContext),
+            context.signal,
+          );
         } catch {
           context.signal.throwIfAborted();
           throw new ModelTransportError("MODEL_REQUEST_UNSUPPORTED");
@@ -144,8 +197,14 @@ async function prepare(
           artifact.bytes.byteLength < 4
         )
           unsupported();
-        if ((imageBytes += artifact.bytes.byteLength) > 524_288)
+        if ((imageBytes += artifact.bytes.byteLength) > maxImageBytes)
           throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
+        try {
+          validateImageAuthority?.(authorityContext);
+        } catch {
+          context.signal.throwIfAborted();
+          unsupported();
+        }
         const bytes = Buffer.from(artifact.bytes);
         const png =
           artifact.mediaType === "image/png" &&
@@ -182,7 +241,13 @@ async function prepare(
     }
     flush();
   }
-  const body = JSON.stringify({
+  if (droppedProviderStateCount)
+    input.unshift({
+      role: "developer",
+      content:
+        "Encrypted provider context was omitted for an explicitly authorized model/account switch. Use the retained visible conversation and actual tool results.",
+    });
+  const payload = {
     model,
     input,
     ...(tools.length
@@ -200,9 +265,20 @@ async function prepare(
       : {}),
     store: false,
     stream: true,
+  };
+  const body = JSON.stringify(payload);
+  const nonImageBody = JSON.stringify({
+    ...payload,
+    input: input.map((item) => {
+      const message = item as { content?: unknown };
+      return Array.isArray(message.content)
+        ? { ...message, content: [{ type: "input_image", detail: "auto" }] }
+        : item;
+    }),
   });
-  if (Buffer.byteLength(body) > 1_048_576) throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
-  return { body, offered };
+  if (Buffer.byteLength(nonImageBody) > 1_048_576 || Buffer.byteLength(body) > 12_582_912)
+    throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
+  return { body, offered, droppedProviderStateCount, imageCount };
 }
 function parseUsage(value: unknown): AdapterUsage | undefined {
   if (value === undefined) return undefined;
@@ -221,15 +297,46 @@ function parseUsage(value: unknown): AdapterUsage | undefined {
   }
   return immutable(result);
 }
-function complete(value: unknown, offered: Map<string, string>): ModelResult {
+function complete(
+  value: unknown,
+  offered: Map<string, string>,
+  model: string,
+  stateScope?: string,
+): ModelResult {
   const response = record(value);
   if (response.status !== "completed" || !Array.isArray(response.output))
     throw new ModelTransportError("MODEL_RESPONSE_INVALID");
   const parts: ModelMessagePart[] = [];
   const calls = new Set<string>();
+  const stateIds = new Set<string>();
+  let stateBytes = 0;
   for (const raw of response.output) {
     const item = record(raw);
-    if (item.type === "reasoning") continue; // opaque provider reasoning is not durable harness state
+    if (item.type === "reasoning") {
+      if (
+        !stateScope ||
+        typeof item.id !== "string" ||
+        !/^[A-Za-z0-9_.:-]{1,200}$/u.test(item.id) ||
+        stateIds.has(item.id) ||
+        typeof item.encrypted_content !== "string" ||
+        !item.encrypted_content ||
+        /[\x00-\x20\x7f]/u.test(item.encrypted_content)
+      )
+        throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+      stateIds.add(item.id);
+      const size = Buffer.byteLength(item.encrypted_content);
+      if (size > 65_536 || (stateBytes += size) > 262_144)
+        throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
+      parts.push({
+        kind: "provider-state",
+        provider: "openai-responses",
+        model,
+        scope: stateScope,
+        id: item.id,
+        encryptedContent: item.encrypted_content,
+      });
+      continue; // Never read or persist plaintext reasoning summaries/content.
+    }
     if (item.type === "message") {
       if (item.role !== "assistant" || !Array.isArray(item.content))
         throw new ModelTransportError("MODEL_RESPONSE_INVALID");
@@ -278,6 +385,10 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
   const id = options.id;
   const credential = options.accessToken;
   const resolveImage = options.resolveImage;
+  const stateScope = options.stateScope;
+  const validateImageAuthority = options.validateImageAuthority;
+  if (stateScope !== undefined && !/^[a-f0-9]{64}$/u.test(stateScope))
+    throw new ModelTransportError("MODEL_CONFIGURATION_INVALID");
   async function* stream(
     request: ModelRequest,
     context: AdapterInvocationContext,
@@ -285,10 +396,27 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
     context.signal.throwIfAborted();
     const signal = AbortSignal.any([context.signal, AbortSignal.timeout(60_000)]);
     try {
-      const prepared = await prepare(request, model, { ...context, signal }, resolveImage);
+      const prepared = await prepare(
+        request,
+        model,
+        { ...context, signal },
+        resolveImage,
+        stateScope,
+        validateImageAuthority,
+        context,
+      );
       const token = await abortable(credential(), signal);
       if (!token || /\s/u.test(token))
         throw new ModelTransportError("MODEL_CREDENTIAL_UNAVAILABLE");
+      signal.throwIfAborted();
+      if (prepared.imageCount) {
+        try {
+          validateImageAuthority?.(context);
+        } catch {
+          signal.throwIfAborted();
+          unsupported();
+        }
+      }
       const response = await abortable(
         fetch("https://api.openai.com/v1/responses", {
           method: "POST",
@@ -319,9 +447,14 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
         )
           throw new ModelTransportError("MODEL_RESPONSE_INVALID");
         else if (event.type === "response.completed")
-          result = complete(event.response, prepared.offered);
+          result = complete(event.response, prepared.offered, model, stateScope);
       }
       if (!result) throw new ModelTransportError("MODEL_STREAM_TRUNCATED");
+      if (prepared.droppedProviderStateCount)
+        result = immutable({
+          ...result,
+          droppedProviderStateCount: prepared.droppedProviderStateCount,
+        });
       signal.throwIfAborted();
       if (
         request.maxOutputTokens !== undefined &&
@@ -344,6 +477,15 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
     manifest: Object.freeze({
       id,
       version: "1",
+      ...(stateScope
+        ? {
+            providerStateIdentity: Object.freeze({
+              provider: "openai-responses" as const,
+              model,
+              scope: stateScope,
+            }),
+          }
+        : {}),
       title: `ChatGPT plan: ${model}`,
       requiredCapabilities: Object.freeze([]),
       features: Object.freeze({

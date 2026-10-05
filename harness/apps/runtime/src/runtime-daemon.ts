@@ -1,11 +1,18 @@
+import { withoutPrivateModelState } from "./runtime-public-model-state.js";
 import { collectInstalledAgentPluginTools } from "./runtime-agent-plugin-tools.js";
 import { DURABLE_NATIVE_CHAT_SCOPES_MIGRATION } from "./runtime-coding-plugin-scopes.js";
+import {
+  RuntimeCodingImageStore,
+  type CodingImageAuthority,
+} from "./runtime-coding-image-store.js";
+import { createRuntimeCodingDesktopTools } from "./runtime-coding-desktop-tools.js";
 import { configuredDesktopController } from "./runtime-desktop-http.js";
 import { createRuntimeBrowserTools } from "./runtime-browser-tools.js";
 import { RuntimeBrowserService } from "./runtime-browser-service.js";
 import { createPlaywrightBrowserDriver } from "./runtime-browser-driver.js";
 import { providerAwaitingDecision } from "./runtime-provider-policy.js";
-import { resolve } from "node:path";
+import { resolve, dirname, join, relative, isAbsolute, sep } from "node:path";
+import { mkdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { createChatGPTPlanModelAdapter, listChatGPTPlanModels } from "./runtime-chatgpt-model.js";
 
@@ -197,6 +204,13 @@ export class RuntimeDaemon {
   private models: RuntimeModels | undefined;
   private readonly agent: RuntimeCodingService;
   private readonly desktop = configuredDesktopController();
+  private readonly imageInvocations = new Map<
+    string,
+    { authority: CodingImageAuthority; signal: AbortSignal }
+  >();
+  private readonly images = new RuntimeCodingImageStore({
+    isCurrent: (authority) => this.imageAuthorityCurrent(authority),
+  });
   private readonly browser: RuntimeBrowserService;
   private readonly chatGPTLogin = new ChatGPTLoginController(
     process.env["ZET_CHATGPT_HOST_ID"] ? { hostId: process.env["ZET_CHATGPT_HOST_ID"] } : {},
@@ -269,13 +283,22 @@ export class RuntimeDaemon {
         sandboxes: this.pluginSandboxes,
       }),
       capabilityAuthority: () => authority ?? { evaluate: () => ({ decision: "deny" as const }) },
-      redact: (value) => this.redaction.redact(value),
+      redact: (value) => this.redaction.redact(withoutPrivateModelState(value)),
       dispatch: execution === undefined ? undefined : (runId) => this.dispatcher?.wake(runId),
       modelCatalog: () => this.codingModelCatalog(),
       toolCatalog: () => this.installedAgentToolCatalog(),
       browserGeneration: () => {
         const state = this.browser.snapshot();
         return state.armed ? state.generation : undefined;
+      },
+      desktopGeneration: () => {
+        const state = this.desktop.snapshot();
+        return state.state === "armed" ? state.generation : undefined;
+      },
+      revokeRun: (runId) => {
+        this.images.revokeRun(runId);
+        for (const [key, invocation] of this.imageInvocations)
+          if (invocation.authority.runId === runId) this.imageInvocations.delete(key);
       },
       providerIdentity: () => this.currentChatGPTAccountKey(),
       isModelConfigured: (modelId) =>
@@ -357,7 +380,7 @@ export class RuntimeDaemon {
         clients: {
           database: this.database,
           approvals: this.approvals,
-          redact: (value) => this.redaction.redact(value),
+          redact: (value) => this.redaction.redact(withoutPrivateModelState(value)),
           registerSecret: (secret) => {
             this.redaction.registerSecret(secret);
           },
@@ -396,7 +419,7 @@ export class RuntimeDaemon {
           }),
           capabilityAuthority: () =>
             authority ?? { evaluate: () => ({ decision: "deny" as const }) },
-          redact: (value) => this.redaction.redact(value),
+          redact: (value) => this.redaction.redact(withoutPrivateModelState(value)),
           dispatch:
             execution === undefined
               ? undefined
@@ -433,7 +456,7 @@ export class RuntimeDaemon {
     if (this.state !== "running") {
       throw new TypeError("Runtime daemon must be running before publishing stream events.");
     }
-    return this.eventStream.publish(type, this.redaction.redact(data));
+    return this.eventStream.publish(type, this.redaction.redact(withoutPrivateModelState(data)));
   }
 
   /**
@@ -686,10 +709,14 @@ export class RuntimeDaemon {
         : undefined;
     const mutationTools =
       project?.workspacePath && mutationFactories
-        ? mutationFactories[0].createRuntimeMutationTools({
-            root: project.workspacePath,
-            approve: (tool, context) => this.agent.approveTool(tool, context),
-          })
+        ? mutationFactories[0]
+            .createRuntimeMutationTools({
+              root: project.workspacePath,
+              approve: (tool, context) => this.agent.approveTool(tool, context),
+            })
+            .filter(
+              (tool) => process.platform !== "win32" || tool.manifest.id !== "harness.fs.write",
+            )
         : [];
     const fileTools =
       project?.workspacePath && mutationFactories
@@ -702,6 +729,12 @@ export class RuntimeDaemon {
       project?.workspacePath && createRuntimeGitTools
         ? createRuntimeGitTools({
             root: project.workspacePath,
+            managedJournalPath: isAbsolute(this.database.snapshot().path)
+              ? join(
+                  resolve(dirname(this.database.snapshot().path), "managed-worktrees"),
+                  `${createHash("sha256").update(project.workspacePath).digest("hex")}.json`,
+                )
+              : undefined,
             ...(toolPolicy?.mutationConsent
               ? {
                   approve: (
@@ -755,12 +788,49 @@ export class RuntimeDaemon {
       toolPolicy?.browserEnabled && toolPolicy.browserGeneration !== undefined
         ? createRuntimeBrowserTools(this.browser, toolPolicy.browserGeneration)
         : [];
+    let worktreeJournalPath: string | undefined;
+    const worktreeTools: ToolAdapter[] = [];
+    if (project?.workspacePath && toolPolicy?.mutationConsent && process.platform === "linux") {
+      const stateRoot = resolve(dirname(this.database.snapshot().path), "managed-worktrees");
+      const rel = relative(project.workspacePath, stateRoot);
+      if (
+        isAbsolute(this.database.snapshot().path) &&
+        (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+      ) {
+        await mkdir(stateRoot, { recursive: true, mode: 0o700 });
+        worktreeJournalPath = join(
+          stateRoot,
+          `${createHash("sha256").update(project.workspacePath).digest("hex")}.json`,
+        );
+        const [{ createRuntimeWorktreeTools }, { runSandboxedManagedWorktree }] = await Promise.all(
+          [import("./runtime-coding-worktrees.js"), import("./runtime-process-sandbox.js")],
+        );
+        worktreeTools.push(
+          ...createRuntimeWorktreeTools({
+            root: project.workspacePath,
+            journalPath: worktreeJournalPath,
+            approve: (tool, context) => this.agent.approveTool(tool, context),
+            sandbox: runSandboxedManagedWorktree,
+          }),
+        );
+      }
+    }
+    const imageAuthority = this.codingImageAuthority(request.runId);
+    const desktopTools = imageAuthority
+      ? createRuntimeCodingDesktopTools({
+          controller: this.desktop,
+          authority: imageAuthority,
+          imageStore: this.images,
+        })
+      : [];
     const nativeTools = [
       ...codingTools,
       ...mutationTools,
       ...fileTools,
       ...gitTools,
       ...browserTools,
+      ...desktopTools,
+      ...worktreeTools,
       ...(childTool ? [childTool] : []),
       ...(searchTool ? [searchTool] : []),
     ];
@@ -778,8 +848,10 @@ export class RuntimeDaemon {
       componentTools: installedTools,
       toolOwner: (tool) => (nativeOwners.has(tool) ? "harness.native" : installedOwners.get(tool)),
       allows: (capability) =>
+        (capability === "desktop:task" && desktopTools.length > 0) ||
         (capability === "browser:task" && browserTools.length > 0) ||
         (capability === "git:read" && gitTools.length > 0) ||
+        (capability === "git:worktree" && worktreeTools.length > 0) ||
         (capability === "git:write" && toolPolicy?.mutationConsent === true) ||
         (capability === "fs:read" && codingTools.length > 0) ||
         (["fs:write", "process:exec"].includes(capability) && mutationTools.length > 0) ||
@@ -790,6 +862,40 @@ export class RuntimeDaemon {
         ) ||
         this.pluginAuthority(capability).decision === "allow",
       configuredModels: () => this.configuredModelIds(),
+      providerStatePolicy: (context, sessionId, modelId) => {
+        const grant = this.agent.toolPolicy(context.runId);
+        return grant?.explicitModelSelection &&
+          grant.sessionId === sessionId &&
+          grant.modelId === modelId
+          ? "omit-incompatible"
+          : "require";
+      },
+      modelUserParts: (context, sessionId, modelId) => {
+        if (
+          request.operation.sourceNodeId !== "reply" ||
+          context.runId !== request.runId ||
+          context.opIndex !== request.op ||
+          context.signal.aborted ||
+          !context.toolScope?.includes("harness.desktop.share")
+        )
+          return [];
+        const authority = this.codingImageAuthority(context.runId);
+        if (!authority || authority.sessionId !== sessionId || authority.modelId !== modelId)
+          return [];
+        const parts = this.images.partsFor(authority);
+        if (parts.length) {
+          if (this.imageInvocations.size >= 1000)
+            throw new Error("Image invocation capacity reached.");
+          this.imageInvocations.set(`${context.runId}:${context.logicalEffectId}`, {
+            authority,
+            signal: context.signal,
+          });
+          context.signal.addEventListener("abort", () => this.images.revokeRun(context.runId), {
+            once: true,
+          });
+        }
+        return parts;
+      },
       modelSecrets: (modelId) => this.models?.secretsFor(modelId),
       onStreamProgress: (progress) => {
         this.publishEvent("model.progress", progress);
@@ -829,6 +935,42 @@ export class RuntimeDaemon {
     }));
   }
 
+  private codingImageAuthority(runId: string): CodingImageAuthority | undefined {
+    const grant = this.agent.toolPolicy(runId);
+    if (
+      !grant?.desktopEnabled ||
+      grant.desktopGeneration === undefined ||
+      !grant.providerIdentity ||
+      !this.chatGPTModels.has(grant.modelId)
+    )
+      return undefined;
+    const authority: CodingImageAuthority = {
+      runId,
+      sessionId: grant.sessionId,
+      modelId: grant.modelId,
+      accountId: grant.providerIdentity,
+      root: grant.root,
+      desktopGeneration: grant.desktopGeneration,
+    };
+    return this.imageAuthorityCurrent(authority) ? authority : undefined;
+  }
+  private imageAuthorityCurrent(authority: CodingImageAuthority): boolean {
+    const grant = this.agent.toolPolicy(authority.runId);
+    const state = this.desktop.snapshot();
+    return (
+      !!grant &&
+      grant.desktopEnabled &&
+      grant.sessionId === authority.sessionId &&
+      grant.modelId === authority.modelId &&
+      grant.root === authority.root &&
+      grant.desktopGeneration === authority.desktopGeneration &&
+      state.state === "armed" &&
+      state.generation === authority.desktopGeneration &&
+      grant.providerIdentity === authority.accountId &&
+      this.currentChatGPTAccountKey() === authority.accountId &&
+      this.configuredModelIds().has(authority.modelId)
+    );
+  }
   private currentChatGPTAccountKey(): string | undefined {
     const account = this.chatGPTLogin.auth.account();
     return account
@@ -866,6 +1008,40 @@ export class RuntimeDaemon {
             createChatGPTPlanModelAdapter({
               id,
               model: model.slug,
+              stateScope: accountKey,
+              resolveImage: async (ref, context) => {
+                const invocation = this.imageInvocations.get(
+                  `${context.runId}:${context.logicalEffectId}`,
+                );
+                if (
+                  !invocation ||
+                  invocation.signal !== context.signal ||
+                  context.signal.aborted ||
+                  !context.toolScope?.includes("harness.desktop.share") ||
+                  invocation.authority.modelId !== id ||
+                  invocation.authority.accountId !== accountKey
+                )
+                  throw new Error("Image invocation is not authorized.");
+                return {
+                  bytes: await this.images.resolve(ref, invocation.authority, context.signal),
+                  mediaType: "image/png",
+                };
+              },
+              validateImageAuthority: (context) => {
+                const invocation = this.imageInvocations.get(
+                  `${context.runId}:${context.logicalEffectId}`,
+                );
+                if (
+                  !invocation ||
+                  invocation.signal !== context.signal ||
+                  context.signal.aborted ||
+                  !context.toolScope?.includes("harness.desktop.share") ||
+                  invocation.authority.modelId !== id ||
+                  invocation.authority.accountId !== accountKey ||
+                  !this.imageAuthorityCurrent(invocation.authority)
+                )
+                  throw new Error("Image transmission authority expired.");
+              },
               accessToken: () => this.accountBoundChatGPTToken(accountKey),
             }),
           );
@@ -982,6 +1158,8 @@ export class RuntimeDaemon {
   private async stopOnce(): Promise<boolean> {
     const schedule = this.triggerSchedule.stop();
     this.desktop.close();
+    this.images.clear();
+    this.imageInvocations.clear();
     await this.browser.close();
     this.agent.close();
     await this.agent.drainCancellations();

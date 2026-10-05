@@ -68,3 +68,13 @@ Browser/desktop checkpoint local repository suite: 216 files passed, 1818 tests 
 The project-actions/chat-scopes checkpoint passed **224 files / 1909 tests**, with three Linux platform skips. Full typecheck, lint, formatting, production build, plugin smoke, runtime/web startup and unchanged numeric/dependency guards passed. Measured local startup median was 253.6 ms and idle RSS median 96,256,000 bytes; the direct runtime dependency list remains ten entries, including one external dependency.
 
 An actual guarded HTTP/SQLite smoke verified two separate chats, absent graphs before the first turn, the native catalog, refusal of provider aliases, and restrictions surviving daemon restart. Actual CLI smoke verified session create/read/list/archive/restore with disconnected authentication, unarmed browser and disabled desktop. These checks made no inference, login, browser input, desktop capture or provider calls. Model-loop and populated-graph checks remain scripted fixtures.
+
+## Extended boundary acceptance
+
+New evidence separates offline inference/desktop fixtures from mandatory Windows kernel checks. Encrypted Responses items survive SQLite close/reopen in order, account/model mismatch fails closed by default, explicit model selection records any incompatible-state reset, and opaque-state compaction refuses silent loss. Public DTOs/events exclude encrypted replay state.
+
+The production ChatGPT image resolver requires exact current run/session/model/account/root/desktop generation plus canonical main-step share scope. Human consent names the captured monitor and exact destination, expiry and use budget; pixels are volatile and never written to conversation history. Authorization is rechecked immediately before transport after token refresh. Synthetic screenshots and browser UI fixtures establish boundaries, not live PC/provider acceptance.
+
+Windows native filesystem compile, temporary filesystem and ancestry-race fixtures, plus zero-network AppContainer/JobObject outsider-read/cancel/timeout fixtures, are mandatory on Windows CI. Linux skips those tests honestly. Fixed diagnostics are the first Windows process milestone; npm project scripts, broader Git and managed worktrees remain unsupported on Windows at this checkpoint.
+
+Managed worktree fixtures use actual temporary Git repositories through an injected TEST runner; production uses the required namespace sandbox and never falls back to host execution. Private-journal ownership, exact immutable consent, unknown/preexisting-tree rejection, bounded checkout and no-force removal are tested. Live Linux namespace acceptance remains blocked in the selected cloud host.

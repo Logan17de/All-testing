@@ -3,6 +3,15 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const files = [
+  "apps/runtime/src/runtime-coding-desktop-tools.ts",
+  "apps/runtime/src/runtime-coding-image-store.ts",
+  "apps/runtime/src/runtime-coding-worktrees.ts",
+  "apps/runtime/src/runtime-windows-coding.ts",
+  "apps/runtime/src/runtime-windows-process-sandbox.ts",
+  "apps/runtime/src/runtime-public-model-state.ts",
+  "apps/web/app/agent/desktop-image-consent.tsx",
+  "apps/web/app/agent/desktop-image-consent-view.ts",
+  "scripts/agent-cli.mjs",
   "packages/mcp/src/mcp-input-schema.ts",
   "apps/runtime/src/runtime-workspace-instructions.ts",
   "apps/runtime/src/runtime-agent-tool-policy.ts",

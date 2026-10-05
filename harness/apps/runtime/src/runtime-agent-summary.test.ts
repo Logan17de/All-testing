@@ -47,6 +47,11 @@ function scriptedModel(): { readonly adapter: ModelAdapter; readonly requests: M
       id: "test.model",
       version: "1",
       title: "Scripted model",
+      providerStateIdentity: {
+        provider: "openai-responses",
+        model: "gpt-test",
+        scope: "a".repeat(64),
+      },
       requiredCapabilities: [],
       features: {
         streaming: false,
@@ -333,4 +338,29 @@ describe("summarizing a conversation only when it no longer fits (9.7)", () => {
       outputTokens: 20,
     });
   });
+});
+
+it("refuses to compact opaque provider state instead of summarizing it or dropping call order", async () => {
+  const { database, conversationId, run, model } = await setup();
+  const ids = new SortableIdGenerator({ now: () => 5000 });
+  appendMessage(database.connection(), {
+    messageId: ids.next(),
+    conversationId,
+    role: "assistant",
+    parts: [
+      {
+        kind: "provider-state",
+        provider: "openai-responses",
+        model: "gpt-test",
+        scope: "a".repeat(64),
+        id: "rs_overflow",
+        encryptedContent: "x".repeat(5000),
+      },
+    ],
+    nowMs: 10,
+  });
+  const result = await run({ maxContextBytes: 1200 });
+  expect(result.report.status).toBe("failed");
+  expect(model.requests).toHaveLength(0);
+  expect(listConversationSummaries(database.connection(), conversationId)).toHaveLength(0);
 });

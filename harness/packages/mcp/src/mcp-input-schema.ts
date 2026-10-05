@@ -2,6 +2,20 @@ import type { JsonObject, JsonSchema, JsonValue } from "@zet-harness/plugin-api"
 
 /** Supported JSON Schema assertions only; unfamiliar assertions fail closed. */
 const ASSERTIONS = new Set([
+  "$ref",
+  "$defs",
+  "definitions",
+  "prefixItems",
+  "additionalItems",
+  "uniqueItems",
+  "not",
+  "if",
+  "then",
+  "else",
+  "dependentRequired",
+  "dependentSchemas",
+  "dependencies",
+  "pattern",
   "type",
   "enum",
   "const",
@@ -108,7 +122,61 @@ function isArray(value: JsonValue): value is readonly JsonValue[] {
 function integerBound(value: unknown): void {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw schemaFailure();
 }
-function inspect(schema: JsonValue): void {
+interface SchemaState {
+  readonly root: JsonValue;
+  readonly dialect: "07" | "2019" | "2020";
+  readonly active: Set<JsonValue>;
+  steps: number;
+}
+function localReference(reference: JsonValue, root: JsonValue): JsonValue {
+  if (typeof reference !== "string" || !reference.startsWith("#/")) throw schemaFailure();
+  let pointer: string;
+  try {
+    pointer = decodeURIComponent(reference.slice(1));
+  } catch {
+    throw schemaFailure();
+  }
+  let target = root;
+  for (const segment of pointer.slice(1).split("/")) {
+    if (/~(?:[^01]|$)/.test(segment)) throw schemaFailure();
+    const key = segment.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (!isObject(target) && !isArray(target)) throw schemaFailure();
+    if (!Object.hasOwn(target, key)) throw schemaFailure();
+    target = (target as Record<string, JsonValue>)[key]!;
+  }
+  if (typeof target !== "boolean" && !isObject(target)) throw schemaFailure();
+  return target;
+}
+/** Deliberately tiny regex grammar: fixed literals or one character class with
+ * optional repetition. No groups, alternation, backrefs or nested quantifiers.
+ * Matching work is linear in bounded input length; unfamiliar patterns quarantine. */
+function safePattern(value: JsonValue): RegExp {
+  if (typeof value !== "string" || value.length > 256) throw schemaFailure();
+  let body = value.startsWith("^") ? value.slice(1) : value;
+  if (body.endsWith("$") && !body.endsWith("\\$")) body = body.slice(0, -1);
+  const literal = /^(?:[a-zA-Z0-9 _,-]|\\[.\\+*?{}()[\]$^|/-])*$/;
+  const singleClass =
+    /^\[(?:[a-zA-Z0-9 _,-]|\\[dDsSwW])+\](?:[+*?]|\{[0-9]{1,5}(?:,[0-9]{0,5})?\})?$/;
+  if (!literal.test(body) && !singleClass.test(body)) throw schemaFailure();
+  if (singleClass.test(body) && /\][+*?{]/.test(body) && !value.startsWith("^"))
+    throw schemaFailure();
+  try {
+    return new RegExp(value, "u");
+  } catch {
+    throw schemaFailure();
+  }
+}
+function inspect(schema: JsonValue, state: SchemaState): void {
+  if (++state.steps > 4096 || state.active.size > 32 || state.active.has(schema))
+    throw schemaFailure();
+  state.active.add(schema);
+  try {
+    inspectBody(schema, state);
+  } finally {
+    state.active.delete(schema);
+  }
+}
+function inspectBody(schema: JsonValue, state: SchemaState): void {
   if (typeof schema === "boolean") return;
   if (!isObject(schema)) throw schemaFailure();
   for (const key of Object.keys(schema))
@@ -118,6 +186,24 @@ function inspect(schema: JsonValue): void {
     (typeof schema.$schema !== "string" || !DIALECTS.has(schema.$schema))
   )
     throw schemaFailure();
+  for (const key of ["$id", "$comment", "title", "description"])
+    if (schema[key] !== undefined && typeof schema[key] !== "string") throw schemaFailure();
+  for (const key of ["deprecated", "readOnly", "writeOnly"])
+    if (schema[key] !== undefined && typeof schema[key] !== "boolean") throw schemaFailure();
+  if (schema.examples !== undefined && !isArray(schema.examples)) throw schemaFailure();
+  if (schema.$id !== undefined) {
+    try {
+      if (new URL(schema.$id as string, "https://mcp.invalid/schema").hash) throw schemaFailure();
+    } catch {
+      throw schemaFailure();
+    }
+  }
+  if (schema !== state.root && (schema.$id !== undefined || schema.$schema !== undefined))
+    throw schemaFailure();
+  if (schema.$ref !== undefined) {
+    const target = localReference(schema.$ref, state.root);
+    inspect(target, state);
+  }
   if (schema.type !== undefined) {
     const types = isArray(schema.type) ? schema.type : [schema.type];
     if (
@@ -143,7 +229,7 @@ function inspect(schema: JsonValue): void {
   if (schema.properties !== undefined) {
     if (!isObject(schema.properties) || Object.keys(schema.properties).length > 200)
       throw schemaFailure();
-    for (const value of Object.values(schema.properties)) inspect(value);
+    for (const value of Object.values(schema.properties)) inspect(value, state);
   }
   if (
     schema.required !== undefined &&
@@ -153,8 +239,66 @@ function inspect(schema: JsonValue): void {
       new Set(schema.required).size !== schema.required.length)
   )
     throw schemaFailure();
-  if (schema.additionalProperties !== undefined) inspect(schema.additionalProperties);
-  if (schema.items !== undefined) inspect(schema.items);
+  if (schema.additionalProperties !== undefined) inspect(schema.additionalProperties, state);
+  if (schema.items !== undefined) {
+    if (isArray(schema.items)) {
+      if (state.dialect === "2020" || !schema.items.length || schema.items.length > 200)
+        throw schemaFailure();
+      for (const item of schema.items) inspect(item, state);
+    } else inspect(schema.items, state);
+  }
+  if (schema.additionalItems !== undefined) {
+    if (state.dialect === "2020") throw schemaFailure();
+    inspect(schema.additionalItems, state);
+  }
+  if (schema.prefixItems !== undefined) {
+    if (
+      state.dialect !== "2020" ||
+      !isArray(schema.prefixItems) ||
+      !schema.prefixItems.length ||
+      schema.prefixItems.length > 200
+    )
+      throw schemaFailure();
+    for (const child of schema.prefixItems) inspect(child, state);
+  }
+  if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== "boolean")
+    throw schemaFailure();
+  if (schema.pattern !== undefined) safePattern(schema.pattern);
+  for (const key of ["not", "if", "then", "else"])
+    if (schema[key] !== undefined) inspect(schema[key], state);
+  for (const key of ["$defs", "definitions", "dependentSchemas"]) {
+    const entries = schema[key];
+    if (entries === undefined) continue;
+    if (
+      (key === "dependentSchemas" && state.dialect === "07") ||
+      !isObject(entries) ||
+      Object.keys(entries).length > 200
+    )
+      throw schemaFailure();
+    for (const child of Object.values(entries)) inspect(child, state);
+  }
+  for (const key of ["dependentRequired", "dependencies"]) {
+    const entries = schema[key];
+    if (entries === undefined) continue;
+    if (
+      (key === "dependentRequired" && state.dialect === "07") ||
+      (key === "dependencies" && state.dialect !== "07") ||
+      !isObject(entries) ||
+      Object.keys(entries).length > 200
+    )
+      throw schemaFailure();
+    for (const child of Object.values(entries)) {
+      if (isArray(child)) {
+        if (
+          child.length > 200 ||
+          child.some((name) => typeof name !== "string") ||
+          new Set(child).size !== child.length
+        )
+          throw schemaFailure();
+      } else if (key === "dependencies") inspect(child, state);
+      else throw schemaFailure();
+    }
+  }
   for (const key of [
     "minProperties",
     "maxProperties",
@@ -174,7 +318,7 @@ function inspect(schema: JsonValue): void {
     const branches = schema[key];
     if (branches === undefined) continue;
     if (!isArray(branches) || !branches.length || branches.length > 32) throw schemaFailure();
-    for (const branch of branches) inspect(branch);
+    for (const branch of branches) inspect(branch, state);
   }
 }
 function equal(left: JsonValue, right: JsonValue, budget = { steps: 0 }): boolean {
@@ -214,10 +358,24 @@ function matchesType(value: JsonValue, type: JsonValue): boolean {
       return false;
   }
 }
-function matches(schema: JsonValue, value: JsonValue, budget: { steps: number }): boolean {
+function matches(
+  schema: JsonValue,
+  value: JsonValue,
+  budget: { steps: number },
+  state: SchemaState,
+): boolean {
   if (++budget.steps > 100_000) throw inputFailure();
   if (typeof schema === "boolean") return schema;
   const rules = schema as Record<string, JsonValue>;
+  if (rules.$ref !== undefined) {
+    const valid = matches(localReference(rules.$ref, state.root), value, budget, state);
+    if (!valid || state.dialect === "07") return valid;
+  }
+  if (rules.not !== undefined && matches(rules.not, value, budget, state)) return false;
+  if (rules.if !== undefined) {
+    const branch = matches(rules.if, value, budget, state) ? rules.then : rules.else;
+    if (branch !== undefined && !matches(branch, value, budget, state)) return false;
+  }
   if (
     rules.type !== undefined &&
     !(isArray(rules.type) ? rules.type : [rules.type]).some((type) => matchesType(value, type))
@@ -238,10 +396,20 @@ function matches(schema: JsonValue, value: JsonValue, budget: { steps: number })
       return false;
     if ((rules.required as string[] | undefined)?.some((key) => !Object.hasOwn(value, key)))
       return false;
+    for (const keyword of ["dependentRequired", "dependentSchemas", "dependencies"]) {
+      const entries = rules[keyword] as Record<string, JsonValue> | undefined;
+      if (!entries) continue;
+      for (const [name, child] of Object.entries(entries)) {
+        if (!Object.hasOwn(value, name)) continue;
+        if (isArray(child)) {
+          if (child.some((required) => !Object.hasOwn(value, required as string))) return false;
+        } else if (!matches(child, value, budget, state)) return false;
+      }
+    }
     const properties = (rules.properties ?? {}) as Record<string, JsonValue>;
     for (const key of keys) {
       const child = Object.hasOwn(properties, key) ? properties[key] : rules.additionalProperties;
-      if (child !== undefined && !matches(child, value[key]!, budget)) return false;
+      if (child !== undefined && !matches(child, value[key]!, budget, state)) return false;
     }
   }
   if (isArray(value)) {
@@ -250,10 +418,25 @@ function matches(schema: JsonValue, value: JsonValue, budget: { steps: number })
       (rules.maxItems !== undefined && value.length > (rules.maxItems as number))
     )
       return false;
-    if (rules.items !== undefined && !value.every((item) => matches(rules.items!, item, budget)))
-      return false;
+    const prefix = (rules.prefixItems ??
+      (isArray(rules.items ?? null) ? rules.items : [])) as readonly JsonValue[];
+    for (let index = 0; index < value.length; index++) {
+      const child =
+        index < prefix.length
+          ? prefix[index]
+          : isArray(rules.items ?? null)
+            ? rules.additionalItems
+            : rules.items;
+      if (child !== undefined && !matches(child, value[index]!, budget, state)) return false;
+    }
+    if (rules.uniqueItems === true) {
+      for (let index = 0; index < value.length; index++)
+        for (let other = 0; other < index; other++)
+          if (equal(value[index]!, value[other]!, budget)) return false;
+    }
   }
   if (typeof value === "string") {
+    if (rules.pattern !== undefined && !safePattern(rules.pattern).test(value)) return false;
     const length = Array.from(value).length;
     if (
       (rules.minLength !== undefined && length < (rules.minLength as number)) ||
@@ -272,17 +455,18 @@ function matches(schema: JsonValue, value: JsonValue, budget: { steps: number })
   }
   if (
     rules.allOf !== undefined &&
-    !(rules.allOf as JsonValue[]).every((branch) => matches(branch, value, budget))
+    !(rules.allOf as JsonValue[]).every((branch) => matches(branch, value, budget, state))
   )
     return false;
   if (
     rules.anyOf !== undefined &&
-    !(rules.anyOf as JsonValue[]).some((branch) => matches(branch, value, budget))
+    !(rules.anyOf as JsonValue[]).some((branch) => matches(branch, value, budget, state))
   )
     return false;
   if (
     rules.oneOf !== undefined &&
-    (rules.oneOf as JsonValue[]).filter((branch) => matches(branch, value, budget)).length !== 1
+    (rules.oneOf as JsonValue[]).filter((branch) => matches(branch, value, budget, state))
+      .length !== 1
   )
     return false;
   return true;
@@ -294,6 +478,7 @@ export function createMcpInputValidator(source: Record<string, unknown>): {
   readonly validate: (input: JsonObject) => JsonObject;
 } {
   let schema: JsonValue;
+  let state: SchemaState;
   try {
     schema = snapshot(source, {
       nodes: 0,
@@ -302,7 +487,19 @@ export function createMcpInputValidator(source: Record<string, unknown>): {
       maxCharacters: 65536,
       maxDepth: 16,
     });
-    inspect(schema);
+    const dialect = isObject(schema) ? schema.$schema : undefined;
+    state = {
+      root: schema,
+      dialect:
+        typeof dialect === "string" && dialect.includes("draft-07")
+          ? "07"
+          : typeof dialect === "string" && dialect.includes("2019-09")
+            ? "2019"
+            : "2020",
+      active: new Set(),
+      steps: 0,
+    };
+    inspect(schema, state);
   } catch {
     throw schemaFailure();
   }
@@ -317,7 +514,7 @@ export function createMcpInputValidator(source: Record<string, unknown>): {
           maxCharacters: 262144,
           maxDepth: 32,
         });
-        if (!isObject(value) || !matches(schema, value, { steps: 0 })) throw inputFailure();
+        if (!isObject(value) || !matches(schema, value, { steps: 0 }, state)) throw inputFailure();
         return value;
       } catch {
         throw inputFailure();

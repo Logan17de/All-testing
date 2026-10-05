@@ -45,6 +45,8 @@ export interface RuntimeCodingServices extends RuntimeGraphHttpServices {
   >;
   isModelConfigured?: (modelId: string) => boolean;
   browserGeneration?: () => number | undefined;
+  desktopGeneration?: () => number | undefined;
+  revokeRun?: (runId: string) => void;
   providerIdentity?: () => string | undefined;
 }
 /** Coding sessions are durable conversations; turns are ordinary recoverable graph runs. */
@@ -62,9 +64,12 @@ export class RuntimeCodingService {
       mutationConsent: boolean;
       subagentsEnabled: boolean;
       searchEnabled: boolean;
+      desktopEnabled: boolean;
+      desktopGeneration: number | undefined;
       browserEnabled: boolean;
       browserGeneration: number | undefined;
       modelId: string;
+      explicitModelSelection: boolean;
       providerIdentity: string | undefined;
     }
   >();
@@ -96,14 +101,29 @@ export class RuntimeCodingService {
     await Promise.all(this.#cancellations.values());
   }
   close(): void {
-    for (const runId of this.#grants.keys()) this.#queueCancellation(runId);
+    for (const runId of this.#grants.keys()) {
+      this.services.revokeRun?.(runId);
+      this.#queueCancellation(runId);
+    }
     this.#requestGeneration++;
     this.#grants.clear();
     for (const p of [...this.#toolApprovals.values()]) p.settle(false);
   }
   toolPolicy(runId: string) {
     this.#root();
-    return this.#grants.get(runId);
+    const grant = this.#grants.get(runId);
+    if (grant) {
+      const run = this.services.database
+        .connection()
+        .prepare("SELECT status FROM runs WHERE run_id=?")
+        .get(runId) as { status: string } | undefined;
+      if (!run || ["completed", "failed", "cancelled"].includes(run.status)) {
+        this.services.revokeRun?.(runId);
+        this.#grants.delete(runId);
+        return undefined;
+      }
+    }
+    return grant;
   }
   approveTool(
     request: { tool: string; args: JsonObject },
@@ -215,16 +235,22 @@ export class RuntimeCodingService {
         id: `harness.fs.${operation}`,
         title: `Workspace ${operation}`,
         pluginId: "harness.native",
-        status: process.platform === "linux" ? "enabled-workspace-read" : "unavailable-platform",
+        status: ["linux", "win32"].includes(process.platform)
+          ? "enabled-workspace-read"
+          : "unavailable-platform",
       })),
-      ...["write", "apply_patch", "mkdir"].map((operation) => ({
+      ...[
+        "write",
+        "apply_patch",
+        "mkdir",
+        ...(process.platform === "win32" ? ["rename", "delete"] : []),
+      ].map((operation) => ({
         id: `harness.fs.${operation}`,
         title: `Workspace ${operation}`,
         pluginId: "harness.native",
-        status:
-          process.platform === "linux"
-            ? "requires-turn-and-per-call-mutation-consent"
-            : "unavailable-platform",
+        status: ["linux", "win32"].includes(process.platform)
+          ? "requires-turn-and-per-call-mutation-consent"
+          : "unavailable-platform",
       })),
       {
         id: "harness.shell.run",
@@ -245,6 +271,18 @@ export class RuntimeCodingService {
         title: `Browser ${operation}`,
         pluginId: "harness.native",
         status: "requires-armed-browser-and-turn-consent",
+      })),
+      ...["create", "list", "remove"].map((operation) => ({
+        id: `harness.git.worktree.${operation}`,
+        title: `Managed worktree ${operation}`,
+        pluginId: "harness.native",
+        status: "requires-private-host-journal-os-sandbox-mutation-consent-and-exact-approval",
+      })),
+      ...["inventory", "capture", "input", "share"].map((operation) => ({
+        id: `harness.desktop.${operation}`,
+        title: `Desktop ${operation}`,
+        pluginId: "harness.native",
+        status: "requires-armed-desktop-turn-consent-and-separate-image-transmission-consent",
       })),
       {
         id: "harness.research.search",
@@ -309,7 +347,10 @@ export class RuntimeCodingService {
     const terminal = new Set(
       runs.filter((r) => ["completed", "failed", "cancelled"].includes(r.status)).map((r) => r.id),
     );
-    for (const id of terminal) this.#grants.delete(id);
+    for (const id of terminal) {
+      this.services.revokeRun?.(id);
+      this.#grants.delete(id);
+    }
     const ids = new Set(runs.map((r) => r.id));
     const visibleRuns = runs.slice(0, 100).map((r) => r.id);
     const rows =
@@ -360,11 +401,16 @@ export class RuntimeCodingService {
         .filter((a) => ids.has(a.runId) && !terminal.has(a.runId))
         .map((a) => this.services.redact(a)),
       capabilities: {
-        readOnlyWorkspaceTools: process.platform === "linux",
-        nativeFilesystemPlatform: process.platform === "linux" ? "linux" : "unavailable",
+        readOnlyWorkspaceTools: ["linux", "win32"].includes(process.platform),
+        nativeFilesystemPlatform: ["linux", "win32"].includes(process.platform)
+          ? process.platform
+          : "unavailable",
         mutationTools: "explicit-per-turn-and-per-call-consent",
         contextSummary: "automatic",
-        osSandbox: "required-bubblewrap-no-host-fallback",
+        osSandbox:
+          process.platform === "win32"
+            ? "required-appcontainer-jobobject-no-host-fallback"
+            : "required-bubblewrap-no-host-fallback",
         filesystemBoundary: "application",
         processExecution: "fixed-argv-approval-sandbox-required",
         projectCommands: ["project-test", "project-build", "project-typecheck", "project-lint"],
@@ -411,6 +457,7 @@ export class RuntimeCodingService {
         "subagentsEnabled",
         "searchEnabled",
         "browserEnabled",
+        "desktopEnabled",
         "workingDirectory",
         "skillMode",
         "skillNames",
@@ -553,6 +600,8 @@ export class RuntimeCodingService {
       if (!this.#runs().some((r) => r.id === turnId && r.sessionId === session.conversationId))
         throw new Error("Turn is outside this session.");
       if (action === "turn/interrupt") {
+        this.services.revokeRun?.(turnId);
+        this.#grants.delete(turnId);
         await this.services.cancel(turnId);
         return { turn: { id: turnId, status: "cancellation-requested" } };
       }
@@ -568,7 +617,13 @@ export class RuntimeCodingService {
       )
     )
       throw new Error("This session already has an unfinished turn.");
-    for (const key of ["mutationConsent", "subagentsEnabled", "searchEnabled", "browserEnabled"])
+    for (const key of [
+      "mutationConsent",
+      "subagentsEnabled",
+      "searchEnabled",
+      "browserEnabled",
+      "desktopEnabled",
+    ])
       if (params[key] !== undefined && typeof params[key] !== "boolean")
         throw new Error("Invalid turn consent.");
     const prompt = text("text", 24_000)!;
@@ -653,10 +708,14 @@ export class RuntimeCodingService {
       mutationConsent: params.mutationConsent === true,
       subagentsEnabled: params.subagentsEnabled === true,
       searchEnabled: params.searchEnabled === true,
+      desktopEnabled: params.desktopEnabled === true,
+      desktopGeneration:
+        params.desktopEnabled === true ? this.services.desktopGeneration?.() : undefined,
       browserEnabled: params.browserEnabled === true,
       browserGeneration:
         params.browserEnabled === true ? this.services.browserGeneration?.() : undefined,
       modelId,
+      explicitModelSelection: typeof params.modelId === "string",
       providerIdentity: this.services.providerIdentity?.(),
     });
     this.services.dispatch?.(created.runId);

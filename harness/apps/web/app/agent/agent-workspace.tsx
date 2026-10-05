@@ -41,6 +41,7 @@ export function AgentWorkspace({ initialSessionId = "" }: { initialSessionId?: s
   const [subagentsEnabled, setSubagentsEnabled] = useState(false);
   const [searchEnabled, setSearchEnabled] = useState(false);
   const [browserEnabled, setBrowserEnabled] = useState(false);
+  const [desktopEnabled, setDesktopEnabled] = useState(false);
   const [runs, setRuns] = useState<Record<string, AgentRun>>({});
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
@@ -85,6 +86,7 @@ export function AgentWorkspace({ initialSessionId = "" }: { initialSessionId?: s
           setSubagentsEnabled(false);
           setSearchEnabled(false);
           setBrowserEnabled(false);
+          setDesktopEnabled(false);
           setRuns({});
           setArchived(false);
           setError("");
@@ -333,6 +335,7 @@ export function AgentWorkspace({ initialSessionId = "" }: { initialSessionId?: s
                     subagentsEnabled,
                     searchEnabled,
                     browserEnabled,
+                    desktopEnabled,
                     ...(instructions.trim() ? { instructions } : {}),
                   }),
                 );
@@ -348,6 +351,7 @@ export function AgentWorkspace({ initialSessionId = "" }: { initialSessionId?: s
                 setSubagentsEnabled(false);
                 setSearchEnabled(false);
                 setBrowserEnabled(false);
+                setDesktopEnabled(false);
               });
             }}
           >
@@ -423,6 +427,19 @@ export function AgentWorkspace({ initialSessionId = "" }: { initialSessionId?: s
                 />{" "}
                 Allow tools from an explicitly armed isolated browser session for the next task.
                 Every browser input still needs approval.
+              </label>
+            </p>
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  disabled={busy || active}
+                  checked={desktopEnabled}
+                  onChange={(event) => setDesktopEnabled(event.target.checked)}
+                />{" "}
+                Allow native desktop tools for the next task using a separately armed local desktop
+                session. Each input requires exact approval; screenshot sharing requires approval of
+                the destination model, chat, current turn and reuse limit.
               </label>
             </p>
             <p>
