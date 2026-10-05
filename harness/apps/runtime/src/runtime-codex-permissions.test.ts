@@ -1,9 +1,57 @@
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildCodexWorkspacePermissionGrant } from "./runtime-codex-permissions.js";
+import {
+  buildCodexWorkspacePermissionGrant,
+  codexPermissionLexicalPath,
+  codexPermissionCanonicalSuffix,
+} from "./runtime-codex-permissions.js";
 describe("native workspace-only permission subset", () => {
+  it("anchors canonical drive aliases without folding directory names or sibling prefixes", () => {
+    const root = String.raw`C:\Users\runneradmin\Temp\workspace`;
+    expect(
+      codexPermissionCanonicalSuffix(
+        root,
+        String.raw`c:\Users\runneradmin\Temp\workspace\safe.txt`,
+        "\\",
+      ),
+    ).toBe("safe.txt");
+    for (const target of [
+      String.raw`C:\Users\runneradmin\Temp\workspace2\safe.txt`,
+      String.raw`C:\Users\runneradmin\Temp\WORKSPACE\safe.txt`,
+      String.raw`D:\Users\runneradmin\Temp\workspace\safe.txt`,
+    ])
+      expect(codexPermissionCanonicalSuffix(root, target, "\\")).toBeUndefined();
+  });
+  it("keeps verified Windows 8.3 roots without accepting unrelated lexical paths", () => {
+    const selected = String.raw`C:\Users\RUNNER~1\AppData\Local\Temp\workspace`;
+    const canonical = String.raw`C:\Users\runneradmin\AppData\Local\Temp\workspace`;
+    expect(
+      codexPermissionLexicalPath(
+        selected,
+        canonical,
+        win32.join(selected, "src", "safe.txt"),
+        win32,
+      ),
+    ).toEqual({ root: selected, components: ["src", "safe.txt"] });
+    expect(
+      codexPermissionLexicalPath(
+        selected,
+        canonical,
+        win32.join(canonical, "src", "safe.txt"),
+        win32,
+      ),
+    ).toEqual({ root: canonical, components: ["src", "safe.txt"] });
+    for (const target of [
+      win32.join(selected, "..", "outside.txt"),
+      win32.join(canonical, "..", "outside.txt"),
+      String.raw`D:\other\safe.txt`,
+      String.raw`C:\Users\unrelated\safe.txt`,
+    ])
+      expect(codexPermissionLexicalPath(selected, canonical, target, win32)).toBeUndefined();
+  });
+
   it("validates canonical requested paths and refuses network, newer schemas and symlink escape", async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-permissions-"));
     const request = (permissions: unknown) => ({

@@ -13,6 +13,42 @@ function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
 }
 const denied = () =>
   new Error("Requested permission is outside the supported workspace-only subset.");
+interface PermissionPathOperations {
+  resolve(path: string): string;
+  relative(from: string, to: string): string;
+  isAbsolute(path: string): boolean;
+  sep: string;
+}
+/** Ordinal canonical containment: Windows drive letters are aliases; directory casing is preserved. */
+export function codexPermissionCanonicalSuffix(
+  root: string,
+  target: string,
+  separator = sep,
+): string | undefined {
+  const drive = (value: string) =>
+    separator === "\\" ? value.replace(/^[a-z]:/iu, (part) => part.toUpperCase()) : value;
+  const base = drive(root),
+    candidate = drive(target);
+  if (candidate === base) return "";
+  const prefix = base.endsWith(separator) ? base : `${base}${separator}`;
+  return candidate.startsWith(prefix) ? candidate.slice(prefix.length) : undefined;
+}
+/** Both roots must already refer to the same realpath. Keeps Windows 8.3 aliases lexical. */
+export function codexPermissionLexicalPath(
+  selectedRoot: string,
+  canonicalRoot: string,
+  target: string,
+  paths: PermissionPathOperations = { resolve, relative, isAbsolute, sep },
+): { root: string; components: string[] } | undefined {
+  for (const root of [paths.resolve(selectedRoot), canonicalRoot]) {
+    const suffix = paths.relative(root, target);
+    if (suffix === ".." || suffix.startsWith(`..${paths.sep}`) || paths.isAbsolute(suffix))
+      continue;
+    return { root, components: suffix.split(paths.sep).filter(Boolean) };
+  }
+  return undefined;
+}
+
 /** Narrow native permission subset: existing canonical workspace files, no network or session grants. */
 export async function buildCodexWorkspacePermissionGrant(
   root: string,
@@ -89,22 +125,19 @@ export async function buildCodexWorkspacePermissionGrant(
       // Canonical output can differ from lexical input on Windows (including drive-letter casing).
       // Validate both paths against the root and keep lstat checks on every lexical component.
       const canonicalTarget = await realpath(normalized);
-      const canonicalSuffix = relative(canonicalRoot, canonicalTarget);
-      if (
-        canonicalSuffix === ".." ||
-        canonicalSuffix.startsWith(`..${sep}`) ||
-        isAbsolute(canonicalSuffix)
-      )
-        throw denied();
-      const suffix = relative(canonicalRoot, normalized);
-      if (suffix === ".." || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) throw denied();
-      const components = suffix.split(sep).filter(Boolean);
+      const canonicalSuffix = codexPermissionCanonicalSuffix(canonicalRoot, canonicalTarget);
+      if (canonicalSuffix === undefined) throw denied();
+      // Windows temporary paths can use 8.3 names while realpath expands them.
+      // Both anchors were verified as this workspace; canonical containment is mandatory above.
+      const lexical = codexPermissionLexicalPath(root, canonicalRoot, normalized);
+      if (!lexical) throw denied();
+      const components = lexical.components;
       if (
         components.some(isBlockedCodexPathSegment) ||
         (process.platform === "win32" && components.some((component) => component.includes(":")))
       )
         throw denied();
-      let current = canonicalRoot;
+      let current = lexical.root;
       for (const component of components) {
         current = resolve(current, component);
         if ((await lstat(current)).isSymbolicLink()) throw denied();
@@ -117,7 +150,7 @@ export async function buildCodexWorkspacePermissionGrant(
       )
         throw denied();
       if (canonicalSuffix.split(sep).some(isBlockedCodexPathSegment)) throw denied();
-      results.push(canonicalTarget);
+      results.push(resolve(canonicalRoot, canonicalSuffix));
     }
     return [...new Set(results)];
   };
