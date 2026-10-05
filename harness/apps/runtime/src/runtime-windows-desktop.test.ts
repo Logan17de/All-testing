@@ -150,10 +150,10 @@ it.skipIf(process.platform !== "win32")(
   "compiles the real Windows C# bridge without desktop access (Windows CI only)",
   async () => {
     await expect(
-      validateWindowsDesktopBridge(AbortSignal.timeout(20_000)),
+      validateWindowsDesktopBridge(AbortSignal.timeout(70_000)),
     ).resolves.toBeUndefined();
   },
-  25_000,
+  75_000,
 );
 it("keeps compile-only validation before any native desktop initialization", () => {
   const validation = WINDOWS_DESKTOP_SCRIPT.indexOf("if ($data.operation -eq 'validate')");

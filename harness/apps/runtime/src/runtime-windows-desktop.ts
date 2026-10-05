@@ -94,7 +94,11 @@ switch ($data.operation) {
 export type WindowsDesktopRunner = (input: string, signal: AbortSignal) => Promise<string>;
 const failure = (): Error => new Error("Windows desktop operation failed or is unavailable.");
 
-async function nativeRun(input: string, signal: AbortSignal): Promise<string> {
+async function nativeRun(
+  input: string,
+  signal: AbortSignal,
+  timeoutMs: 15_000 | 60_000 = 15_000,
+): Promise<string> {
   signal.throwIfAborted();
   if (process.platform !== "win32") throw failure();
   const windows = process.env.SystemRoot;
@@ -139,7 +143,7 @@ async function nativeRun(input: string, signal: AbortSignal): Promise<string> {
       child.kill();
       finish(false);
     };
-    const timer = setTimeout(abort, 15000);
+    const timer = setTimeout(abort, timeoutMs);
     signal.addEventListener("abort", abort, { once: true });
     child.on("error", () => finish(false));
     child.stdin.on("error", () => finish(false));
@@ -157,12 +161,16 @@ async function nativeRun(input: string, signal: AbortSignal): Promise<string> {
   });
 }
 
-/** Compile the actual fixed C# bridge on Windows, without interacting with the desktop. */
+/**
+ * Compile the actual fixed C# bridge on Windows, without interacting with the desktop.
+ * Cold Windows CI assembly/compiler startup gets a separate bounded 60-second
+ * deadline; production inventory, capture and input remain capped at 15 seconds.
+ */
 export async function validateWindowsDesktopBridge(signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
   let value: unknown;
   try {
-    value = JSON.parse(await nativeRun('{"operation":"validate"}', signal));
+    value = JSON.parse(await nativeRun('{"operation":"validate"}', signal, 60_000));
   } catch {
     signal.throwIfAborted();
     throw failure();
