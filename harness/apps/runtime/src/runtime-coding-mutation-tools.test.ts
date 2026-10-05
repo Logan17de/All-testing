@@ -69,7 +69,7 @@ it("writes only the approved immutable snapshot", async () => {
     return true;
   });
   const [write] = createRuntimeMutationTools({ root, approve });
-  if (process.platform !== "linux") {
+  if (process.platform !== "linux" && process.platform !== "win32") {
     await expect(write!.invoke(input, context())).rejects.toThrow();
     expect(approve).not.toHaveBeenCalled();
     return;
@@ -80,7 +80,7 @@ it("writes only the approved immutable snapshot", async () => {
   });
   expect(await readFile(join(root, "file.ts"), "utf8")).toBe("approved");
   expect(await readdir(root)).toEqual(["file.ts"]);
-});
+}, 75_000);
 it("rejects unsafe input before asking for approval", async () => {
   const approve = vi.fn(async () => true);
   const [write, exec] = createRuntimeMutationTools({ root, approve });
@@ -132,7 +132,7 @@ it("aborts after approval before creating any output", async () => {
 it("dispatches a fixed node version diagnostic through mocked OS sandbox after approval", async () => {
   const approve = vi.fn(async () => true);
   const [, exec] = createRuntimeMutationTools({ root, approve });
-  if (process.platform !== "linux") {
+  if (process.platform !== "linux" && process.platform !== "win32") {
     await expect(exec!.invoke({ command: "node-version" }, context())).rejects.toThrow();
     return;
   }

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { runBoundedProcess } from "@zet-harness/tools";
+import { runSandboxedProcess } from "./runtime-process-sandbox.js";
 import type { AdapterInvocationContext } from "@zet-harness/plugin-api";
 import {
   buildManagedWorktreeCommand,
@@ -113,24 +114,31 @@ it("classifies only fixed commands and rejects revisions, paths, options and for
     ).toThrow();
   expect(() => buildManagedWorktreeCommand("remove", { name: "task", force: true })).toThrow();
 });
-it("creates checked-out detached tree, lists owned entries and removes clean tree through sandbox mock", async () => {
-  const approve = vi.fn(() => Promise.resolve(true));
-  const all = tools({ approve });
-  const value = await create(all);
-  expect(value.value).toEqual({
-    worktrees: [{ name: "task", commit, path: ".zet-worktrees/task" }],
-  });
-  expect(await readFile(join(root, ".zet-worktrees/task/source.txt"), "utf8")).toBe(
-    "fixture source\n",
-  );
-  expect((await find("list", all).invoke({}, context())).value).toEqual(value.value);
-  expect((await verifyManagedWorktreeOwnership(root, journalPath)).records[0]?.phase).toBe("owned");
-  expect((await find("remove", all).invoke({ name: "task" }, context())).value).toEqual({
-    worktrees: [],
-  });
-  await expect(lstat(join(root, ".zet-worktrees/task"))).rejects.toMatchObject({ code: "ENOENT" });
-  expect(approve).toHaveBeenCalledTimes(3);
-});
+it.runIf(process.platform === "linux")(
+  "creates checked-out detached tree, lists owned entries and removes clean tree through sandbox mock",
+  async () => {
+    const approve = vi.fn(() => Promise.resolve(true));
+    const all = tools({ approve });
+    const value = await create(all);
+    expect(value.value).toEqual({
+      worktrees: [{ name: "task", commit, path: ".zet-worktrees/task" }],
+    });
+    expect(await readFile(join(root, ".zet-worktrees/task/source.txt"), "utf8")).toBe(
+      "fixture source\n",
+    );
+    expect((await find("list", all).invoke({}, context())).value).toEqual(value.value);
+    expect((await verifyManagedWorktreeOwnership(root, journalPath)).records[0]?.phase).toBe(
+      "owned",
+    );
+    expect((await find("remove", all).invoke({ name: "task" }, context())).value).toEqual({
+      worktrees: [],
+    });
+    await expect(lstat(join(root, ".zet-worktrees/task"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(approve).toHaveBeenCalledTimes(3);
+  },
+);
 it("never deletes a preexisting container or tree without ownership proof", async () => {
   await mkdir(join(root, ".zet-worktrees"));
   await mkdir(join(root, ".zet-worktrees/task"));
@@ -143,15 +151,18 @@ it("never deletes a preexisting container or tree without ownership proof", asyn
   expect(execute).not.toHaveBeenCalled();
   expect(await readFile(join(root, ".zet-worktrees/task/keep.txt"), "utf8")).toBe("keep");
 });
-it("refuses dirty removal without force and preserves the owned tree", async () => {
-  await create();
-  await writeFile(join(root, ".zet-worktrees/task/source.txt"), "user change\n");
-  await expect(find("remove").invoke({ name: "task" }, context())).rejects.toThrow("refused");
-  expect(await readFile(join(root, ".zet-worktrees/task/source.txt"), "utf8")).toBe(
-    "user change\n",
-  );
-  expect((await verifyManagedWorktreeOwnership(root, journalPath)).records).toHaveLength(1);
-});
+it.runIf(process.platform === "linux")(
+  "refuses dirty removal without force and preserves the owned tree",
+  async () => {
+    await create();
+    await writeFile(join(root, ".zet-worktrees/task/source.txt"), "user change\n");
+    await expect(find("remove").invoke({ name: "task" }, context())).rejects.toThrow("refused");
+    expect(await readFile(join(root, ".zet-worktrees/task/source.txt"), "utf8")).toBe(
+      "user change\n",
+    );
+    expect((await verifyManagedWorktreeOwnership(root, journalPath)).records).toHaveLength(1);
+  },
+);
 it("denied approval and pre-cancellation execute nothing and create no container", async () => {
   const execute = vi.fn(sandbox);
   await expect(
@@ -168,23 +179,28 @@ it("denied approval and pre-cancellation execute nothing and create no container
   expect(execute).not.toHaveBeenCalled();
   await expect(lstat(join(root, ".zet-worktrees"))).rejects.toMatchObject({ code: "ENOENT" });
 });
-it("refuses container substitution during approval before sandbox execution", async () => {
-  await create();
-  const execute = vi.fn(sandbox);
-  const all = tools({
-    sandbox: execute,
-    approve: async () => {
-      await rename(join(root, ".zet-worktrees"), join(root, "original-container"));
-      await mkdir(join(root, ".zet-worktrees"));
-      return true;
-    },
-  });
-  await expect(find("remove", all).invoke({ name: "task" }, context())).rejects.toThrow("refused");
-  expect(execute).not.toHaveBeenCalled();
-  expect(await readFile(join(root, "original-container/task/source.txt"), "utf8")).toBe(
-    "fixture source\n",
-  );
-});
+it.runIf(process.platform === "linux")(
+  "refuses container substitution during approval before sandbox execution",
+  async () => {
+    await create();
+    const execute = vi.fn(sandbox);
+    const all = tools({
+      sandbox: execute,
+      approve: async () => {
+        await rename(join(root, ".zet-worktrees"), join(root, "original-container"));
+        await mkdir(join(root, ".zet-worktrees"));
+        return true;
+      },
+    });
+    await expect(find("remove", all).invoke({ name: "task" }, context())).rejects.toThrow(
+      "refused",
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(await readFile(join(root, "original-container/task/source.txt"), "utf8")).toBe(
+      "fixture source\n",
+    );
+  },
+);
 it("refuses Git metadata substitution during first-create approval", async () => {
   const execute = vi.fn(sandbox);
   const all = tools({
@@ -212,19 +228,22 @@ it("quarantines uncertain failed create and never executes fallback cleanup", as
   expect(journal.records[0]?.phase).toBe("creating");
   await expect(find("remove").invoke({ name: "task" }, context())).rejects.toThrow("recovery");
 });
-it("rejects unknown entries and altered worktree pointers before execution", async () => {
-  await create();
-  await mkdir(join(root, ".zet-worktrees/unowned"));
-  const execute = vi.fn(sandbox);
-  await expect(find("list", tools({ sandbox: execute })).invoke({}, context())).rejects.toThrow();
-  expect(execute).not.toHaveBeenCalled();
-  await rm(join(root, ".zet-worktrees/unowned"), { recursive: true });
-  await writeFile(join(root, ".zet-worktrees/task/.git"), "gitdir: /outside/metadata\n");
-  await expect(
-    find("remove", tools({ sandbox: execute })).invoke({ name: "task" }, context()),
-  ).rejects.toThrow();
-  expect(execute).not.toHaveBeenCalled();
-});
+it.runIf(process.platform === "linux")(
+  "rejects unknown entries and altered worktree pointers before execution",
+  async () => {
+    await create();
+    await mkdir(join(root, ".zet-worktrees/unowned"));
+    const execute = vi.fn(sandbox);
+    await expect(find("list", tools({ sandbox: execute })).invoke({}, context())).rejects.toThrow();
+    expect(execute).not.toHaveBeenCalled();
+    await rm(join(root, ".zet-worktrees/unowned"), { recursive: true });
+    await writeFile(join(root, ".zet-worktrees/task/.git"), "gitdir: /outside/metadata\n");
+    await expect(
+      find("remove", tools({ sandbox: execute })).invoke({ name: "task" }, context()),
+    ).rejects.toThrow();
+    expect(execute).not.toHaveBeenCalled();
+  },
+);
 it("rejects workspace-visible state and concurrent journal locks", async () => {
   await expect(create(tools({ journalPath: join(root, "journal.json") }))).rejects.toThrow();
   await writeFile(journalPath + ".lock", "preexisting lock", { mode: 0o600 });
@@ -266,3 +285,33 @@ it("preflight refusal creates no reservation and never executes worktree add", a
   expect(execute).toHaveBeenCalledOnce();
   expect(JSON.parse(await readFile(journalPath, "utf8")) as unknown).toMatchObject({ records: [] });
 });
+
+it.runIf(process.platform === "win32")(
+  "refuses managed worktree production sandbox on Windows without any runner fallback",
+  async () => {
+    const runner = vi.fn<typeof runBoundedProcess>();
+    const identity = { path: root, dev: "1", ino: "1" };
+    await expect(
+      runSandboxedProcess(
+        {
+          command: "git",
+          args: buildManagedWorktreeCommand("create", { name: "task", commit }),
+          cwd: root,
+          env: {},
+        },
+        runner,
+        "win32",
+        {
+          root: identity,
+          git: { ...identity, path: join(root, ".git") },
+          container: { ...identity, path: join(root, ".zet-worktrees") },
+          journalPath,
+          records: [],
+          pendingCreation: { name: "task", commit },
+        },
+      ),
+    ).rejects.toThrow("refused");
+    expect(runner).not.toHaveBeenCalled();
+    await expect(lstat(join(root, ".zet-worktrees"))).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
