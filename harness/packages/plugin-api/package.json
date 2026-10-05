@@ -15,6 +15,10 @@
     "./secret-contract": {
       "types": "./src/secret-contract.ts",
       "default": "./dist/secret-contract.js"
+    },
+    "./mcp-elicitation": {
+      "types": "./src/mcp-elicitation.ts",
+      "default": "./dist/mcp-elicitation.js"
     }
   },
   "scripts": {

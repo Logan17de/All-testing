@@ -10,6 +10,7 @@ type Event = { sequence: number; method: string; params: unknown };
 type Approval = { id: string | number; method: string; params: unknown };
 type Status = {
   scopeGeneration: number;
+  requestGeneration: number;
   available: boolean;
   events: Event[];
   pendingApprovals: Approval[];
@@ -32,6 +33,7 @@ export function CodexWorkspace() {
   const [models, setModels] = useState<RecordValue[]>([]);
   const [threads, setThreads] = useState<RecordValue[]>([]);
   const [model, setModel] = useState("");
+  const [dynamicToolsEnabled, setDynamicToolsEnabled] = useState(false);
   const [sandbox, setSandbox] = useState("read-only");
   const [threadId, setThreadId] = useState("");
   const [turns, setTurns] = useState<Record<string, TurnState>>({});
@@ -49,6 +51,7 @@ export function CodexWorkspace() {
   const [login, setLogin] = useState<{ id: string; url: string } | null>(null);
   const cursor = useRef(0);
   const scopeGeneration = useRef<number | null>(null);
+  const requestGeneration = useRef<number | null>(null);
 
   const action = useCallback(async (name: string, params: RecordValue = {}) => {
     const expectedScope = scopeGeneration.current;
@@ -71,11 +74,21 @@ export function CodexWorkspace() {
         const scopeChanged =
           scopeGeneration.current !== null &&
           result.data.scopeGeneration !== scopeGeneration.current;
+        const processChanged =
+          requestGeneration.current !== null &&
+          requestGeneration.current !== result.data.requestGeneration;
+        requestGeneration.current = result.data.requestGeneration;
         scopeGeneration.current = result.data.scopeGeneration;
+        if (processChanged) {
+          setLogin(null);
+          setLoginConsent(false);
+          setResponding(null);
+        }
         if (scopeChanged) {
           setModels([]);
           setThreads([]);
           setModel("");
+          setDynamicToolsEnabled(false);
           setSandbox("read-only");
           setThreadId("");
           setTranscript(null);
@@ -89,7 +102,7 @@ export function CodexWorkspace() {
           setError("");
         }
         setStatus(result.data);
-        const reset = scopeChanged || result.data.cursor < cursor.current;
+        const reset = scopeChanged || processChanged || result.data.cursor < cursor.current;
         const first = result.data.events[0]?.sequence;
         if (scopeChanged)
           setHistoryNotice("Workspace changed. Previous workspace content has been cleared.");
@@ -183,7 +196,7 @@ export function CodexWorkspace() {
   async function selectThread(actionName: "thread/start" | "thread/resume") {
     const result = record(
       await action(actionName, {
-        ...(actionName === "thread/resume" ? { threadId } : {}),
+        ...(actionName === "thread/resume" ? { threadId } : { dynamicToolsEnabled }),
         sandbox,
         ...(model ? { model } : {}),
       }),
@@ -210,7 +223,11 @@ export function CodexWorkspace() {
     setResponding(approval.id);
     setError("");
     try {
-      await action("approval/respond", { id: approval.id, decision });
+      await action("approval/respond", {
+        id: approval.id,
+        decision,
+        requestGeneration: status?.requestGeneration,
+      });
       setStatus((previous) =>
         previous
           ? {
@@ -344,6 +361,16 @@ export function CodexWorkspace() {
             <option value="read-only">Read only</option>
             <option value="workspace-write">Allow workspace writes</option>
           </select>
+        </label>{" "}
+        <label>
+          <input
+            type="checkbox"
+            checked={dynamicToolsEnabled}
+            disabled={busy}
+            onChange={(event) => setDynamicToolsEnabled(event.target.checked)}
+          />{" "}
+          Enable experimental fixed read-only client tools for a new session (each invocation needs
+          approval)
         </label>{" "}
         <button
           disabled={busy}
@@ -525,7 +552,10 @@ export function CodexWorkspace() {
           <p>No pending approvals.</p>
         ) : (
           status.pendingApprovals.map((approval) => (
-            <div className="card" key={`${status.scopeGeneration}:${String(approval.id)}`}>
+            <div
+              className="card"
+              key={`${status.scopeGeneration}:${status.requestGeneration}:${String(approval.id)}`}
+            >
               <p>{approval.method}</p>
               <p>
                 Session:{" "}
@@ -535,7 +565,9 @@ export function CodexWorkspace() {
                   : " (review this session context before responding)"}
               </p>
               {approval.method === "item/tool/requestUserInput" ||
-              approval.method === "mcpServer/elicitation/request" ? (
+              approval.method === "mcpServer/elicitation/request" ||
+              approval.method === "item/tool/call" ||
+              approval.method === "item/permissions/requestApproval" ? (
                 <CodexRequest
                   request={approval}
                   disabled={responding !== null}
@@ -544,7 +576,10 @@ export function CodexWorkspace() {
                     setResponding(approval.id);
                     setError("");
                     try {
-                      await action(name, params);
+                      await action(name, {
+                        ...params,
+                        requestGeneration: status.requestGeneration,
+                      });
                       setStatus((previous) =>
                         previous
                           ? {

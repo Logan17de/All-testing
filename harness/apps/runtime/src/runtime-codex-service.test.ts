@@ -1,7 +1,10 @@
 import { spawn } from "node:child_process";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { RuntimeCodexService } from "./runtime-codex-service.js";
-const fixture = `const rl=require('node:readline').createInterface({input:process.stdin});rl.on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;if(m.method==='thread/start'){console.log(JSON.stringify({id:'approval-1',method:'item/commandExecution/requestApproval',params:{command:'example',threadId:'t'}}));console.log(JSON.stringify({id:'unsupported',method:'item/permissions/requestApproval',params:{}}));console.log(JSON.stringify({method:'turn/completed',params:{threadId:'thread'}}));}console.log(JSON.stringify({id:m.id,result:{method:m.method,params:m.params,...(['thread/start','thread/resume'].includes(m.method)?{thread:{id:'t'}}:{})}}));});`;
+const fixture = `const rl=require('node:readline').createInterface({input:process.stdin});rl.on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;if(m.method==='thread/start'){console.log(JSON.stringify({id:'approval-1',method:'item/commandExecution/requestApproval',params:{command:'example',threadId:'t'}}));console.log(JSON.stringify({id:'unsupported',method:'account/chatgptAuthTokens/refresh',params:{}}));console.log(JSON.stringify({method:'turn/completed',params:{threadId:'thread'}}));}console.log(JSON.stringify({id:m.id,result:{method:m.method,params:m.params,...(['thread/start','thread/resume'].includes(m.method)?{thread:{id:'t'}}:{})}}));});`;
 function service(timeoutMs = 1000) {
   return new RuntimeCodexService({
     cwd: process.cwd(),
@@ -37,7 +40,11 @@ describe("official Codex JSONL service (fixture only; no provider calls)", () =>
       });
       expect(codex.snapshot().events[0]?.method).toBe("turn/completed");
       expect(codex.snapshot().pendingApprovals.map((item) => item.id)).toEqual(["approval-1"]);
-      await codex.action("approval/respond", { id: "approval-1", decision: "decline" });
+      await codex.action("approval/respond", {
+        requestGeneration: codex.snapshot().requestGeneration,
+        id: "approval-1",
+        decision: "decline",
+      });
       expect(codex.snapshot().pendingApprovals).toEqual([]);
       expect(codex.snapshot(1).events).toEqual([]);
       await expect(
@@ -125,6 +132,63 @@ describe("official Codex JSONL service (fixture only; no provider calls)", () =>
       codex.close();
     }
   });
+  it("registers only opted-in fixed tools and executes each call after explicit consent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-tools-service-"));
+    await writeFile(join(root, "example.txt"), "safe fixture content");
+    const codex = new RuntimeCodexService({
+      cwd: root,
+      spawnProcess: () =>
+        spawn(
+          process.execPath,
+          [
+            "-e",
+            `
+      let response; require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+        const m=JSON.parse(line); if(m.id==='tool'){response=m.result;return;} if(m.id===undefined)return;
+        if(m.method==='thread/start') console.log(JSON.stringify({id:'tool',method:'item/tool/call',params:{threadId:'t',turnId:'v',callId:'c',namespace:null,tool:'zet_workspace_read_file',arguments:{path:'example.txt'}}}));
+        console.log(JSON.stringify({id:m.id,result:m.method==='model/list'?{response}:{method:m.method,params:m.params,thread:{id:'t'}}}));
+      });`,
+          ],
+          { stdio: "pipe" },
+        ),
+    });
+    try {
+      const result = (await codex.action("thread/start", { dynamicToolsEnabled: true })) as {
+        params: { dynamicTools: { name: string }[] };
+      };
+      expect(result.params.dynamicTools.map((tool) => tool.name)).toEqual([
+        "zet_workspace_read_file",
+        "zet_workspace_list",
+      ]);
+      const generation = codex.snapshot().requestGeneration;
+      await expect(
+        codex.action("dynamic-tool/respond", { id: "tool", execute: true }),
+      ).rejects.toThrow("generation");
+      await expect(
+        codex.action("dynamic-tool/respond", {
+          id: "tool",
+          execute: true,
+          requestGeneration: generation,
+          command: "arbitrary",
+        }),
+      ).rejects.toThrow();
+      await codex.action("dynamic-tool/respond", {
+        id: "tool",
+        execute: true,
+        requestGeneration: generation,
+      });
+      expect(await codex.action("model/list")).toMatchObject({
+        response: {
+          success: true,
+          contentItems: [{ type: "inputText", text: "safe fixture content" }],
+        },
+      });
+      await expect(codex.action("thread/start", { dynamicToolsEnabled: "true" })).rejects.toThrow();
+    } finally {
+      codex.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("expires resolved approvals and refuses duplicate request identifiers", async () => {
     const make = (duplicate: boolean) =>
       new RuntimeCodexService({
@@ -155,7 +219,11 @@ describe("official Codex JSONL service (fixture only; no provider calls)", () =>
       await resolved.action("model/list");
       expect(resolved.snapshot().pendingApprovals).toEqual([]);
       await expect(
-        resolved.action("approval/respond", { id: "pending", decision: "accept" }),
+        resolved.action("approval/respond", {
+          requestGeneration: resolved.snapshot().requestGeneration,
+          id: "pending",
+          decision: "accept",
+        }),
       ).rejects.toThrow("expired");
     } finally {
       resolved.close();
@@ -192,19 +260,29 @@ describe("official Codex JSONL service (fixture only; no provider calls)", () =>
     try {
       await codex.action("model/list");
       await expect(
-        codex.action("approval/respond", { id: "question", decision: "accept" }),
+        codex.action("approval/respond", {
+          requestGeneration: codex.snapshot().requestGeneration,
+          id: "question",
+          decision: "accept",
+        }),
       ).rejects.toThrow();
       for (const answers of [{ wrong: { answers: ["a"] } }, { choice: { answers: [4] } }, {}]) {
         await expect(
-          codex.action("user-input/respond", { id: "question", answers }),
+          codex.action("user-input/respond", {
+            requestGeneration: codex.snapshot().requestGeneration,
+            id: "question",
+            answers,
+          }),
         ).rejects.toThrow();
       }
       await codex.action("user-input/respond", {
+        requestGeneration: codex.snapshot().requestGeneration,
         id: "question",
         answers: { choice: { answers: ["private answer"] } },
       });
       await expect(
         codex.action("user-input/respond", {
+          requestGeneration: codex.snapshot().requestGeneration,
           id: "question",
           answers: { choice: { answers: ["again"] } },
         }),
@@ -215,32 +293,52 @@ describe("official Codex JSONL service (fixture only; no provider calls)", () =>
         { count: 2, choice: "safe", extra: true },
       ]) {
         await expect(
-          codex.action("elicitation/respond", { id: "form", action: "accept", content }),
+          codex.action("elicitation/respond", {
+            requestGeneration: codex.snapshot().requestGeneration,
+            id: "form",
+            action: "accept",
+            content,
+          }),
         ).rejects.toThrow();
       }
       await codex.action("elicitation/respond", {
+        requestGeneration: codex.snapshot().requestGeneration,
         id: "form",
         action: "accept",
         content: { count: 2, choice: "safe" },
       });
       await expect(
-        codex.action("elicitation/respond", { id: "form", action: "cancel" }),
+        codex.action("elicitation/respond", {
+          requestGeneration: codex.snapshot().requestGeneration,
+          id: "form",
+          action: "cancel",
+        }),
       ).rejects.toThrow("expired");
       await expect(
-        codex.action("elicitation/respond", { id: "url", action: "accept" }),
+        codex.action("elicitation/respond", {
+          requestGeneration: codex.snapshot().requestGeneration,
+          id: "url",
+          action: "accept",
+        }),
       ).rejects.toThrow("External URL consent");
       for (const id of ["url-http", "url-credentials", "url-invalid"]) {
         await expect(
           codex.action("elicitation/respond", {
+            requestGeneration: codex.snapshot().requestGeneration,
             id,
             action: "accept",
             confirmExternalConsent: true,
           }),
         ).rejects.toThrow("valid HTTPS");
-        await codex.action("elicitation/respond", { id, action: "cancel" });
+        await codex.action("elicitation/respond", {
+          requestGeneration: codex.snapshot().requestGeneration,
+          id,
+          action: "cancel",
+        });
       }
       await expect(
         codex.action("elicitation/respond", {
+          requestGeneration: codex.snapshot().requestGeneration,
           id: "url",
           action: "accept",
           confirmExternalConsent: true,
@@ -248,6 +346,7 @@ describe("official Codex JSONL service (fixture only; no provider calls)", () =>
         }),
       ).rejects.toThrow();
       await codex.action("elicitation/respond", {
+        requestGeneration: codex.snapshot().requestGeneration,
         id: "url",
         action: "accept",
         confirmExternalConsent: true,
@@ -255,6 +354,7 @@ describe("official Codex JSONL service (fixture only; no provider calls)", () =>
       });
       await expect(
         codex.action("elicitation/respond", {
+          requestGeneration: codex.snapshot().requestGeneration,
           id: "url",
           action: "accept",
           confirmExternalConsent: true,

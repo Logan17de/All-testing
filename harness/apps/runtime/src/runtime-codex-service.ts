@@ -1,6 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { resolve } from "node:path";
+import { validateMcpFormContent } from "@zet-harness/plugin-api/mcp-elicitation";
+import { CODEX_DYNAMIC_TOOLS, executeCodexDynamicTool } from "./runtime-codex-dynamic-tools.js";
+import { buildCodexWorkspacePermissionGrant } from "./runtime-codex-permissions.js";
 
 export type CodexDecision = "accept" | "decline" | "cancel";
 export interface CodexEvent {
@@ -30,141 +33,12 @@ const APPROVAL_METHODS = new Set([
   "item/fileChange/requestApproval",
   "item/tool/requestUserInput",
   "mcpServer/elicitation/request",
+  "item/permissions/requestApproval",
+  "item/tool/call",
 ]);
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-// Restrict arbitrary OpenAI form schemas to the official MCP primitive form subset.
-function formContent(schema: unknown, content: unknown): boolean {
-  if (!object(schema) || schema.type !== "object" || !object(schema.properties) || !object(content))
-    return false;
-  if (
-    Object.keys(schema).some((key) => !["$schema", "type", "properties", "required"].includes(key))
-  )
-    return false;
-  const required = schema.required ?? [];
-  if (
-    !Array.isArray(required) ||
-    required.some(
-      (key) =>
-        typeof key !== "string" ||
-        !Object.hasOwn(schema.properties as object, key) ||
-        !Object.hasOwn(content, key),
-    )
-  )
-    return false;
-  for (const [key, value] of Object.entries(content)) {
-    if (!Object.hasOwn(schema.properties, key)) return false;
-    const field = schema.properties[key];
-    if (
-      !object(field) ||
-      Object.keys(field).some(
-        (key) =>
-          ![
-            "type",
-            "title",
-            "description",
-            "default",
-            "minimum",
-            "maximum",
-            "minLength",
-            "maxLength",
-            "format",
-            "enum",
-            "enumNames",
-            "oneOf",
-            "items",
-            "minItems",
-            "maxItems",
-          ].includes(key),
-      )
-    )
-      return false;
-    const bounds = (min: unknown, max: unknown, count: number) =>
-      (min === undefined || (typeof min === "number" && count >= min)) &&
-      (max === undefined || (typeof max === "number" && count <= max));
-    const choices = (item: Record<string, unknown>) =>
-      Array.isArray(item.enum)
-        ? item.enum
-        : Array.isArray(item.oneOf)
-          ? item.oneOf.map((option) => (object(option) ? option.const : undefined))
-          : Array.isArray(item.anyOf)
-            ? item.anyOf.map((option) => (object(option) ? option.const : undefined))
-            : undefined;
-    switch (field.type) {
-      case "boolean":
-        if (typeof value !== "boolean") return false;
-        break;
-      case "number":
-      case "integer":
-        if (
-          typeof value !== "number" ||
-          !Number.isFinite(value) ||
-          (field.type === "integer" && !Number.isSafeInteger(value)) ||
-          !bounds(field.minimum, field.maximum, value)
-        )
-          return false;
-        break;
-      case "string": {
-        if (
-          typeof value !== "string" ||
-          value.length > 16_384 ||
-          !bounds(field.minLength, field.maxLength, [...value].length)
-        )
-          return false;
-        const allowed = choices(field);
-        if (allowed && !allowed.includes(value)) return false;
-        if (field.format !== undefined) {
-          if (field.format === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return false;
-          else if (field.format === "uri") {
-            try {
-              new URL(value);
-            } catch {
-              return false;
-            }
-          } else if (
-            field.format === "date" &&
-            (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)))
-          )
-            return false;
-          else if (
-            field.format === "date-time" &&
-            (!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) ||
-              !Number.isFinite(Date.parse(value)))
-          )
-            return false;
-          else if (
-            typeof field.format !== "string" ||
-            !["email", "uri", "date", "date-time"].includes(field.format)
-          )
-            return false;
-        }
-        break;
-      }
-      case "array": {
-        if (
-          !Array.isArray(value) ||
-          value.length > 100 ||
-          !object(field.items) ||
-          !bounds(field.minItems, field.maxItems, value.length)
-        )
-          return false;
-        const allowed = choices(field.items);
-        if (
-          !allowed ||
-          value.some((item) => typeof item !== "string" || !allowed.includes(item)) ||
-          new Set(value).size !== value.length
-        )
-          return false;
-        break;
-      }
-      default:
-        return false;
-    }
-  }
-  return true;
-}
-
 const fail = () => new Error("Codex app-server unavailable or protocol request failed.");
 
 /** Official app-server JSONL transport. No credentials are read, returned, or persisted here. */
@@ -172,6 +46,7 @@ export class RuntimeCodexService extends EventEmitter {
   readonly #options: CodexServiceOptions;
   #scope = "";
   #scopeGeneration = 0;
+  #requestGeneration = 0;
   #child: ChildProcessWithoutNullStreams | undefined;
   #ready: Promise<void> | undefined;
   #buffer = "";
@@ -182,6 +57,7 @@ export class RuntimeCodexService extends EventEmitter {
   #events: CodexEvent[] = [];
   #closed = false;
   #threads = new Map<string, "read-only" | "workspace-write">();
+  #dynamicThreads = new Set<string>();
   constructor(options: CodexServiceOptions) {
     super();
     this.#options = options;
@@ -203,6 +79,7 @@ export class RuntimeCodexService extends EventEmitter {
     return {
       available: this.#child !== undefined,
       scopeGeneration: this.#scopeGeneration,
+      requestGeneration: this.#requestGeneration,
       cursor: this.#sequence,
       events: this.#events.filter((event) => event.sequence > since),
       pendingApprovals: [...this.#approvals.values()],
@@ -232,7 +109,7 @@ export class RuntimeCodexService extends EventEmitter {
       });
       await this.#request("initialize", {
         clientInfo: { name: "zet_harness", title: "Z harness", version: "0.1.0" },
-        capabilities: { experimentalApi: false },
+        capabilities: { experimentalApi: true },
       });
       this.#write({ method: "initialized" });
     })();
@@ -351,6 +228,87 @@ export class RuntimeCodexService extends EventEmitter {
   }
   async action(action: string, params: Record<string, unknown> = {}): Promise<unknown> {
     this.#syncScope();
+    if (action.endsWith("/respond") && params["requestGeneration"] !== this.#requestGeneration)
+      throw new Error("Invalid or expired Codex request generation.");
+    if (action === "permissions/respond" || action === "dynamic-tool/respond") {
+      const id = params["id"];
+      const pending =
+        typeof id === "string" || typeof id === "number" ? this.#approvals.get(id) : undefined;
+      if (!pending || !object(pending.params)) throw new Error("Invalid or expired Codex request.");
+      const generation = this.#requestGeneration;
+      let result: unknown;
+      if (action === "permissions/respond") {
+        if (
+          pending.method !== "item/permissions/requestApproval" ||
+          !["allow", "deny"].includes(String(params["decision"])) ||
+          Object.keys(params).some(
+            (key) =>
+              !["id", "decision", "confirmTurnPermission", "requestGeneration"].includes(key),
+          )
+        )
+          throw new Error("Invalid permission response.");
+        if (params["decision"] === "allow") {
+          if (
+            params["confirmTurnPermission"] !== true ||
+            typeof pending.params.threadId !== "string" ||
+            !this.#threads.has(pending.params.threadId)
+          )
+            throw new Error("Explicit turn permission consent required for a loaded thread.");
+          result = {
+            permissions: await buildCodexWorkspacePermissionGrant(this.#scope, pending.params),
+            scope: "turn",
+            strictAutoReview: true,
+          };
+        } else result = { permissions: {}, scope: "turn" };
+      } else {
+        if (
+          pending.method !== "item/tool/call" ||
+          typeof params["execute"] !== "boolean" ||
+          Object.keys(params).some((key) => !["id", "execute", "requestGeneration"].includes(key))
+        )
+          throw new Error("Invalid dynamic tool response.");
+        if (params["execute"] === true) {
+          if (
+            Object.keys(pending.params).some(
+              (key) =>
+                !["threadId", "turnId", "callId", "namespace", "tool", "arguments"].includes(key),
+            ) ||
+            [pending.params.threadId, pending.params.turnId, pending.params.callId].some(
+              (value) =>
+                typeof value !== "string" || !value || value.length > 512 || value.includes("\0"),
+            ) ||
+            typeof pending.params.tool !== "string" ||
+            pending.params.tool.length > 200 ||
+            !object(pending.params.arguments) ||
+            Buffer.byteLength(JSON.stringify(pending.params.arguments)) > 16_384
+          )
+            throw new Error("Invalid native dynamic tool request.");
+          if (
+            typeof pending.params.threadId !== "string" ||
+            !this.#threads.has(pending.params.threadId) ||
+            !this.#dynamicThreads.has(pending.params.threadId) ||
+            pending.params.namespace !== null ||
+            typeof pending.params.tool !== "string"
+          )
+            throw new Error("Dynamic tools are not enabled for this thread.");
+          result = await executeCodexDynamicTool(
+            this.#scope,
+            pending.params.tool,
+            pending.params.arguments,
+          );
+        } else
+          result = {
+            contentItems: [{ type: "inputText", text: "User declined this client tool call." }],
+            success: false,
+          };
+      }
+      this.#syncScope();
+      if (this.#requestGeneration !== generation || this.#approvals.get(pending.id) !== pending)
+        throw new Error("Expired workspace request.");
+      this.#write({ id: pending.id, result });
+      this.#approvals.delete(pending.id);
+      return { responded: true };
+    }
     if (action === "user-input/respond" || action === "elicitation/respond") {
       const id = params["id"];
       const pending =
@@ -420,7 +378,7 @@ export class RuntimeCodexService extends EventEmitter {
             // no URL is fetched and no third-party credentials transit through this broker.
           } else if (
             !["form", "openai/form", "openaiForm"].includes(String(pending.params.mode)) ||
-            !formContent(pending.params.requestedSchema, content)
+            !validateMcpFormContent(pending.params.requestedSchema, content)
           )
             throw new Error("Unsupported form schema or invalid content.");
         } else if (content !== null) throw new Error("Declined elicitations have no content.");
@@ -500,6 +458,13 @@ export class RuntimeCodexService extends EventEmitter {
       case "model/list":
         args = {};
         break;
+      case "permissionProfile/list":
+        args = {
+          cwd: this.#scope,
+          limit: 50,
+          ...(params["cursor"] !== undefined ? { cursor: string("cursor") } : {}),
+        };
+        break;
       case "thread/list":
         if (params["archived"] !== undefined && typeof params["archived"] !== "boolean")
           throw new Error("Invalid archived filter.");
@@ -520,8 +485,14 @@ export class RuntimeCodexService extends EventEmitter {
         args = { threadId: string("threadId") };
         break;
       case "thread/start":
+        if (
+          params["dynamicToolsEnabled"] !== undefined &&
+          typeof params["dynamicToolsEnabled"] !== "boolean"
+        )
+          throw new Error("Invalid dynamic tool opt-in.");
         args = {
           ...policy,
+          ...(params["dynamicToolsEnabled"] === true ? { dynamicTools: CODEX_DYNAMIC_TOOLS } : {}),
           ...(typeof params["model"] === "string" ? { model: params["model"] } : {}),
         };
         break;
@@ -570,10 +541,13 @@ export class RuntimeCodexService extends EventEmitter {
       if (typeof thread?.id !== "string") throw fail();
       if (this.#threads.size >= 1000 && !this.#threads.has(thread.id)) throw fail();
       this.#threads.set(thread.id, sandbox);
+      if (action === "thread/start" && params["dynamicToolsEnabled"] === true)
+        this.#dynamicThreads.add(thread.id);
     }
     if (action === "thread/archive") {
       const threadId = string("threadId");
       this.#threads.delete(threadId);
+      this.#dynamicThreads.delete(threadId);
       for (const [id, approval] of this.#approvals) {
         if (object(approval.params) && approval.params.threadId === threadId)
           this.#approvals.delete(id);
@@ -582,12 +556,14 @@ export class RuntimeCodexService extends EventEmitter {
     return result;
   }
   #stop(): void {
+    this.#requestGeneration += 1;
     const child = this.#child;
     this.#child = undefined;
     this.#ready = undefined;
     this.#buffer = "";
     this.#approvals.clear();
     this.#threads.clear();
+    this.#dynamicThreads.clear();
     for (const pending of this.#pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(fail());

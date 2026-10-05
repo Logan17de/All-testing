@@ -120,7 +120,8 @@ explicit selection. Native workspace network and additional writable roots are d
 The page supports explicit ChatGPT login consent/cancellation, account/model/session refresh,
 workspace-scoped session pagination, archive/restore and native context compaction,
 start/resume/read, streamed native events, task interruption, command/file approvals,
-user-input questions, constrained MCP form elicitation and explicit HTTPS URL-mode consent.
+user-input questions, official flat MCP forms with titled single/multiple selections and
+primitive constraints, and explicit HTTPS URL-mode consent.
 MCP URL acceptance acknowledges consent, not verified completion or authentication, as the
 [official MCP specification](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation) requires. Native events are polled every
 1.5 seconds with a bounded history. Command/file approvals are once only; stale requests,
@@ -136,12 +137,52 @@ Codex session data into SQLite. Native tool output/events may contain private pr
 Zet does not claim to redact arbitrary secret text produced by the native agent/MCP/hooks.
 User-input answers are not journaled by the Zet client; native Codex owns its own session data.
 
-Unsupported official server requests fail closed, including permission-profile grants, dynamic
-client tools, external auth-token refresh, attestation and legacy approvals. MCP schemas beyond
-the supported primitive/form constraints may require the official CLI. No hosted Codex Cloud,
+Unsupported official server requests fail closed, including external auth-token refresh,
+attestation and legacy approvals. Nested/arbitrary MCP schemas and regex patterns remain
+unsupported: the standard specification restricts forms to flat primitive fields; the pinned
+typed Codex schema does not include patterns. The broker never executes server-supplied regex. No hosted Codex Cloud,
 proprietary connector, desktop control or account entitlement is fabricated. Configured MCP
 servers and hooks retain their native trust/authority; process sandbox rules cannot constrain
 side effects performed by a remote tool service.
+
+## Latest independent capability milestone
+
+Implemented narrow native permission responses, optional experimental read/list tools,
+strict shared flat MCP forms, and generation-bound responses. Repository validation passed
+192 test files / 1,652 tests (one existing skip), lint, typecheck and build. Independent review
+passed seven focused files / 51 tests and produced [the acceptance checklist](CODEX-ACCEPTANCE.md).
+The real installed CLI accepted experimental tool registration on an isolated ephemeral
+read-only thread and returned account/model/permission-profile discovery. No turn, native
+grant or tool invocation ran. A production browser against an explicitly mocked runtime
+verified disabled consent controls, permission denial, per-call tool consent and multi-select
+MCP validation/submission; recorded requests included the displayed generation. These browser
+fixture responses did not perform any native action. Browser DOM checks also confirmed an
+external URL has no destination before consent, gains one only when checked, and loses it
+when unchecked; no external navigation occurred. Authenticated execution remains separate.
+
+## Narrow permission consent and experimental client tools
+
+Official `permissionProfile/list` discovery is available; the pinned public thread/turn API
+has no profile-selection field, so the harness does not invent one. Native permission
+requests can be denied without a grant. Explicit acceptance grants only existing canonical
+regular workspace files for the current turn. Directories, new files, symlinks, hardlinks,
+known credential paths, network and session/persistent scope are refused. The official CLI
+owns enforcement of the accepted native grant; grants are not executed in the test run.
+
+Experimental client tools use the official pinned `dynamicTools` protocol. A new session
+must explicitly enable two fixed tools: `zet_workspace_read_file` and `zet_workspace_list`.
+Each invocation requires separate user approval. They perform no shell execution or network
+access. Linux descriptor-relative reads enforce workspace confinement and reject symlinks,
+hardlinks, known secret paths, nonregular files and oversized/binary content. Unsupported
+platforms fail closed. Tools are not silently enabled on restored sessions.
+
+Every approval/form/permission/tool response includes the displayed request generation;
+responses from a previous native process or workspace are rejected even if request IDs repeat.
+The shared MCP validator checks all requested fields, including unanswered optional fields,
+enum options/defaults/bounds, and formats. Known sensitive field names are refused, but this
+heuristic cannot prove arbitrary content contains no secrets. Use trusted MCP servers, review
+all fields, and never enter passwords/API keys/payment credentials into form mode. External
+URL consent must precede navigation, and the server verifies completion independently.
 
 ## Provider validation boundary
 
@@ -155,8 +196,8 @@ Follow-up validation: 188 test files passed, 1,612 tests passed and one existing
 lint, typecheck, build, both startup checks and isolated installed Codex protocol check passed.
 
 Remaining boundaries: authenticated coding/approval/resume/compaction behavior needs user
-consent and a live account check. Permission-profile grants, dynamic client tools, external
-token refresh, attestation, complex MCP forms and proprietary hosted/desktop capabilities
+consent and a live account check. Network/session/directory permission grants, arbitrary client tools, external
+token refresh, attestation, nested MCP forms and proprietary hosted/desktop capabilities
 remain unsupported and fail closed; these are explicit gaps rather than parity claims.
 
 No new credentials or OAuth grants were created during development. Live inference requires

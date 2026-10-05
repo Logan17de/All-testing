@@ -104,19 +104,42 @@ try {
       title: "Z harness isolated smoke check",
       version: "0.1.0",
     },
-    capabilities: { experimentalApi: false },
+    capabilities: { experimentalApi: true },
   });
   assert.ok(initialized && typeof initialized === "object", "Missing initialize result.");
   child.stdin.write(`${JSON.stringify({ method: "initialized" })}\n`);
   const account = await request("account/read", { refreshToken: false });
   // Do not print account data, even if the isolation assertion fails.
   if (!account || typeof account !== "object" || account.account !== null) throw failure();
+  const models = await request("model/list", { limit: 20 });
+  if (!models || !Array.isArray(models.data)) throw failure();
+  const permissions = await request("permissionProfile/list", { cwd: root, limit: 20 });
+  if (!permissions || !Array.isArray(permissions.data)) throw failure();
+  const thread = await request("thread/start", {
+    cwd: codexHome,
+    ephemeral: true,
+    sandbox: "read-only",
+    approvalPolicy: "never",
+    approvalsReviewer: "user",
+    dynamicTools: [
+      {
+        type: "function",
+        name: "zet_smoke_no_execution",
+        description: "Protocol registration check only; this tool is never invoked.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      },
+    ],
+  });
+  if (!thread || typeof thread.thread?.id !== "string") throw failure();
   console.log(
-    "PASS: installed official Codex app-server initialize/account-read; isolated account is unauthenticated. No login or inference.",
+    "PASS: installed official experimental dynamic tool registration on an ephemeral read-only thread. No turn or tool was executed.",
+  );
+  console.log(
+    "PASS: installed official Codex app-server initialize/account-read/model-list/permission-profile-list; isolated account is unauthenticated. No login, grant, tool execution or inference.",
   );
 } catch {
   process.exitCode = 1;
-  console.error("FAIL: isolated installed Codex app-server handshake/account-read.");
+  console.error("FAIL: isolated installed Codex app-server handshake/account/catalog discovery.");
 } finally {
   rejectPending();
   if (!exited) child.kill("SIGTERM");

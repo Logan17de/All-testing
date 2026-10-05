@@ -102,4 +102,119 @@ describe("Codex workspace scope boundary (fixture only)", () => {
       service.close();
     }
   });
+  it("requires explicit turn-only permission consent and refuses dynamic execution without opt-in", async () => {
+    const service = new RuntimeCodexService({
+      cwd: process.cwd(),
+      spawnProcess: () =>
+        spawn(
+          process.execPath,
+          [
+            "-e",
+            `
+      require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+        const m=JSON.parse(line);if(!m.method||m.id===undefined)return;
+        if(m.method==='model/list') {
+          for(const [id,fileSystem,network] of [
+            ['local',{read:[require('node:path').join(process.cwd(),'package.json')],write:null},null],
+            ['outside',{read:['/'],write:null},null],
+            ['network',null,{enabled:true}]
+          ]) console.log(JSON.stringify({id,method:'item/permissions/requestApproval',params:{threadId:'t',turnId:'turn',itemId:'item',startedAtMs:0,reason:null,cwd:process.cwd(),environmentId:null,permissions:{fileSystem,network}}}));
+          console.log(JSON.stringify({id:'tool',method:'item/tool/call',params:{threadId:'t',turnId:'turn',callId:'call',namespace:null,tool:'zet_workspace_read_file',arguments:{path:'package.json'}}}));
+        }
+        console.log(JSON.stringify({id:m.id,result:{thread:{id:'t'}}}));
+      });`,
+          ],
+          { stdio: "pipe" },
+        ),
+    });
+    try {
+      await service.action("thread/start");
+      await service.action("model/list");
+      await expect(
+        service.action("permissions/respond", {
+          requestGeneration: service.snapshot().requestGeneration,
+          id: "local",
+          decision: "allow",
+        }),
+      ).rejects.toThrow();
+      for (const id of ["outside", "network"]) {
+        await expect(
+          service.action("permissions/respond", {
+            requestGeneration: service.snapshot().requestGeneration,
+            id,
+            decision: "allow",
+            confirmTurnPermission: true,
+          }),
+        ).rejects.toThrow();
+        await service.action("permissions/respond", {
+          requestGeneration: service.snapshot().requestGeneration,
+          id,
+          decision: "deny",
+        });
+      }
+      await service.action("permissions/respond", {
+        requestGeneration: service.snapshot().requestGeneration,
+        id: "local",
+        decision: "allow",
+        confirmTurnPermission: true,
+      });
+      await expect(
+        service.action("permissions/respond", {
+          requestGeneration: service.snapshot().requestGeneration,
+          id: "local",
+          decision: "allow",
+          confirmTurnPermission: true,
+        }),
+      ).rejects.toThrow();
+      await expect(
+        service.action("dynamic-tool/respond", {
+          requestGeneration: service.snapshot().requestGeneration,
+          id: "tool",
+          execute: true,
+        }),
+      ).rejects.toThrow();
+      await service.action("dynamic-tool/respond", {
+        requestGeneration: service.snapshot().requestGeneration,
+        id: "tool",
+        execute: false,
+      });
+      expect(service.snapshot().pendingApprovals).toEqual([]);
+    } finally {
+      service.close();
+    }
+  });
+  it("binds approval responses to process generation even when native IDs are reused", async () => {
+    let root = process.cwd();
+    const service = new RuntimeCodexService({
+      get cwd() {
+        return root;
+      },
+      spawnProcess: () => spawn(process.execPath, ["-e", fixture], { stdio: "pipe" }),
+    });
+    try {
+      await service.action("model/list");
+      const original = service.snapshot();
+      root = "/tmp";
+      service.snapshot();
+      await service.action("model/list");
+      const current = service.snapshot();
+      expect(current.pendingApprovals[0]?.id).toBe(original.pendingApprovals[0]?.id);
+      expect(current.requestGeneration).toBeGreaterThan(original.requestGeneration);
+      await expect(
+        service.action("approval/respond", {
+          id: "old-approval",
+          decision: "accept",
+          requestGeneration: original.requestGeneration,
+        }),
+      ).rejects.toThrow("generation");
+      await service.action("approval/respond", {
+        id: "old-approval",
+        decision: "decline",
+        requestGeneration: current.requestGeneration,
+      });
+      expect(service.snapshot().pendingApprovals).toEqual([]);
+    } finally {
+      service.close();
+    }
+  });
 });
