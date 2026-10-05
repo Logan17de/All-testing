@@ -51,6 +51,9 @@ export default async function HomePage() {
         <Link className="btn" href="/models">
           Models
         </Link>
+        <Link className="btn" href="/codex">
+          Codex agent
+        </Link>
         <Link className="btn" href="/plugins">
           Plugins
         </Link>

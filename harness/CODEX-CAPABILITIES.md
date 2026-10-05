@@ -9,9 +9,9 @@ PHASE-6.6-6.11.md. Zet does not claim full proprietary Codex product parity.
 - **Codex:** the pinned official `@openai/codex` CLI is launched directly, with inherited terminal I/O.
   The official [SDK source](https://github.com/openai/codex/tree/main/sdk/typescript) also wraps this
   CLI; the [app-server source](https://github.com/openai/codex/tree/main/codex-rs/app-server) exposes
-  a richer protocol. This milestone uses the CLI rather than implementing its token exchange.
+  a richer protocol. The CLI bridge and the native `/codex` page use these official transports rather than implementing a token exchange.
   [Authentication](https://developers.openai.com/codex/auth) supports ChatGPT login and API keys.
-  Login is an explicit user action with `--confirm-persist-login`; the user must complete consent.
+  Login is an explicit user action with `--confirm-persist-login` or the page's persistent-login checkbox; the user must complete real browser consent.
   Zet never imports browser tokens or Codex credential files. The CLI owns credential persistence.
 - **Claude:** direct Anthropic API credentials, using its documented
   [OpenAI compatibility API](https://platform.claude.com/docs/en/api/openai-sdk).
@@ -37,15 +37,25 @@ PHASE-6.6-6.11.md. Zet does not claim full proprietary Codex product parity.
 
 ## Concrete capability evidence
 
+Implementation milestones above are complete for the supported integration scope. Validation:
+186 test files passed (1,599 tests passed, one existing skip); lint, typecheck, production build
+and both startup smoke checks passed using Node 24.20.0/npm 12.0.2. Native protocol/approval
+and provider transport tests use fixtures. A separate real installed Codex 0.160.0 app-server
+check initialized and read an unauthenticated account in a temporary home. The production
+browser connected to that official server, displayed its actual model catalog, and verified
+read-only defaults and explicit login gating. The Models page also verified a missing xAI
+environment credential before any provider request. No subscription login, paid inference or
+live authenticated provider tool loop was performed; those require user consent/credentials.
+
 | Capability | Zet runtime | Official Codex bridge |
 | --- | --- | --- |
-| Coding agent loop | Bounded model/tool graph, durable goals/todos; `runtime-agent-loop.test.ts` | Native Codex loop in interactive `chat` or JSONL `exec` |
+| Coding agent loop | Bounded model/tool graph, durable goals/todos; `runtime-agent-loop.test.ts` | Native Codex loop through `/codex`, interactive `chat` or JSONL `exec` |
 | Filesystem/shell | Native tools package, symlink/path boundaries, executable allowlist; host/plugin wiring required | Native CLI tools, default read-only, explicit `--write` |
 | Sandbox/approvals | Capability policy and durable human gates; process allowlist is **not** an OS sandbox | Official CLI OS sandbox where supported, interactive `on-request` approvals |
-| Sessions/resume | SQLite journal, restart recovery, replay/fork, conversation branches | Native stored sessions; explicit UUID `resume`, no ambiguous `--last` |
-| Streaming | Adapter SSE parser, transient stream sink, runtime event SSE; agent-model steps currently buffer replies | Native `exec --json` structured JSONL events, interactive output |
-| Cancellation | Dispatcher abort signals and model transport cancellation tests | SIGINT/SIGTERM forwarded to CLI, child exit status preserved |
-| Model/provider switching | Models UI and capability-aware router, direct API/environment keys | `--model`; additional native provider configuration stays with CLI |
+| Sessions/resume | SQLite journal, restart recovery, replay/fork, conversation branches | Native stored sessions, web start/resume/read, explicit UUID CLI resume |
+| Streaming | Adapter SSE parser, streamed agent turns, transient count-only progress events, final durable message | Native web events/transcript, `exec --json`, interactive output |
+| Cancellation | Dispatcher abort signals and model transport cancellation tests | Web turn interruption; SIGINT/SIGTERM/SIGHUP forwarded to CLI |
+| Model/provider switching | Models UI and capability-aware router, direct API/environment keys | Web model catalog/selection and `--model`; provider config stays with CLI |
 | Context handling | Token/byte budgets, required sections, conversation summary, project memory | CLI owns native compaction and context accounting |
 | Instructions/skills | Explicit agent system instructions; no automatic AGENTS.md/SKILL.md discovery | Native CLI instruction/skill discovery according to installed version/config |
 | MCP | Optional local/remote MCP package and trust/capability tests | CLI's configured MCP integrations; configure through official CLI |
@@ -53,7 +63,7 @@ PHASE-6.6-6.11.md. Zet does not claim full proprietary Codex product parity.
 | Browser/computer | Can use an approved MCP/plugin; no built-in desktop/browser driver | Configure a supported MCP/browser tool; no proprietary desktop or hosted service entitlement claimed |
 | Git workflow | Native status/diff/apply/commit tools, patch preview and approval policies | Native Git/filesystem tools inside CLI sandbox; review changes before pushing |
 | Errors/secrets | Safe transport errors, redaction, per-model credential accessor, no keys in API model views | Credentials stay with CLI; terminal output/session files may contain private project content |
-| UI/CLI | Local Next.js Models/projects/graph/run inspector; existing client API | `npm run codex -- help`, `status`, `login`, `chat`, `exec`, `resume` |
+| UI/CLI | Local Next.js Models/projects/graph/run inspector; existing client API | Native `/codex` page plus CLI help/status/login/chat/exec/resume |
 
 ## Running Codex
 
@@ -74,10 +84,35 @@ satisfy an interactive escalation; switch to `chat` if approval is needed. Works
 access is disabled. Native CLI config, MCP connections and skills remain the user's trust
 boundary; the bridge does not turn untrusted third-party servers/plugins into safe tools.
 
-Codex runs are currently **separate from Zet graph runs**: their history is not mirrored into
-SQLite and the web inspector does not render native Codex turns or approval requests. Integrating
-app-server threads, typed approval requests, streaming and cancellation into that inspector is
-remaining work. CLI-native features are available through the bridge, not reimplemented in Zet.
+## Native Codex page
+
+Open `/codex`, or choose **Codex agent** from Overview/Models. The runtime lazily launches the
+pinned official app-server on stdio only; it has no externally listening app-server port.
+The local guarded API exposes a fixed method list and applies the chosen workspace, sandbox
+and user approval policy to every turn. Defaults are read-only; workspace-write requires an
+explicit selection. Native workspace network and additional writable roots are disabled.
+
+The page supports explicit ChatGPT login consent/cancellation, account/model/session refresh,
+start/resume/read, streamed native events, task interruption, command/file approvals,
+user-input questions, constrained MCP form elicitation and explicit HTTPS URL-mode consent.
+MCP URL acceptance acknowledges consent, not verified completion or authentication, as the
+[official MCP specification](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation) requires. Native events are polled every
+1.5 seconds with a bounded history. Command/file approvals are once only; stale requests,
+unknown response IDs and invalid answers are refused. External consent is always the user's
+real action; the harness does not obtain or replay browser tokens.
+
+Codex sessions remain **separate from Zet graph runs**: the `/codex` page reads the official
+session history, while the graph inspector reads Zet's SQLite journal. It does not mirror
+Codex session data into SQLite. Native tool output/events may contain private project content;
+Zet does not claim to redact arbitrary secret text produced by the native agent/MCP/hooks.
+User-input answers are not journaled by the Zet client; native Codex owns its own session data.
+
+Unsupported official server requests fail closed, including permission-profile grants, dynamic
+client tools, external auth-token refresh, attestation and legacy approvals. MCP schemas beyond
+the supported primitive/form constraints may require the official CLI. No hosted Codex Cloud,
+proprietary connector, desktop control or account entitlement is fabricated. Configured MCP
+servers and hooks retain their native trust/authority; process sandbox rules cannot constrain
+side effects performed by a remote tool service.
 
 ## Provider validation boundary
 
@@ -86,3 +121,7 @@ user-approved credentials, provider billing/access and a writable official crede
 store. Transport fixtures prove request/response, tool and streaming behavior but cannot prove
 account entitlement, actual model availability or production provider compatibility. Do not
 label a fixture result as a live provider result.
+
+Current model examples are checked against the [Claude catalog](https://platform.claude.com/docs/en/models/overview)
+and [xAI documentation](https://docs.x.ai/overview); provider access is account-dependent and
+the API-key page accepts exact model IDs rather than pretending a placeholder proves availability.

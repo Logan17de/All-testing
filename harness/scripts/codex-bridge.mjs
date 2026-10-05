@@ -110,7 +110,7 @@ export async function runBridge(argv) {
   }
   return await new Promise((resolve) => {
     const child = spawn(process.execPath, [cli, ...args], { stdio: "inherit", shell: false });
-    const signals = ["SIGINT", "SIGTERM"];
+    const signals = ["SIGINT", "SIGTERM", "SIGHUP"];
     const handlers = signals.map((signal) => {
       const handler = () => {
         child.kill(signal);
@@ -126,7 +126,7 @@ export async function runBridge(argv) {
     });
     child.once("exit", (code, signal) => {
       cleanup();
-      resolve(code ?? (signal === "SIGINT" ? 130 : 143));
+      resolve(code ?? { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 }[signal] ?? 1);
     });
   });
 }

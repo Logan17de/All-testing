@@ -4,6 +4,7 @@ import {
   ASK_MODEL_NODE_TYPE,
   buildModelContext,
   contextBudgetForModel,
+  consumeModelStream,
   routeModel,
   type ModelCatalog,
 } from "@zet-harness/core";
@@ -37,6 +38,8 @@ import type {
   JsonValue,
   ModelMessage,
   ModelMessagePart,
+  ModelRequest,
+  ModelResult,
   ToolAdapter,
 } from "@zet-harness/plugin-api";
 import type { NodeSecretAccessor } from "@zet-harness/plugin-api/secret-contract";
@@ -107,6 +110,13 @@ export interface AgentNodeExecutorOptions {
   readonly modelSecrets?: (modelId: string) => NodeSecretAccessor | undefined;
   /** UTC epoch milliseconds. Defaults to the system clock. */
   readonly now?: () => number;
+  /** Transient counts only: never forward raw deltas, which can split a secret across events. */
+  readonly onStreamProgress?: (progress: {
+    readonly runId: string;
+    readonly modelId: string;
+    readonly textCharacters: number;
+    readonly completed: boolean;
+  }) => void;
   /** Message ids. Defaults to a sortable UUIDv7. */
   readonly createId?: () => string;
   /** Runs every node that is not an agent step. */
@@ -326,6 +336,47 @@ export function createAgentNodeExecutor(
   const createId = options.createId ?? createSortableId;
   const granted = (capabilities: readonly string[]): boolean =>
     capabilities.every((capability) => options.allows?.(capability) === true);
+
+  const generate = async (
+    adapter: ModelAdapter,
+    request: ModelRequest,
+    context: AdapterInvocationContext,
+  ): Promise<ModelResult> => {
+    if (!adapter.manifest.features.streaming || adapter.stream === undefined) {
+      return adapter.generate(request, context);
+    }
+    let textCharacters = 0;
+    let lastPublishedAt = 0;
+    const publish = (completed: boolean): void => {
+      // Display failures must never corrupt an otherwise valid provider response.
+      try {
+        options.onStreamProgress?.({
+          runId: context.runId,
+          modelId: adapter.manifest.id,
+          textCharacters,
+          completed,
+        });
+      } catch {
+        /* The transient observer has no execution authority. */
+      }
+    };
+    const consumed = await consumeModelStream(adapter.stream(request, context), {
+      onTextDelta: (text) => {
+        context.signal.throwIfAborted();
+        textCharacters += text.length;
+        const timestamp = Date.now();
+        if (timestamp - lastPublishedAt >= 100) {
+          lastPublishedAt = timestamp;
+          publish(false);
+        }
+      },
+    });
+    context.signal.throwIfAborted();
+    publish(true);
+    return consumed.usage === undefined
+      ? consumed.result
+      : { ...consumed.result, usage: consumed.usage };
+  };
 
   const recorded = (execution: RuntimeNodeExecution): RuntimeNodeExecutionResult | undefined => {
     const step = readAgentStep(database.connection(), execution.logicalEffectId);
@@ -728,7 +779,8 @@ export function createAgentNodeExecutor(
       }
     }
 
-    const result = await adapter.generate(
+    const result = await generate(
+      adapter,
       {
         messages: context.messages,
         ...(tools.length > 0 ? { tools: actionToolSpecifications(tools) } : {}),
@@ -946,7 +998,8 @@ export function createAgentNodeExecutor(
       throw new AgentStepError("AGENT_NO_MODEL", "No available model can answer this prompt.");
     }
 
-    const result = await adapter.generate(
+    const result = await generate(
+      adapter,
       {
         messages: [
           ...(instructions === undefined || instructions.trim().length === 0

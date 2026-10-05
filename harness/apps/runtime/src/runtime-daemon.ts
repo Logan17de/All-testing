@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { createRequire } from "node:module";
 
 import {
   DURABLE_CHECKPOINTS_MIGRATION,
@@ -59,6 +60,8 @@ import {
   type SuspendForApprovalInput,
 } from "./runtime-human-approvals.js";
 import { GITHUB_PLUGIN_ID, createGitHubPlugin } from "@zet-harness/github";
+import { RuntimeCodexService } from "./runtime-codex-service.js";
+import { readWorkspace } from "./runtime-setup-http.js";
 import { createAgentNodeExecutor } from "./runtime-agent-nodes.js";
 import { RuntimeModels } from "./runtime-models.js";
 import type { ModelCheckResult } from "./runtime-model-http.js";
@@ -172,12 +175,27 @@ export class RuntimeDaemon {
   private pluginReport: RuntimePluginReport;
   private pluginSandboxes: readonly IsolatedPlugin[] = [];
   private models: RuntimeModels | undefined;
+  private readonly codex: RuntimeCodexService;
   private pluginPolicies: ReadonlyMap<string, CapabilityPermissionPolicy> = new Map();
 
   constructor(options: RuntimeDaemonOptions = {}) {
     this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
     this.migrations = options.migrations ?? RUNTIME_DATABASE_MIGRATIONS;
     this.redaction = options.redaction ?? new RuntimeRedactionRegistry();
+    const database = this.database;
+    this.codex = new RuntimeCodexService({
+      get cwd() {
+        return readWorkspace(database)?.path ?? process.cwd();
+      },
+      command: process.execPath,
+      args: [
+        createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js"),
+        "app-server",
+        "--stdio",
+        "--config",
+        "sandbox_workspace_write.network_access=false",
+      ],
+    });
     // Plugins load in start(), after construction, so both of these read plugin
     // state when they are called rather than capturing it now. A host-supplied
     // authority or executor always takes precedence.
@@ -259,6 +277,7 @@ export class RuntimeDaemon {
         projects: { database: this.database },
         memories: { database: this.database },
         setup: { database: this.database },
+        codex: this.codex,
         connections: {
           database: this.database,
         },
@@ -595,13 +614,20 @@ export class RuntimeDaemon {
       allows: (capability) => this.pluginAuthority(capability).decision === "allow",
       configuredModels: () => this.configuredModelIds(),
       modelSecrets: (modelId) => this.models?.secretsFor(modelId),
+      onStreamProgress: (progress) => {
+        this.publishEvent("model.progress", progress);
+      },
       fallback: plugins,
     })(request);
   }
 
   /** Ids of the models a person configured in this harness. */
   private configuredModelIds(): ReadonlySet<string> {
-    return new Set(listModelConfigs(this.database.connection()).map((model) => model.modelId));
+    return new Set(
+      listModelConfigs(this.database.connection())
+        .filter((model) => model.profile !== "openrouter" && model.credential !== "connection")
+        .map((model) => model.modelId),
+    );
   }
 
   /**
@@ -681,6 +707,7 @@ export class RuntimeDaemon {
   }
 
   private async stopOnce(): Promise<boolean> {
+    this.codex.close();
     const schedule = this.triggerSchedule.stop();
     const draining = this.dispatcher?.stop();
     const pluginCleanup = Promise.all([

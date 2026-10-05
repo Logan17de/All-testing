@@ -296,7 +296,7 @@ export async function handleModelHttp(
       if (request.method === "GET") {
         writeRuntimeJson(response, 200, {
           models: listModelConfigs(database.connection()),
-          profiles: MODEL_PROFILES,
+          profiles: MODEL_PROFILES.filter((profile) => profile !== "openrouter"),
         });
         return;
       }

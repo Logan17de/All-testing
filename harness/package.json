@@ -25,7 +25,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "codex": "node scripts/codex-bridge.mjs"
+    "codex": "node scripts/codex-bridge.mjs",
+    "test:codex": "node scripts/codex-app-server-smoke.mjs"
   },
   "devDependencies": {
     "@eslint/js": "~9.39.5",

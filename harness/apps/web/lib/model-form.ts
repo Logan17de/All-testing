@@ -68,8 +68,8 @@ export const MODEL_PRESETS: Readonly<Record<ModelProfile, ModelPreset>> = {
     baseUrl: "https://api.anthropic.com/v1",
     credential: "stored",
     credentialEnv: "ANTHROPIC_API_KEY",
-    modelPlaceholder: "claude-sonnet-5",
-    contextWindowTokens: 200_000,
+    modelPlaceholder: "claude-sonnet-5-5",
+    contextWindowTokens: 1_000_000,
   },
   gemini: {
     label: "Google Gemini",
@@ -86,8 +86,8 @@ export const MODEL_PRESETS: Readonly<Record<ModelProfile, ModelPreset>> = {
     baseUrl: "https://api.x.ai/v1",
     credential: "stored",
     credentialEnv: "XAI_API_KEY",
-    modelPlaceholder: "grok-4",
-    contextWindowTokens: 256_000,
+    modelPlaceholder: "grok-4.7",
+    contextWindowTokens: 500_000,
   },
   ollama: {
     label: "Ollama",

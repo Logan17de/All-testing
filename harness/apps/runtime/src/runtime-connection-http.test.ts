@@ -51,6 +51,23 @@ describe("direct provider integration boundary", () => {
       ]),
     );
   });
+  it("exposes native status without starting a process or consenting to login", async () => {
+    const { send } = await startDaemon();
+    const status = await send("GET", "/api/codex");
+    expect(status.status).toBe(200);
+    expect(status.body).toMatchObject({ available: false, pendingApprovals: [] });
+    expect(
+      (
+        await send("POST", "/api/codex", {
+          action: "account/login/start",
+          params: { type: "chatgpt" },
+        })
+      ).status,
+    ).toBe(502);
+    expect((await send("GET", "/api/codex")).body["available"]).toBe(false);
+    expect((await send("GET", "/api/models")).body["profiles"]).not.toContain("openrouter");
+  });
+
   it("retires every OpenRouter action without exchanging or creating credentials", async () => {
     const { send } = await startDaemon();
     for (const action of ["start", "complete", "sign-out", "models"]) {

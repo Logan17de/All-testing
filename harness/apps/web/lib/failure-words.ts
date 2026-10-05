@@ -9,7 +9,7 @@
 
 export const MODEL_FAILURE_REASONS: Readonly<Record<string, string>> = {
   MODEL_CREDENTIAL_UNAVAILABLE:
-    "No key was available: store one, sign in again, or set the environment variable and restart the runtime.",
+    "No key was available: store a provider API key or set the environment variable before starting the runtime.",
   MODEL_NETWORK_ERROR: "The endpoint could not be reached. Is the server running at that URL?",
   MODEL_TIMEOUT: "The endpoint took too long to answer.",
   MODEL_RESPONSE_INVALID: "Something answered, but not in the Chat Completions format.",

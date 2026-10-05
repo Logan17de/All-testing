@@ -195,7 +195,7 @@ function agentGraph(conversationId: string, maxIterations: number): GraphJsonV1 
   };
 }
 
-async function setup(responses: readonly ModelResult[]) {
+async function setup(responses: readonly ModelResult[], streaming = false) {
   const database = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
   database.open();
   runSqliteMigrations(database.connection(), RUNTIME_DATABASE_MIGRATIONS);
@@ -207,7 +207,28 @@ async function setup(responses: readonly ModelResult[]) {
   await host.activate(createControlFlowPlugin());
   await host.activate(createAgentPlugin());
   const model = scriptedModel(responses);
-  host.models.register(model.adapter);
+  const progress: { textCharacters: number; completed: boolean }[] = [];
+  host.models.register(
+    streaming
+      ? {
+          ...model.adapter,
+          manifest: {
+            ...model.adapter.manifest,
+            features: { ...model.adapter.manifest.features, streaming: true },
+          },
+          generate: () => {
+            throw new Error("Streaming must not call buffered generation");
+          },
+          stream: async function* (request, context) {
+            context.signal.throwIfAborted();
+            const result = await model.adapter.generate(request, context);
+            yield { type: "text-delta", text: "fixture-" };
+            yield { type: "text-delta", text: "private-secret" };
+            yield { type: "completed", result };
+          },
+        }
+      : model.adapter,
+  );
 
   const ids = new SortableIdGenerator({ now: () => 1_000 });
   const { projectId } = createProject(database.connection(), {
@@ -238,6 +259,9 @@ async function setup(responses: readonly ModelResult[]) {
   const executor = createAgentNodeExecutor({
     database,
     models: host.models,
+    onStreamProgress: (update) => {
+      progress.push({ textCharacters: update.textCharacters, completed: update.completed });
+    },
     createId: () => ids.next(),
     fallback: createPluginNodeExecutor({ host }),
   });
@@ -264,10 +288,30 @@ async function setup(responses: readonly ModelResult[]) {
     return { runId, report: await dispatcher.dispatch(runId) };
   };
 
-  return { database, host, model, projectId, conversationId, executor, run };
+  return { database, host, model, projectId, conversationId, executor, run, progress };
 }
 
 describe("the bounded agent loop", () => {
+  it("consumes streamed tool turns, stores one final message per step and publishes only counts", async () => {
+    const { database, conversationId, model, progress, run } = await setup(
+      [
+        callTool("stream-call", "harness_goals_create", { title: "Streamed goal" }),
+        reply("The goal is saved."),
+      ],
+      true,
+    );
+    expect((await run(4)).report.status).toBe("completed");
+    expect(model.requests).toHaveLength(2);
+    expect(
+      readConversationMessages(database.connection(), conversationId).map(
+        (message) => message.role,
+      ),
+    ).toEqual(["user", "assistant", "tool", "assistant"]);
+    expect(progress.filter((update) => update.completed)).toHaveLength(2);
+    expect(progress.at(-1)).toMatchObject({ textCharacters: 22, completed: true });
+    expect(JSON.stringify(progress)).not.toContain("private-secret");
+  });
+
   it("runs model→tool→model inside a structured loop and plans work through goal actions", async () => {
     const { database, model, projectId, conversationId, run } = await setup([
       callTool("call-1", "harness_goals_create", { title: "Launch the site", priority: 10 }),

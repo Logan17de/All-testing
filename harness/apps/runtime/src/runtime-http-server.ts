@@ -1,3 +1,5 @@
+import { createCodexHttpHandler, isCodexHttpPath } from "./runtime-codex-http.js";
+import type { RuntimeCodexService } from "./runtime-codex-service.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import {
@@ -176,6 +178,7 @@ export class RuntimeHttpServer {
   private readonly memoryServices: RuntimeMemoryHttpServices | undefined;
   private readonly modelServices: RuntimeModelHttpServices | undefined;
   private readonly setupServices: RuntimeSetupHttpServices | undefined;
+  private readonly codexHandler: ReturnType<typeof createCodexHttpHandler> | undefined;
   private readonly connectionHandler: ReturnType<typeof createConnectionHttpHandler> | undefined;
   private readonly triggerServices: RuntimeTriggerHttpServices | undefined;
   private readonly clientServices: RuntimeClientHttpServices | undefined;
@@ -222,6 +225,7 @@ export class RuntimeHttpServer {
       readonly models?: RuntimeModelHttpServices;
       readonly setup?: RuntimeSetupHttpServices;
       readonly connections?: RuntimeConnectionHttpServices;
+      readonly codex?: RuntimeCodexService;
       /** Standing reasons to start a run: manual, cron, webhook and api triggers. */
       readonly triggers?: RuntimeTriggerHttpServices;
       /** External clients: tokens issued locally, then used instead of a browser session. */
@@ -243,6 +247,8 @@ export class RuntimeHttpServer {
     this.setupServices = services.setup;
     this.connectionHandler =
       services.connections === undefined ? undefined : createConnectionHttpHandler();
+    this.codexHandler =
+      services.codex === undefined ? undefined : createCodexHttpHandler(services.codex);
     this.triggerServices = services.triggers;
     this.clientServices = services.clients;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
@@ -415,6 +421,16 @@ export class RuntimeHttpServer {
             writeRuntimeApiError(response, error);
           },
         );
+        return;
+      }
+      if (isCodexHttpPath(url.pathname)) {
+        if (this.codexHandler === undefined) {
+          writeJson(response, 503, { error: { code: "CODEX_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void this.codexHandler(request, response, url, this.security).catch((error: unknown) => {
+          writeRuntimeApiError(response, error);
+        });
         return;
       }
       if (isConnectionHttpPath(url.pathname)) {
