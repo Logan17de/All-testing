@@ -78,6 +78,7 @@ export type AgentStepErrorCode =
   | "AGENT_PROJECT_BUSY"
   | "AGENT_BUDGET_EXCEEDED"
   | "AGENT_INPUT_MISSING"
+  | "AGENT_ASSISTANT_CONTEXT_LIMIT"
   | "AGENT_OPAQUE_CONTEXT_LOST"
   | "AGENT_PROVIDER_STATE_MISMATCH";
 
@@ -92,6 +93,14 @@ export class AgentStepError extends Error {
 }
 
 export interface AgentNodeExecutorOptions {
+  /** Trusted current authority, checked before and after every inference/tool boundary. */
+  readonly assertInvocation?: (context: AdapterInvocationContext) => void;
+  readonly projectContext?: boolean;
+  readonly filterMessagePath?: (
+    context: AdapterInvocationContext,
+    conversationId: string,
+    path: readonly DurableMessageRecord[],
+  ) => readonly DurableMessageRecord[];
   readonly database: SqliteDatabase;
   readonly models: ModelCatalog;
   /** Tools the host offers every step, beside the project's goal and todo actions. */
@@ -372,8 +381,11 @@ export function createAgentNodeExecutor(
     request: ModelRequest,
     context: AdapterInvocationContext,
   ): Promise<ModelResult> => {
+    options.assertInvocation?.(context);
     if (!adapter.manifest.features.streaming || adapter.stream === undefined) {
-      return adapter.generate(request, context);
+      const result = await adapter.generate(request, context);
+      options.assertInvocation?.(context);
+      return result;
     }
     let textCharacters = 0;
     let lastPublishedAt = 0;
@@ -393,6 +405,7 @@ export function createAgentNodeExecutor(
     const consumed = await consumeModelStream(adapter.stream(request, context), {
       onTextDelta: (text) => {
         context.signal.throwIfAborted();
+        options.assertInvocation?.(context);
         textCharacters += text.length;
         const timestamp = Date.now();
         if (timestamp - lastPublishedAt >= 100) {
@@ -402,6 +415,7 @@ export function createAgentNodeExecutor(
       },
     });
     context.signal.throwIfAborted();
+    options.assertInvocation?.(context);
     publish(true);
     return consumed.usage === undefined
       ? consumed.result
@@ -541,8 +555,12 @@ export function createAgentNodeExecutor(
     wired: readonly string[],
   ): readonly ToolAdapter[] => {
     const builtins = [
-      ...createGoalActionTools({ database, projectId, now, createId }),
-      ...(memories ? createMemoryActionTools({ database, projectId, runId, now, createId }) : []),
+      ...(options.projectContext === false
+        ? []
+        : createGoalActionTools({ database, projectId, now, createId })),
+      ...(memories && options.projectContext !== false
+        ? createMemoryActionTools({ database, projectId, runId, now, createId })
+        : []),
     ];
     for (const tool of builtins) builtinOwners.add(tool);
     return restrictAgentTools(
@@ -725,7 +743,8 @@ export function createAgentNodeExecutor(
       integerConfig(config, "reserveOutputTokens") ?? DEFAULT_RESERVE_OUTPUT_TOKENS;
     const maxOutputTokens = integerConfig(config, "maxOutputTokens");
     const maxContextBytes = integerConfig(config, "maxContextBytes");
-    const maxMemories = countConfig(config, "maxMemories") ?? MEMORY_LIMIT;
+    const maxMemories =
+      options.projectContext === false ? 0 : (countConfig(config, "maxMemories") ?? MEMORY_LIMIT);
     const summaryMaxOutputTokens =
       integerConfig(config, "summaryMaxOutputTokens") ?? DEFAULT_SUMMARY_OUTPUT_TOKENS;
     const modelId = stringConfig(config, "modelId");
@@ -738,7 +757,9 @@ export function createAgentNodeExecutor(
         `Conversation '${conversationId}' does not exist.`,
       );
     }
+    options.assertInvocation?.(invocationContext(execution));
     await holdProject(execution, conversation.projectId);
+    options.assertInvocation?.(invocationContext(execution));
     enforceModelBudgets(execution.runId, config);
     const tools = restrictAgentTools(
       offeredTools(conversation.projectId, execution.runId, maxMemories > 0, wiredTools(execution)),
@@ -800,8 +821,11 @@ export function createAgentNodeExecutor(
       return parts.length ? { role: converted.role, parts } : undefined;
     };
     const latest = latestMessage(conversation.conversationId);
-    const path =
+    const rawPath =
       latest === undefined ? [] : readMessagePath(database.connection(), latest.messageId);
+    const path =
+      options.filterMessagePath?.(stepContext, conversation.conversationId, rawPath) ?? rawPath;
+    options.assertInvocation?.(stepContext);
     droppedProviderStateCount = path.reduce(
       (count, message) =>
         count +
@@ -821,11 +845,14 @@ export function createAgentNodeExecutor(
     });
 
     // A summary stands in for the messages it covers, so the branch starts after it.
-    let summary = summaryForBranch(
-      database.connection(),
-      conversation.conversationId,
-      path.map((message) => message.messageId),
-    );
+    let summary =
+      options.projectContext === false
+        ? undefined
+        : summaryForBranch(
+            database.connection(),
+            conversation.conversationId,
+            path.map((message) => message.messageId),
+          );
     let tail = path.slice((summary?.index ?? -1) + 1);
     const hasOpaque = (messages: readonly DurableMessageRecord[]) =>
       messages.some((message) =>
@@ -844,7 +871,11 @@ export function createAgentNodeExecutor(
             required: true,
             messages: [{ role: "system", parts: [{ kind: "text", text: systemPrompt }] }],
           },
-          { id: "goals", required: true, messages: [goalSummary(conversation.projectId)] },
+          {
+            id: "goals",
+            required: options.projectContext !== false,
+            messages: options.projectContext === false ? [] : [goalSummary(conversation.projectId)],
+          },
           { id: "memory", messages: memory.message === undefined ? [] : [memory.message] },
           {
             id: "summary",
@@ -865,6 +896,11 @@ export function createAgentNodeExecutor(
     const overflow =
       context.sections.find((section) => section.id === "conversation")?.droppedMessages ?? 0;
     let wroteSummary = false;
+    if (overflow > 0 && options.projectContext === false)
+      throw new AgentStepError(
+        "AGENT_ASSISTANT_CONTEXT_LIMIT",
+        "Assistant context exceeds its budget; begin a fresh authorized context. Shared memories and summaries are disabled for scoped assistant turns.",
+      );
     if (overflow > 0 && hasOpaque(tail))
       throw new AgentStepError(
         "AGENT_OPAQUE_CONTEXT_LOST",
@@ -926,10 +962,11 @@ export function createAgentNodeExecutor(
       stepContext,
     );
     execution.signal.throwIfAborted();
+    options.assertInvocation?.(invocationContext(execution));
 
     const outputs = {
       again: result.finishReason === "tool-calls",
-      blocked: projectBlocked(conversation.projectId),
+      blocked: options.projectContext === false ? false : projectBlocked(conversation.projectId),
       finishReason: result.finishReason,
     };
     const usage = {
@@ -968,6 +1005,7 @@ export function createAgentNodeExecutor(
     const storedUsage = toStoredUsage(result.usage);
 
     await database.commit((writer) => {
+      options.assertInvocation?.(invocationContext(execution));
       if (readAgentStep(writer, execution.logicalEffectId) !== undefined) return;
       const message = appendMessage(writer, {
         messageId: createId(),
@@ -1011,7 +1049,9 @@ export function createAgentNodeExecutor(
         `Conversation '${conversationId}' does not exist.`,
       );
     }
+    options.assertInvocation?.(invocationContext(execution));
     await holdProject(execution, conversation.projectId);
+    options.assertInvocation?.(invocationContext(execution));
 
     const head = latestMessage(conversation.conversationId);
     const calls =
@@ -1019,7 +1059,8 @@ export function createAgentNodeExecutor(
         ? head.parts.filter((part): part is DurableToolCallPart => part.kind === "tool-call")
         : [];
     enforceToolBudget(execution.runId, config, calls.length);
-    const maxMemories = countConfig(config, "maxMemories") ?? MEMORY_LIMIT;
+    const maxMemories =
+      options.projectContext === false ? 0 : (countConfig(config, "maxMemories") ?? MEMORY_LIMIT);
     const recordedCatalog: readonly AgentToolIdentity[] = (() => {
       if (!head || head.role !== "assistant") return [];
       const record = database
@@ -1046,6 +1087,7 @@ export function createAgentNodeExecutor(
 
     const results: DurableMessagePart[] = [];
     for (const call of calls) {
+      options.assertInvocation?.(invocationContext(execution));
       const tool = tools.find((candidate) => modelToolName(candidate.manifest.id) === call.name);
       if (tool === undefined) {
         results.push({
@@ -1067,9 +1109,11 @@ export function createAgentNodeExecutor(
           ...invocationContext(execution, `${execution.logicalEffectId}:${call.callId}`),
           toolScope: Object.freeze(tools.map((candidate) => candidate.manifest.id)),
         });
+        options.assertInvocation?.(invocationContext(execution));
         results.push({ kind: "tool-result", callId: call.callId, value: outcome.value });
       } catch (error) {
         execution.signal.throwIfAborted();
+        options.assertInvocation?.(invocationContext(execution));
         results.push({
           kind: "tool-result",
           callId: call.callId,
@@ -1085,9 +1129,11 @@ export function createAgentNodeExecutor(
       }
     }
     execution.signal.throwIfAborted();
+    options.assertInvocation?.(invocationContext(execution));
 
     const outputs = { calls: calls.length };
     await database.commit((writer) => {
+      options.assertInvocation?.(invocationContext(execution));
       if (readAgentStep(writer, execution.logicalEffectId) !== undefined) return;
       const message =
         head === undefined || results.length === 0

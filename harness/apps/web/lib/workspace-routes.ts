@@ -26,6 +26,7 @@ const ALLOWED_PATHS: readonly RegExp[] = [
   /^workflows\/(chat|chat-github)$/u,
   /^connections$/u,
   /^agent$/u,
+  /^assistant$/u,
   /^desktop$/u,
   /^browser$/u,
   /^auth\/chatgpt(?:\/(login|cancel|search))?$/u,

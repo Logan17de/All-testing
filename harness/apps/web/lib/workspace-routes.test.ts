@@ -76,3 +76,8 @@ describe("workspace proxy paths", () => {
     }
   });
 });
+
+it("allows only the scoped assistant endpoint", () => {
+  expect(runtimeWorkspacePath(["assistant"], new URLSearchParams())).toBe("/api/assistant");
+  expect(runtimeWorkspacePath(["assistant", "connect"], new URLSearchParams())).toBeUndefined();
+});

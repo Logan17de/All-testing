@@ -1,3 +1,5 @@
+import { createAssistantHttpHandler } from "./runtime-assistant-http.js";
+import type { RuntimeAssistantController } from "./runtime-assistant-controller.js";
 import {
   createDesktopHttpHandler,
   isDesktopHttpPath,
@@ -193,6 +195,7 @@ export class RuntimeHttpServer {
   private readonly chatGPTAuthHandler: ReturnType<typeof createChatGPTAuthHttpHandler> | undefined;
   private readonly desktopHandler: ReturnType<typeof createDesktopHttpHandler> | undefined;
   private readonly browserHandler: ReturnType<typeof createBrowserHttpHandler> | undefined;
+  private readonly assistantHandler: ReturnType<typeof createAssistantHttpHandler> | undefined;
   private readonly codingHandler: ReturnType<typeof createCodingHttpHandler> | undefined;
   private readonly connectionHandler: ReturnType<typeof createConnectionHttpHandler> | undefined;
   private readonly triggerServices: RuntimeTriggerHttpServices | undefined;
@@ -241,6 +244,7 @@ export class RuntimeHttpServer {
       readonly setup?: RuntimeSetupHttpServices;
       readonly connections?: RuntimeConnectionHttpServices;
       readonly agent?: RuntimeCodingService;
+      readonly assistant?: RuntimeAssistantController;
       readonly browser?: RuntimeBrowserService;
       readonly desktop?: RuntimeDesktopController;
       readonly chatGPTAuth?: { controller: ChatGPTLoginController; search?: CodexSearchBridge };
@@ -271,6 +275,9 @@ export class RuntimeHttpServer {
         : createChatGPTAuthHttpHandler(services.chatGPTAuth);
     this.desktopHandler = services.desktop ? createDesktopHttpHandler(services.desktop) : undefined;
     this.browserHandler = services.browser ? createBrowserHttpHandler(services.browser) : undefined;
+    this.assistantHandler = services.assistant
+      ? createAssistantHttpHandler(services.assistant)
+      : undefined;
     this.codingHandler =
       services.agent === undefined ? undefined : createCodingHttpHandler(services.agent);
     this.triggerServices = services.triggers;
@@ -474,6 +481,16 @@ export class RuntimeHttpServer {
           return;
         }
         void this.browserHandler(request, response, url, this.security).catch((error: unknown) =>
+          writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (url.pathname === "/api/assistant") {
+        if (!this.assistantHandler) {
+          writeJson(response, 503, { error: { code: "ASSISTANT_UNAVAILABLE" } });
+          return;
+        }
+        void this.assistantHandler(request, response, url, this.security).catch((error: unknown) =>
           writeRuntimeApiError(response, error),
         );
         return;

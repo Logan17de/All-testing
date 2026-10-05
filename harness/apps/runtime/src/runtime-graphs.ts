@@ -445,9 +445,11 @@ export async function createRunFromStoredPlan(
   database: SqliteDatabase,
   plan: StoredPlan,
   now: number = Date.now(),
+  assertAuthority?: () => void,
 ): Promise<string> {
   const runId = `run-${createSortableId()}`;
   await database.commit((connection) => {
+    assertAuthority?.();
     connection
       .prepare(
         `INSERT INTO runs (run_id, document_hash, compiled_plan_id, status, parent_run_id,
@@ -463,9 +465,10 @@ export async function createRunFromCompiledGraph(
   database: SqliteDatabase,
   compiled: CompiledGraph,
   now: number = Date.now(),
+  assertAuthority?: () => void,
 ): Promise<CreatedRun> {
   const plan = await storeCompiledGraph(database, compiled, now);
-  const runId = await createRunFromStoredPlan(database, plan, now);
+  const runId = await createRunFromStoredPlan(database, plan, now, assertAuthority);
   return Object.freeze({ runId, ...plan });
 }
 
