@@ -27,6 +27,8 @@ export interface AdapterInvocationContext {
   readonly signal: AbortSignal;
   readonly retryBudget: AdapterRetryBudget;
   readonly secrets?: NodeSecretAccessor;
+  /** Trusted broker intersection for this invocation; canonical IDs, never model arguments. */
+  readonly toolScope?: readonly string[];
 }
 
 export interface ModelTextPart {

@@ -2,7 +2,6 @@ import type {
   AdapterInvocationContext,
   HarnessPlugin,
   JsonObject,
-  JsonSchema,
   NodeBehavior,
   PluginContext,
   ToolAdapter,
@@ -17,6 +16,8 @@ import {
   type McpServerConfig,
   type McpToolDescriptor,
 } from "./mcp-client.js";
+
+import { createMcpInputValidator } from "./mcp-input-schema.js";
 
 /**
  * Capability demanded by every MCP tool.
@@ -75,12 +76,6 @@ function mcpToolBehavior(
   });
 }
 
-function sanitizeSchema(schema: Record<string, unknown>): JsonSchema {
-  // The schema is server-supplied and only used for description and
-  // validation, never executed. Copying it drops any prototype tricks.
-  return JSON.parse(JSON.stringify(schema)) as JsonSchema;
-}
-
 /**
  * Translate one MCP tool descriptor into an ordinary tool adapter.
  *
@@ -94,6 +89,8 @@ export function createMcpToolAdapter(
   descriptor: McpToolDescriptor,
 ): ToolAdapter {
   const maxCharacters = registration.maxResultCharacters ?? DEFAULT_MAX_RESULT_CHARACTERS;
+  const validator = createMcpInputValidator(descriptor.inputSchema);
+  const toolName = descriptor.name;
 
   return Object.freeze({
     manifest: Object.freeze({
@@ -101,7 +98,7 @@ export function createMcpToolAdapter(
       version: "1",
       title: descriptor.annotations?.title ?? descriptor.name,
       ...(descriptor.description === undefined ? {} : { description: descriptor.description }),
-      inputSchema: sanitizeSchema(descriptor.inputSchema),
+      inputSchema: validator.schema,
       // The protocol does not describe tool output shapes, so the harness
       // declares what it actually returns rather than inventing a schema.
       outputSchema: Object.freeze({
@@ -123,9 +120,10 @@ export function createMcpToolAdapter(
     async invoke(input: JsonObject, context: AdapterInvocationContext): Promise<ToolResult> {
       context.signal.throwIfAborted();
 
+      const validatedInput = validator.validate(input);
       let result: McpCallResult;
       try {
-        result = await client.callTool(descriptor.name, { ...input }, context.signal);
+        result = await client.callTool(toolName, validatedInput, context.signal);
       } catch (error) {
         context.signal.throwIfAborted();
         // Remote diagnostic text can contain credentials. Keep it outside the

@@ -58,6 +58,7 @@ describe("RuntimeDaemon", () => {
       { version: 21, name: "durable_app_settings" },
       { version: 22, name: "durable_model_connections" },
       { version: 23, name: "durable_workspaces" },
+      { version: 24, name: "durable-native-chat-tool-scopes" },
     ]);
   });
 
@@ -109,10 +110,10 @@ describe("RuntimeDaemon", () => {
           query: "ok",
           migrations: {
             status: "ok",
-            appliedCount: 23,
-            expectedCount: 23,
-            appliedVersion: 23,
-            expectedVersion: 23,
+            appliedCount: 24,
+            expectedCount: 24,
+            appliedVersion: 24,
+            expectedVersion: 24,
           },
         },
       },

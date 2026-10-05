@@ -187,3 +187,145 @@ describe("native ChatGPT Responses inference adapter (mock provider)", () => {
     expect(fetch.mock.calls[0]![0]).toBe("https://api.openai.com/v1/models");
   });
 });
+describe("host-authorized image input (mock provider; no desktop bridge)", () => {
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6pAAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const imageRequest = (
+    role: "user" | "assistant" = "user",
+    artifactRef = "artifact:fixture",
+    mediaType = "image/png",
+  ): ModelRequest => ({
+    messages: [
+      {
+        role,
+        parts: [
+          { kind: "text", text: "Inspect this user-selected image." },
+          { kind: "image", artifactRef, mediaType },
+        ],
+      },
+    ],
+    maxOutputTokens: 100,
+  });
+  function imageSetup(
+    resolveImage: NonNullable<Parameters<typeof createChatGPTPlanModelAdapter>[0]["resolveImage"]>,
+  ) {
+    const f = setup([completed([message])]);
+    return {
+      ...f,
+      adapter: createChatGPTPlanModelAdapter({
+        id: "chatgpt.fixture",
+        model: "gpt-test",
+        accessToken: f.accessToken,
+        fetch: f.fetch,
+        resolveImage,
+      }),
+    };
+  }
+  it("encodes only trusted user image bytes as public input_image without persisting the artifact ref", async () => {
+    const resolver = vi.fn<
+      NonNullable<Parameters<typeof createChatGPTPlanModelAdapter>[0]["resolveImage"]>
+    >(() => Promise.resolve({ bytes: png, mediaType: "image/png" as const }));
+    const f = imageSetup(resolver);
+    expect(f.adapter.manifest.features.vision).toBe(true);
+    await f.adapter.generate(imageRequest(), context());
+    expect(resolver.mock.calls[0]?.[0]).toBe("artifact:fixture");
+    const body = JSON.parse(f.fetch.mock.calls[0]![1]!.body as string) as {
+      input: unknown[];
+      store: boolean;
+    };
+    expect(body.store).toBe(false);
+    expect(body.input).toEqual([
+      { role: "user", content: "Inspect this user-selected image." },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_image",
+            image_url: `data:image/png;base64,${png.toString("base64")}`,
+            detail: "auto",
+          },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(body)).not.toContain("artifact:fixture");
+  });
+  it("default no resolver refuses images before credential lookup or provider fetch", async () => {
+    const f = setup([completed([message])]);
+    expect(f.adapter.manifest.features.vision).toBe(false);
+    await expect(f.adapter.generate(imageRequest(), context())).rejects.toMatchObject({
+      code: "MODEL_REQUEST_UNSUPPORTED",
+    });
+    expect(f.accessToken).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+  it("rejects non-user images, URLs, paths and unsupported media before artifact lookup", async () => {
+    const resolver = vi.fn<
+      NonNullable<Parameters<typeof createChatGPTPlanModelAdapter>[0]["resolveImage"]>
+    >(() => Promise.resolve({ bytes: png, mediaType: "image/png" as const }));
+    const f = imageSetup(resolver);
+    for (const req of [
+      imageRequest("assistant"),
+      imageRequest("user", "https://example.invalid/image"),
+      imageRequest("user", "../file.png"),
+      imageRequest("user", "C:\\file.png"),
+      imageRequest("user", "fixture", "image/svg+xml"),
+    ])
+      await expect(f.adapter.generate(req, context())).rejects.toMatchObject({
+        code: "MODEL_REQUEST_UNSUPPORTED",
+      });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+  it("rejects MIME/magic mismatch and limits raw bytes before base64/provider submission", async () => {
+    for (const bytes of [Buffer.from("not an image"), Buffer.alloc(524_289)]) {
+      const f = imageSetup(() => Promise.resolve({ bytes, mediaType: "image/png" }));
+      await expect(f.adapter.generate(imageRequest(), context())).rejects.toHaveProperty("code");
+      expect(f.fetch).not.toHaveBeenCalled();
+      expect(f.accessToken).not.toHaveBeenCalled();
+    }
+    const f = imageSetup(() => Promise.resolve({ bytes: png, mediaType: "image/jpeg" }));
+    await expect(f.adapter.generate(imageRequest(), context())).rejects.toMatchObject({
+      code: "MODEL_REQUEST_UNSUPPORTED",
+    });
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+  it("supports bounded JPEG/WebP signatures and refuses malformed RIFF lengths", async () => {
+    const webp = Buffer.alloc(20);
+    webp.write("RIFF", 0);
+    webp.writeUInt32LE(12, 4);
+    webp.write("WEBPVP8 ", 8);
+    for (const [mediaType, bytes] of [
+      ["image/jpeg", Buffer.from([255, 216, 255, 224, 255, 217])],
+      ["image/webp", webp],
+    ] as const) {
+      const f = imageSetup(() => Promise.resolve({ bytes, mediaType }));
+      await f.adapter.generate(imageRequest("user", "fixture", mediaType), context());
+      expect(f.fetch).toHaveBeenCalledTimes(1);
+    }
+    webp.writeUInt32LE(0, 4);
+    const f = imageSetup(() => Promise.resolve({ bytes: webp, mediaType: "image/webp" }));
+    await expect(
+      f.adapter.generate(imageRequest("user", "fixture", "image/webp"), context()),
+    ).rejects.toMatchObject({ code: "MODEL_REQUEST_UNSUPPORTED" });
+  });
+  it("bounds multiple images and aborts a noncooperative resolver without leaking its error", async () => {
+    const f = imageSetup(() => Promise.resolve({ bytes: png, mediaType: "image/png" }));
+    const part = { kind: "image" as const, artifactRef: "fixture", mediaType: "image/png" };
+    await expect(
+      f.adapter.generate({ messages: [{ role: "user", parts: Array(5).fill(part) }] }, context()),
+    ).rejects.toMatchObject({ code: "MODEL_RESPONSE_LIMIT" });
+    expect(f.fetch).not.toHaveBeenCalled();
+    const controller = new AbortController();
+    const hanging = imageSetup(() => new Promise(() => {}));
+    const pending = hanging.adapter.generate(imageRequest(), context(controller.signal));
+    controller.abort(new Error("fixture cancellation"));
+    await expect(pending).rejects.toThrow("fixture cancellation");
+    expect(hanging.fetch).not.toHaveBeenCalled();
+    const denied = imageSetup(() => Promise.reject(new Error("private resolver error")));
+    await expect(denied.adapter.generate(imageRequest(), context())).rejects.toMatchObject({
+      code: "MODEL_REQUEST_UNSUPPORTED",
+    });
+  });
+});

@@ -4,11 +4,16 @@ import { AgentWorkspace } from "./agent-workspace";
 
 export const metadata = { title: "Coding workspace — Zet Harness" };
 
-export default function AgentPage() {
+export default async function AgentPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ session?: string }>;
+}) {
+  const query = await searchParams;
   return (
     <main className="page">
       <nav className="crumbs">
-        <Link href="/">Overview</Link>
+        <Link href="/overview">Overview</Link>
         <span>/</span>
         <span>Coding workspace</span>
         <Link href="/models">Models</Link>
@@ -18,8 +23,11 @@ export default function AgentPage() {
         Run coding tasks with your configured provider models. The harness owns the agent loop,
         workspace tools, approvals and saved sessions.
       </p>
-      <ChatGPTConnection />
-      <AgentWorkspace />
+      <details className="panel">
+        <summary>Account connection setup</summary>
+        <ChatGPTConnection />
+      </details>
+      <AgentWorkspace initialSessionId={typeof query.session === "string" ? query.session : ""} />
     </main>
   );
 }

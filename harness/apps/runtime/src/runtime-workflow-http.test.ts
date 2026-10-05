@@ -190,8 +190,8 @@ describe("ready-made workflows", () => {
       role: "assistant",
       parts: [{ kind: "text", text: "Hello! How can I help?" }],
     });
-    // A plain chat hands the model no GitHub tools.
-    expect(model.offered[0]?.some((name) => name.startsWith("github_"))).toBe(false);
+    // Ordinary chat offers enabled host-granted plugin tools by default.
+    expect(model.offered[0]?.some((name) => name.startsWith("github_"))).toBe(true);
     expect(model.offered[0]).toContain("harness_goals_list");
   });
 

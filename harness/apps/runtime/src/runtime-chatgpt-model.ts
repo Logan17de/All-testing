@@ -19,11 +19,22 @@ import {
   record,
 } from "@zet-harness/models";
 
+export interface ChatGPTImageArtifact {
+  readonly bytes: Uint8Array;
+  readonly mediaType: "image/png" | "image/jpeg" | "image/webp";
+}
+/** Trusted host lookup only: must enforce artifact ownership and explicit transmission consent. */
+export type ChatGPTImageResolver = (
+  artifactRef: string,
+  context: AdapterInvocationContext,
+) => Promise<ChatGPTImageArtifact>;
 export interface ChatGPTModelOptions {
   id: string;
   model: string;
   accessToken: () => Promise<string>;
   fetch?: typeof globalThis.fetch;
+  /** Absent by default. Never accepts arbitrary paths/URLs or adds model tool authority. */
+  resolveImage?: ChatGPTImageResolver;
 }
 const unsupported = (): never => {
   throw new ModelTransportError("MODEL_REQUEST_UNSUPPORTED");
@@ -31,10 +42,12 @@ const unsupported = (): never => {
 function toolName(name: string): string {
   return `tool_${createHash("sha256").update(name).digest("hex").slice(0, 24)}`;
 }
-function prepare(
+async function prepare(
   request: ModelRequest,
   model: string,
-): { body: string; offered: Map<string, string> } {
+  context: AdapterInvocationContext,
+  resolveImage?: ChatGPTImageResolver,
+): Promise<{ body: string; offered: Map<string, string> }> {
   if (request.model !== undefined && request.model !== model) unsupported();
   if (request.outputSchema !== undefined || request.options !== undefined) unsupported();
   // Plan route forbids max_output_tokens. The local postresponse gate below does not
@@ -58,6 +71,8 @@ function prepare(
     };
   });
   const input: unknown[] = [];
+  let imageBytes = 0;
+  let imageCount = 0;
   const priorCalls = new Set<string>();
   const priorResults = new Set<string>();
   for (const message of request.messages) {
@@ -101,6 +116,67 @@ function prepare(
           type: "function_call_output",
           call_id: part.callId,
           output: JSON.stringify(part.value),
+        });
+      } else if (part.kind === "image") {
+        flush();
+        if (
+          message.role !== "user" ||
+          !resolveImage ||
+          !/^(?:artifact:)?[A-Za-z0-9][A-Za-z0-9_.-]{0,199}$/u.test(part.artifactRef) ||
+          !["image/png", "image/jpeg", "image/webp"].includes(part.mediaType)
+        )
+          unsupported();
+        if (++imageCount > 4) throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
+        context.signal.throwIfAborted();
+        let artifact: ChatGPTImageArtifact;
+        try {
+          artifact = await abortable(resolveImage!(part.artifactRef, context), context.signal);
+        } catch {
+          context.signal.throwIfAborted();
+          throw new ModelTransportError("MODEL_REQUEST_UNSUPPORTED");
+        }
+        context.signal.throwIfAborted();
+        if (
+          !artifact ||
+          typeof artifact !== "object" ||
+          !(artifact.bytes instanceof Uint8Array) ||
+          artifact.mediaType !== part.mediaType ||
+          artifact.bytes.byteLength < 4
+        )
+          unsupported();
+        if ((imageBytes += artifact.bytes.byteLength) > 524_288)
+          throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
+        const bytes = Buffer.from(artifact.bytes);
+        const png =
+          artifact.mediaType === "image/png" &&
+          bytes.length >= 24 &&
+          bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+          bytes.readUInt32BE(8) === 13 &&
+          bytes.toString("ascii", 12, 16) === "IHDR";
+        const jpeg =
+          artifact.mediaType === "image/jpeg" &&
+          bytes[0] === 255 &&
+          bytes[1] === 216 &&
+          bytes[2] === 255 &&
+          bytes.at(-2) === 255 &&
+          bytes.at(-1) === 217;
+        const webp =
+          artifact.mediaType === "image/webp" &&
+          bytes.length >= 16 &&
+          bytes.toString("ascii", 0, 4) === "RIFF" &&
+          bytes.readUInt32LE(4) === bytes.length - 8 &&
+          bytes.toString("ascii", 8, 12) === "WEBP" &&
+          ["VP8 ", "VP8L", "VP8X"].includes(bytes.toString("ascii", 12, 16));
+        if (!png && !jpeg && !webp) unsupported();
+        input.push({
+          role: "user",
+          content: [
+            {
+              type: "input_image",
+              image_url: `data:${artifact.mediaType};base64,${bytes.toString("base64")}`,
+              detail: "auto",
+            },
+          ],
         });
       } else unsupported();
     }
@@ -201,14 +277,15 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
   const model = options.model;
   const id = options.id;
   const credential = options.accessToken;
+  const resolveImage = options.resolveImage;
   async function* stream(
     request: ModelRequest,
     context: AdapterInvocationContext,
   ): AsyncIterable<ModelStreamEvent> {
     context.signal.throwIfAborted();
-    const prepared = prepare(request, model);
     const signal = AbortSignal.any([context.signal, AbortSignal.timeout(60_000)]);
     try {
+      const prepared = await prepare(request, model, { ...context, signal }, resolveImage);
       const token = await abortable(credential(), signal);
       if (!token || /\s/u.test(token))
         throw new ModelTransportError("MODEL_CREDENTIAL_UNAVAILABLE");
@@ -272,7 +349,7 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
       features: Object.freeze({
         streaming: true,
         tools: true,
-        vision: false,
+        vision: resolveImage !== undefined,
         structuredOutput: false,
       }),
     }),

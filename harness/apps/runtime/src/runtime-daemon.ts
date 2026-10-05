@@ -1,3 +1,5 @@
+import { collectInstalledAgentPluginTools } from "./runtime-agent-plugin-tools.js";
+import { DURABLE_NATIVE_CHAT_SCOPES_MIGRATION } from "./runtime-coding-plugin-scopes.js";
 import { configuredDesktopController } from "./runtime-desktop-http.js";
 import { createRuntimeBrowserTools } from "./runtime-browser-tools.js";
 import { RuntimeBrowserService } from "./runtime-browser-service.js";
@@ -69,9 +71,11 @@ import { GITHUB_PLUGIN_ID, createGitHubPlugin } from "@zet-harness/github";
 import { ChatGPTLoginController } from "./runtime-chatgpt-auth-http.js";
 import { CodexSearchBridge } from "./runtime-codex-search.js";
 import { createRuntimeCodingSearchTool } from "./runtime-coding-search-tool.js";
-import { RuntimeCodingService } from "./runtime-coding-service.js";
-import type { ToolAdapter } from "@zet-harness/plugin-api";
-import { createRuntimeMutationTools } from "./runtime-coding-mutation-tools.js";
+import {
+  RuntimeCodingService,
+  type NativeAgentToolCatalogEntry,
+} from "./runtime-coding-service.js";
+import type { AdapterInvocationContext, JsonObject, ToolAdapter } from "@zet-harness/plugin-api";
 import { createRuntimeCodingSubagentTool } from "./runtime-coding-subagents.js";
 import { createRuntimeCodingTools } from "./runtime-coding-tools.js";
 import { readConversation } from "@zet-harness/db/durable-conversation-records";
@@ -132,6 +136,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_APP_SETTINGS_MIGRATION,
   DURABLE_MODEL_CONNECTIONS_MIGRATION,
   DURABLE_WORKSPACES_MIGRATION,
+  DURABLE_NATIVE_CHAT_SCOPES_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
@@ -267,6 +272,7 @@ export class RuntimeDaemon {
       redact: (value) => this.redaction.redact(value),
       dispatch: execution === undefined ? undefined : (runId) => this.dispatcher?.wake(runId),
       modelCatalog: () => this.codingModelCatalog(),
+      toolCatalog: () => this.installedAgentToolCatalog(),
       browserGeneration: () => {
         const state = this.browser.snapshot();
         return state.armed ? state.generation : undefined;
@@ -292,7 +298,7 @@ export class RuntimeDaemon {
             },
           }),
     });
-    // A test or a proxy may stand in for OpenRouter; its sign-in and its models follow.
+    // The loopback API uses the same native session and configured provider services.
     this.httpServer = new RuntimeHttpServer(
       options.api,
       this.eventStream,
@@ -552,7 +558,7 @@ export class RuntimeDaemon {
         await host.activate(createAgentPlugin());
         // Text box, Model and Output box: text in, text out, no conversation needed.
         await host.activate(createBoxesPlugin());
-        // GitHub is a first-party component: a workflow uses it only by wiring it in.
+        // GitHub exposes first-party read components and owned read tools to authorized agents.
         // Its token, when there is one, is read per request and never recorded.
         const githubToken = process.env["GITHUB_TOKEN"];
         if (githubToken !== undefined && githubToken.length > 0) {
@@ -642,7 +648,9 @@ export class RuntimeDaemon {
       : { pluginId: resolution.plugin.id, pluginVersion: resolution.plugin.version };
   }
 
-  private executePluginNode(request: RuntimeNodeExecution): Promise<RuntimeNodeExecutionResult> {
+  private async executePluginNode(
+    request: RuntimeNodeExecution,
+  ): Promise<RuntimeNodeExecutionResult> {
     const plugins = createPluginNodeExecutor({
       ...(this.pluginHost === undefined ? {} : { host: this.pluginHost }),
       sandboxes: this.pluginSandboxes,
@@ -666,11 +674,42 @@ export class RuntimeDaemon {
       ? createRuntimeCodingTools({ root: project.workspacePath })
       : [];
     const toolPolicy = this.agent.toolPolicy(request.runId);
-    const mutationTools =
+    const { createRuntimeGitTools } = project?.workspacePath
+      ? await import("./runtime-coding-git-tools.js")
+      : { createRuntimeGitTools: undefined };
+    const mutationFactories =
       project?.workspacePath && toolPolicy?.mutationConsent
-        ? createRuntimeMutationTools({
+        ? await Promise.all([
+            import("./runtime-coding-mutation-tools.js"),
+            import("./runtime-coding-file-tools.js"),
+          ])
+        : undefined;
+    const mutationTools =
+      project?.workspacePath && mutationFactories
+        ? mutationFactories[0].createRuntimeMutationTools({
             root: project.workspacePath,
             approve: (tool, context) => this.agent.approveTool(tool, context),
+          })
+        : [];
+    const fileTools =
+      project?.workspacePath && mutationFactories
+        ? mutationFactories[1].createRuntimeCodingFileTools({
+            root: project.workspacePath,
+            approve: (tool, context) => this.agent.approveTool(tool, context),
+          })
+        : [];
+    const gitTools =
+      project?.workspacePath && createRuntimeGitTools
+        ? createRuntimeGitTools({
+            root: project.workspacePath,
+            ...(toolPolicy?.mutationConsent
+              ? {
+                  approve: (
+                    tool: { tool: string; args: JsonObject },
+                    context: AdapterInvocationContext,
+                  ) => this.agent.approveTool(tool, context),
+                }
+              : {}),
           })
         : [];
     if (
@@ -716,33 +755,39 @@ export class RuntimeDaemon {
       toolPolicy?.browserEnabled && toolPolicy.browserGeneration !== undefined
         ? createRuntimeBrowserTools(this.browser, toolPolicy.browserGeneration)
         : [];
+    const nativeTools = [
+      ...codingTools,
+      ...mutationTools,
+      ...fileTools,
+      ...gitTools,
+      ...browserTools,
+      ...(childTool ? [childTool] : []),
+      ...(searchTool ? [searchTool] : []),
+    ];
+    const installed = this.installedAgentPluginTools(host);
+    const nativeOwners = new WeakSet<ToolAdapter>(nativeTools);
+    const installedOwners = new WeakMap<ToolAdapter, string>(
+      installed.map(({ adapter, owner }) => [adapter, owner]),
+    );
+    const installedTools = installed.map(({ adapter }) => adapter);
     return createAgentNodeExecutor({
       database: this.database,
       models: host.models,
-      tools: [
-        ...codingTools,
-        ...mutationTools,
-        ...browserTools,
-        ...(childTool ? [childTool] : []),
-        ...(searchTool ? [searchTool] : []),
-      ],
-      componentTools: host.tools.listManifests().flatMap((manifest) => {
-        const adapter = host.tools.getAdapter(manifest.id, manifest.version);
-        if (adapter === undefined) return [];
-        const pluginId = host.tools.getResolution(manifest.id, manifest.version)?.plugin.id;
-        if (pluginId === GITHUB_PLUGIN_ID) return [adapter];
-        const policy = pluginId === undefined ? undefined : this.pluginPolicies.get(pluginId);
-        const granted = manifest.behavior.requiredCapabilities.every(
-          (capability) => policy?.allows(capability) === true,
-        );
-        return granted ? [adapter] : [];
-      }),
+      tools: [...nativeTools, ...installedTools],
+      // These are the same guarded instances as the default tools, never raw registry adapters.
+      componentTools: installedTools,
+      toolOwner: (tool) => (nativeOwners.has(tool) ? "harness.native" : installedOwners.get(tool)),
       allows: (capability) =>
         (capability === "browser:task" && browserTools.length > 0) ||
+        (capability === "git:read" && gitTools.length > 0) ||
+        (capability === "git:write" && toolPolicy?.mutationConsent === true) ||
         (capability === "fs:read" && codingTools.length > 0) ||
         (["fs:write", "process:exec"].includes(capability) && mutationTools.length > 0) ||
         (capability === "agent:delegate" && childTool !== undefined) ||
         (capability === "network:codex-search" && searchTool !== undefined) ||
+        installed.some(({ adapter }) =>
+          adapter.manifest.behavior.requiredCapabilities.includes(capability),
+        ) ||
         this.pluginAuthority(capability).decision === "allow",
       configuredModels: () => this.configuredModelIds(),
       modelSecrets: (modelId) => this.models?.secretsFor(modelId),
@@ -751,6 +796,37 @@ export class RuntimeDaemon {
       },
       fallback: plugins,
     })(request);
+  }
+
+  private installedAgentPluginTools(host = this.pluginHost) {
+    if (!host) return [];
+    return collectInstalledAgentPluginTools({
+      host,
+      allows: (pluginId, capability) =>
+        pluginId === GITHUB_PLUGIN_ID
+          ? capability === "network:https"
+          : this.pluginPolicies.get(pluginId)?.allows(capability) === true,
+      approve: (request, context) => this.agent.approveTool(request, context),
+    }).filter(({ adapter }) => {
+      const pluginId = host.tools.getResolution(adapter.manifest.id, adapter.manifest.version)
+        ?.plugin.id;
+      return (
+        pluginId !== GITHUB_PLUGIN_ID ||
+        ["none", "external-read"].includes(adapter.manifest.behavior.effect)
+      );
+    });
+  }
+  private installedAgentToolCatalog(): readonly NativeAgentToolCatalogEntry[] {
+    const host = this.pluginHost;
+    if (!host) return [];
+    return this.installedAgentPluginTools(host).map(({ adapter }) => ({
+      id: adapter.manifest.id,
+      title: adapter.manifest.title,
+      pluginId: host.tools.getResolution(adapter.manifest.id, adapter.manifest.version)!.plugin.id,
+      status: ["none", "external-read"].includes(adapter.manifest.behavior.effect)
+        ? "enabled-host-granted"
+        : "requires-turn-and-per-call-mutation-consent",
+    }));
   }
 
   private currentChatGPTAccountKey(): string | undefined {

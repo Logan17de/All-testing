@@ -3,6 +3,19 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const files = [
+  "packages/mcp/src/mcp-input-schema.ts",
+  "apps/runtime/src/runtime-workspace-instructions.ts",
+  "apps/runtime/src/runtime-agent-tool-policy.ts",
+  "apps/runtime/src/runtime-agent-plugin-tools.ts",
+  "apps/runtime/src/runtime-coding-plugin-scopes.ts",
+  "apps/web/app/agent/chat-plugin-scope.tsx",
+  "apps/web/app/agent/chat-plugin-view.ts",
+  "apps/web/app/agent/chat-graph-panel.tsx",
+  "apps/web/app/agent/chat-graph-canvas.tsx",
+  "apps/web/app/agent/chat-messages.tsx",
+  "apps/runtime/src/runtime-git-command.ts",
+  "apps/runtime/src/runtime-coding-git-tools.ts",
+  "apps/runtime/src/runtime-coding-file-tools.ts",
   "scripts/browser-cli.mjs",
   "apps/runtime/src/runtime-workflows.ts",
   "apps/runtime/src/runtime-browser-policy.ts",
@@ -103,6 +116,11 @@ for (const file of files) {
   }
   function walk(node) {
     if (ts.isNewExpression(node) && /Error$/.test(node.expression.getText(source)))
+      add(node, "Error construction; see delivery rules");
+    if (
+      ts.isCallExpression(node) &&
+      /^(?:Error|TypeError|RangeError)$/.test(node.expression.getText(source))
+    )
       add(node, "Error construction; see delivery rules");
     if (
       ts.isCallExpression(node) &&

@@ -74,6 +74,12 @@ export function createAgentPlugin(): HarnessPlugin {
           configSchema: {
             type: "object",
             properties: {
+              toolAllowlist: {
+                type: "array",
+                items: { type: "string", minLength: 1, maxLength: 200 },
+                maxItems: 200,
+                uniqueItems: true,
+              },
               conversationId: SORTABLE_ID_SCHEMA,
               systemPrompt: { type: "string", minLength: 1, maxLength: 20_000 },
               reserveOutputTokens: { type: "integer", minimum: 1 },
@@ -118,6 +124,12 @@ export function createAgentPlugin(): HarnessPlugin {
           configSchema: {
             type: "object",
             properties: {
+              toolAllowlist: {
+                type: "array",
+                items: { type: "string", minLength: 1, maxLength: 200 },
+                maxItems: 200,
+                uniqueItems: true,
+              },
               conversationId: SORTABLE_ID_SCHEMA,
               maxToolCalls: { type: "integer", minimum: 1 },
               allowedTools: {

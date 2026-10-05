@@ -4,7 +4,12 @@ import { lstat, open, realpath, rename, rm, type FileHandle } from "node:fs/prom
 import path from "node:path";
 import type { AdapterInvocationContext, JsonObject, ToolAdapter } from "@zet-harness/plugin-api";
 import { createMinimalEnvironment, createWorkspacePathResolver } from "@zet-harness/tools";
-import { runSandboxedProcess } from "./runtime-process-sandbox.js";
+import {
+  runSandboxedProcess,
+  runSandboxedProjectCommand,
+  PROJECT_COMMANDS,
+  type ProjectCommand,
+} from "./runtime-process-sandbox.js";
 import { isBlockedWorkspacePathSegment } from "./runtime-workspace-read-tools.js";
 
 export interface RuntimeMutationToolOptions {
@@ -130,11 +135,11 @@ export function createRuntimeMutationTools(
           title:
             operation === "write"
               ? "Write workspace file after consent"
-              : "Run fixed diagnostic after consent",
+              : "Run fixed diagnostic or project script after consent",
           description:
             operation === "write"
               ? "Replace/create one UTF-8 file up to 64 KiB after explicit approval. Existing parent directory required. Linux only; credentials and links refused."
-              : "Run node --version or git status --porcelain after explicit approval. Fixed direct argv in a required independent OS sandbox. Bounded output/time; unavailable sandbox fails closed.",
+              : "Run approved fixed diagnostics or npm test/build/typecheck/lint scripts with required Linux isolation, no network or host fallback. Project scripts run in a bounded private source copy with read-only dependencies; generated outputs are discarded. Requires trusted ZET_NPM_CLI.",
           inputSchema:
             operation === "write"
               ? {
@@ -147,7 +152,12 @@ export function createRuntimeMutationTools(
                   type: "object",
                   additionalProperties: false,
                   required: ["command"],
-                  properties: { command: { type: "string", enum: ["node-version", "git-status"] } },
+                  properties: {
+                    command: {
+                      type: "string",
+                      enum: ["node-version", "git-status", ...PROJECT_COMMANDS],
+                    },
+                  },
                 },
           outputSchema: { type: "object" },
           behavior: {
@@ -170,7 +180,7 @@ export function createRuntimeMutationTools(
           } else {
             if (
               Object.keys(input).length !== 1 ||
-              !["node-version", "git-status"].includes(input.command as string)
+              !["node-version", "git-status", ...PROJECT_COMMANDS].includes(input.command as string)
             )
               throw refused();
             snapshot = Object.freeze({ command: input.command as string });
@@ -192,6 +202,20 @@ export function createRuntimeMutationTools(
                 value: {
                   path: snapshot.path!,
                   writtenBytes: Buffer.byteLength(snapshot.content as string),
+                },
+              };
+            }
+            if (PROJECT_COMMANDS.includes(snapshot.command as ProjectCommand)) {
+              const outcome = await runSandboxedProjectCommand({
+                cwd: resolver.root,
+                command: snapshot.command as ProjectCommand,
+                signal: context.signal,
+              });
+              return {
+                value: {
+                  ...outcome,
+                  executionWorkspace: "temporary-copy",
+                  sourceWorkspaceModified: false,
                 },
               };
             }

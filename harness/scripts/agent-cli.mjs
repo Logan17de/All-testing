@@ -1,11 +1,25 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 
-const HELP = `Zet native coding agent\nUsage: npm run agent -- <status|models|sessions|start|read|exec|cancel|archive|restore> [options]\nOptions: --runtime http://127.0.0.1:3211 --session ID --turn ID --model ID --prompt TEXT --title TEXT\nSelect the workspace and configure inference in the local UI first.\nTool execution stays in the harness; this CLI never launches a provider CLI or grants approvals.`;
+const HELP = `Zet native coding agent\nUsage: npm run agent -- <status|models|sessions|start|read|exec|cancel|archive|restore> [options]\nOptions: --runtime http://127.0.0.1:3211 --session ID --turn ID --model ID --prompt TEXT --title TEXT --cwd WORKSPACE_RELATIVE_DIRECTORY\nInstruction selection (exec only): --skill-mode full|catalog --skills NAME,NAME\nPer-turn opt-ins (exec only): --consent yes|no --subagents yes|no --browser yes|no --search yes|no\nAll opt-ins default to no. --consent yes allows mutation requests, never automatic approval; review exact pending requests in the UI. Browser requires an independently armed scope; search requires configured authentication.\nSelect the workspace and configure inference in the local UI first.\nTool execution stays in the harness; this CLI never launches a provider CLI or grants approvals.`;
 
 export function parseAgentCommand(argv) {
   const [command = "help", ...rest] = argv;
-  const allowed = new Set(["runtime", "session", "turn", "model", "prompt", "title"]);
+  const allowed = new Set([
+    "runtime",
+    "session",
+    "turn",
+    "model",
+    "prompt",
+    "title",
+    "consent",
+    "subagents",
+    "browser",
+    "search",
+    "cwd",
+    "skill-mode",
+    "skills",
+  ]);
   const options = {};
   for (let i = 0; i < rest.length; i += 2) {
     const flag = rest[i];
@@ -20,6 +34,27 @@ export function parseAgentCommand(argv) {
     )
       throw new Error("Unknown, repeated or missing option.");
     options[key] = value;
+  }
+  if ("cwd" in options && command !== "exec")
+    throw new Error("--cwd is an exec-only workspace-relative directory.");
+  if (
+    ("skill-mode" in options &&
+      (command !== "exec" || !["full", "catalog"].includes(options["skill-mode"]))) ||
+    ("skills" in options && command !== "exec")
+  )
+    throw new Error("Skill selection is an exec-only option; skill mode must be full or catalog.");
+  const skillNames = options.skills?.split(",");
+  if (
+    skillNames &&
+    (skillNames.length > 20 ||
+      new Set(skillNames).size !== skillNames.length ||
+      skillNames.some((name) => !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u.test(name)))
+  )
+    throw new Error("Select at most 20 unique workspace skill names.");
+  const optIns = ["consent", "subagents", "browser", "search"];
+  for (const key of optIns) {
+    if (key in options && (command !== "exec" || !["yes", "no"].includes(options[key])))
+      throw new Error(`--${key} is an exec-only option accepting exactly yes or no.`);
   }
   const url = new URL(options.runtime ?? "http://127.0.0.1:3211");
   if (
@@ -50,6 +85,13 @@ export function parseAgentCommand(argv) {
         sessionId: requireOption("session"),
         modelId: requireOption("model"),
         text: requireOption("prompt"),
+        ...(options.cwd ? { workingDirectory: options.cwd } : {}),
+        ...(options["skill-mode"] ? { skillMode: options["skill-mode"] } : {}),
+        ...(skillNames ? { skillNames } : {}),
+        mutationConsent: options.consent === "yes",
+        subagentsEnabled: options.subagents === "yes",
+        browserEnabled: options.browser === "yes",
+        searchEnabled: options.search === "yes",
       },
     }),
     cancel: () => ({

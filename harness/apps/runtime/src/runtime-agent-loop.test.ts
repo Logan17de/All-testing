@@ -32,6 +32,7 @@ import type {
   ModelAdapter,
   ModelRequest,
   ModelResult,
+  ToolAdapter,
   NodeDefinition,
 } from "@zet-harness/plugin-api";
 
@@ -195,7 +196,11 @@ function agentGraph(conversationId: string, maxIterations: number): GraphJsonV1 
   };
 }
 
-async function setup(responses: readonly ModelResult[], streaming = false) {
+async function setup(
+  responses: readonly ModelResult[],
+  streaming = false,
+  externalTools: readonly ToolAdapter[] = [],
+) {
   const database = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
   database.open();
   runSqliteMigrations(database.connection(), RUNTIME_DATABASE_MIGRATIONS);
@@ -259,6 +264,7 @@ async function setup(responses: readonly ModelResult[], streaming = false) {
   const executor = createAgentNodeExecutor({
     database,
     models: host.models,
+    tools: externalTools,
     onStreamProgress: (update) => {
       progress.push({ textCharacters: update.textCharacters, completed: update.completed });
     },
@@ -275,12 +281,27 @@ async function setup(responses: readonly ModelResult[], streaming = false) {
   dispatchers.push(dispatcher);
   dispatcher.start();
 
-  const run = async (maxIterations: number) => {
-    const compiled = await compileEditorGraph(
-      agentGraph(conversationId, maxIterations),
-      { host },
-      authority,
-    );
+  const run = async (
+    maxIterations: number,
+    scope: { model?: readonly string[]; tools?: readonly string[] } = {},
+  ) => {
+    const graph = agentGraph(conversationId, maxIterations);
+    const scopedGraph = {
+      ...graph,
+      nodes: graph.nodes.map((node) => ({
+        ...node,
+        config: {
+          ...node.config,
+          ...(node.id === "think" && scope.model !== undefined
+            ? { toolAllowlist: [...scope.model] }
+            : {}),
+          ...(node.id === "act" && scope.tools !== undefined
+            ? { toolAllowlist: [...scope.tools] }
+            : {}),
+        },
+      })),
+    };
+    const compiled = await compileEditorGraph(scopedGraph, { host }, authority);
     if (!compiled.valid) {
       throw new Error(`The agent graph did not compile: ${JSON.stringify(compiled.diagnostics)}`);
     }
@@ -292,6 +313,63 @@ async function setup(responses: readonly ModelResult[], streaming = false) {
 }
 
 describe("the bounded agent loop", () => {
+  it("passes only the actual model/tools-node intersection as trusted child scope", async () => {
+    const scopes: (readonly string[] | undefined)[] = [];
+    const tool: ToolAdapter = {
+      manifest: {
+        id: "plugin.read",
+        version: "1",
+        title: "Scoped read",
+        inputSchema: { type: "object" },
+        outputSchema: { type: "object" },
+        behavior: {
+          primitiveFamily: "effect",
+          determinism: "nondeterministic",
+          effect: "external-read",
+          idempotency: "idempotent",
+          recovery: "rerun",
+          executionMode: "in-process",
+          requiredCapabilities: [],
+        },
+      },
+      invoke: (_input, context) => {
+        scopes.push(context.toolScope);
+        return Promise.resolve({ value: {} });
+      },
+    };
+    const { run, model } = await setup(
+      [callTool("scoped-read", "plugin_read", {}), reply("Done")],
+      false,
+      [tool],
+    );
+    expect((await run(4, { model: ["plugin.read"], tools: ["plugin.read"] })).report.status).toBe(
+      "completed",
+    );
+    expect(model.requests[0]?.tools?.map((entry) => entry.name)).toEqual(["plugin_read"]);
+    expect(scopes).toEqual([["plugin.read"]]);
+  });
+
+  it("a model-node empty allowlist cannot be bypassed by a hallucinated call or broad tools node", async () => {
+    const { database, projectId, model, run } = await setup([
+      callTool("scope-call", "harness_goals_create", { title: "Must not be created" }),
+      reply("Done"),
+    ]);
+    expect((await run(4, { model: [] })).report.status).toBe("completed");
+    expect(model.requests[0]?.tools).toBeUndefined();
+    expect(listGoals(database.connection(), projectId)).toHaveLength(0);
+  });
+  it("a narrower tools-node allowlist denies a call that the model was offered", async () => {
+    const { database, projectId, model, run } = await setup([
+      callTool("scope-call", "harness_goals_create", { title: "Must not be created" }),
+      reply("Done"),
+    ]);
+    expect((await run(4, { tools: [] })).report.status).toBe("completed");
+    expect(model.requests[0]?.tools?.some((tool) => tool.name === "harness_goals_create")).toBe(
+      true,
+    );
+    expect(listGoals(database.connection(), projectId)).toHaveLength(0);
+  });
+
   it("consumes streamed tool turns, stores one final message per step and publishes only counts", async () => {
     const { database, conversationId, model, progress, run } = await setup(
       [

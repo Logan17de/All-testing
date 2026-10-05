@@ -8,6 +8,7 @@ import type {
 import { createRuntimeCodingSubagentTool } from "./runtime-coding-subagents.js";
 const context = (signal = new AbortController().signal): AdapterInvocationContext => ({
   signal,
+  toolScope: ["harness.fs.read", "harness.fs.list"],
   runId: "test-run",
   logicalEffectId: "effect",
   opIndex: 0,
@@ -45,6 +46,42 @@ const readTool = (): ToolAdapter => ({
   invoke: vi.fn(() => Promise.resolve({ value: { content: "fixture" } })),
 });
 describe("bounded separate-context child agent", () => {
+  it("missing, empty or alias-only parent scope cannot offer or execute a child read", async () => {
+    for (const scope of [undefined, [], ["harness_fs_read"]]) {
+      const read = readTool();
+      const generate = vi.fn<
+        (request: ModelRequest, context: AdapterInvocationContext) => Promise<ModelResult>
+      >(() =>
+        Promise.resolve({
+          message: {
+            role: "assistant",
+            parts: [
+              {
+                kind: "tool-call",
+                callId: "read",
+                name: "harness_fs_read",
+                arguments: { path: "private.ts" },
+              },
+            ],
+          },
+          finishReason: "tool-calls",
+        }),
+      );
+      const tool = createRuntimeCodingSubagentTool({ generate, readTools: [read] });
+      const base = { ...context() };
+      delete base.toolScope;
+      await expect(
+        tool.invoke(
+          { task: "Review" },
+          { ...base, ...(scope === undefined ? {} : { toolScope: scope }) },
+        ),
+      ).rejects.toThrow("unavailable");
+      expect(generate.mock.calls[0]?.[0].tools).toEqual([]);
+      expect(generate.mock.calls[0]?.[1].toolScope).toEqual([]);
+      expect(read.invoke).not.toHaveBeenCalled();
+    }
+  });
+
   it("passes isolated task and fixed read tools, performs a bounded read then reports", async () => {
     const read = readTool();
     const generate = vi

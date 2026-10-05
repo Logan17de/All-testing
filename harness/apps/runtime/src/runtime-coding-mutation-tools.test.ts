@@ -16,11 +16,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AdapterInvocationContext, JsonObject } from "@zet-harness/plugin-api";
 import { createRuntimeMutationTools } from "./runtime-coding-mutation-tools.js";
-import { runSandboxedProcess } from "./runtime-process-sandbox.js";
-vi.mock("./runtime-process-sandbox.js", () => ({ runSandboxedProcess: vi.fn() }));
+import { runSandboxedProcess, runSandboxedProjectCommand } from "./runtime-process-sandbox.js";
+vi.mock(import("./runtime-process-sandbox.js"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  runSandboxedProcess: vi.fn(),
+  runSandboxedProjectCommand: vi.fn(),
+}));
 let root: string;
 beforeEach(async () => {
   vi.mocked(runSandboxedProcess).mockReset();
+  vi.mocked(runSandboxedProjectCommand).mockReset();
   root = await mkdtemp(join(tmpdir(), "zet-mutations-"));
 });
 afterEach(async () => {
@@ -163,3 +168,42 @@ it("sandbox failure fails closed without host process fallback", async () => {
   await expect(exec!.invoke({ command: "node-version" }, context())).rejects.toThrow("rejected");
   expect(runSandboxedProcess).toHaveBeenCalledTimes(1);
 });
+it.runIf(process.platform === "linux")(
+  "executes only the approved fixed project command in a private copy",
+  async () => {
+    const approvals: JsonObject[] = [];
+    const tools = createRuntimeMutationTools({
+      root,
+      approve: async (request) => {
+        approvals.push(request.args);
+        return true;
+      },
+    });
+    const tool = tools.find((entry) => entry.manifest.id === "harness.shell.run")!;
+    vi.mocked(runSandboxedProjectCommand).mockResolvedValue({
+      outcome: "exited",
+      exitCode: 1,
+      signal: null,
+      stdout: "fixture failing test",
+      stderr: "",
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      durationMs: 1,
+    });
+    const result = await tool.invoke({ command: "project-test" }, context());
+    expect(approvals).toEqual([{ command: "project-test" }]);
+    expect(vi.mocked(runSandboxedProjectCommand).mock.calls[0]?.[0]).toMatchObject({
+      cwd: root,
+      command: "project-test",
+    });
+    expect(result.value).toMatchObject({
+      exitCode: 1,
+      executionWorkspace: "temporary-copy",
+      sourceWorkspaceModified: false,
+    });
+    await expect(
+      tool.invoke({ command: "project-test", argv: ["--danger"] }, context()),
+    ).rejects.toThrow();
+    expect(runSandboxedProcess).not.toHaveBeenCalled();
+  },
+);

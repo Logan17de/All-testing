@@ -44,6 +44,13 @@ import type {
 } from "@zet-harness/plugin-api";
 import type { NodeSecretAccessor } from "@zet-harness/plugin-api/secret-contract";
 
+import {
+  agentToolAllowlist,
+  agentToolCatalog,
+  readRecordedAgentToolCatalog,
+  restrictAgentTools,
+  type AgentToolIdentity,
+} from "./runtime-agent-tool-policy.js";
 import { actionToolSpecifications, modelToolName } from "./runtime-action-tools.js";
 import { createGoalActionTools } from "./runtime-goal-actions.js";
 import { createMemoryActionTools } from "./runtime-memory-actions.js";
@@ -86,6 +93,10 @@ export interface AgentNodeExecutorOptions {
   readonly models: ModelCatalog;
   /** Tools the host offers every step, beside the project's goal and todo actions. */
   readonly tools?: readonly ToolAdapter[];
+  /** Trusted host registry provenance; undefined owners are refused. */
+  readonly toolOwner?: (tool: ToolAdapter) => string | undefined;
+  /** Host run/agent restriction, intersected with each node's canonical allowlist. */
+  readonly toolAllowlist?: readonly string[];
   /**
    * Tools a component can hand to a step by naming them on its `tools` input.
    *
@@ -497,17 +508,43 @@ export function createAgentNodeExecutor(
    * project's memories writes none either, so one setting decides whether a step
    * has anything to do with project memory at all.
    */
+  const builtinOwners = new WeakSet<ToolAdapter>();
+  const owner = (tool: ToolAdapter): string | undefined =>
+    builtinOwners.has(tool)
+      ? "harness.project-actions"
+      : options.toolOwner
+        ? options.toolOwner(tool)
+        : "trusted-host";
   const offeredTools = (
     projectId: string,
     runId: string,
     memories: boolean,
     wired: readonly string[],
-  ): readonly ToolAdapter[] => [
-    ...createGoalActionTools({ database, projectId, now, createId }),
-    ...(memories ? createMemoryActionTools({ database, projectId, runId, now, createId }) : []),
-    ...(options.tools ?? []).filter((tool) => granted(tool.manifest.behavior.requiredCapabilities)),
-    ...(options.componentTools ?? []).filter((tool) => wired.includes(tool.manifest.id)),
-  ];
+  ): readonly ToolAdapter[] => {
+    const builtins = [
+      ...createGoalActionTools({ database, projectId, now, createId }),
+      ...(memories ? createMemoryActionTools({ database, projectId, runId, now, createId }) : []),
+    ];
+    for (const tool of builtins) builtinOwners.add(tool);
+    return restrictAgentTools(
+      [
+        ...builtins,
+        ...(options.tools ?? []).filter((tool) =>
+          granted(tool.manifest.behavior.requiredCapabilities),
+        ),
+        // Component wiring names tools, but never supplies missing host capability grants.
+        ...(options.componentTools ?? []).filter(
+          (tool) =>
+            wired.includes(tool.manifest.id) &&
+            granted(tool.manifest.behavior.requiredCapabilities),
+        ),
+      ],
+      {
+        ...(options.toolAllowlist === undefined ? {} : { allowlist: options.toolAllowlist }),
+        owner,
+      },
+    );
+  };
 
   /** The tool ids the components wired into this step hand over. */
   const wiredTools = (execution: RuntimeNodeExecution): readonly string[] => {
@@ -682,11 +719,14 @@ export function createAgentNodeExecutor(
     }
     await holdProject(execution, conversation.projectId);
     enforceModelBudgets(execution.runId, config);
-    const tools = offeredTools(
-      conversation.projectId,
-      execution.runId,
-      maxMemories > 0,
-      wiredTools(execution),
+    const tools = restrictAgentTools(
+      offeredTools(conversation.projectId, execution.runId, maxMemories > 0, wiredTools(execution)),
+      {
+        ...(agentToolAllowlist(config) === undefined
+          ? {}
+          : { allowlist: agentToolAllowlist(config)! }),
+        owner,
+      },
     );
     const configured = options.configuredModels?.() ?? new Set<string>();
     const decision = routeModel({
@@ -796,6 +836,7 @@ export function createAgentNodeExecutor(
       finishReason: result.finishReason,
     };
     const usage = {
+      toolCatalog: agentToolCatalog(tools, owner),
       model: { id: manifest.id, version: manifest.version },
       selectionRule: decision.selectionRule,
       context: {
@@ -874,14 +915,28 @@ export function createAgentNodeExecutor(
         : [];
     enforceToolBudget(execution.runId, config, calls.length);
     const maxMemories = countConfig(config, "maxMemories") ?? MEMORY_LIMIT;
-    const tools = offeredTools(
-      conversation.projectId,
-      execution.runId,
-      maxMemories > 0,
-      wiredTools(execution),
-    ).filter(
-      (tool) =>
-        allowedTools === undefined || allowedTools.includes(modelToolName(tool.manifest.id)),
+    const recordedCatalog: readonly AgentToolIdentity[] = (() => {
+      if (!head || head.role !== "assistant") return [];
+      const record = database
+        .connection()
+        .prepare(
+          "SELECT usage_json FROM agent_steps WHERE message_id = ? AND run_id = ? AND kind = 'model'",
+        )
+        .get(head.messageId, execution.runId) as { usage_json: string | null } | undefined;
+      return readRecordedAgentToolCatalog(
+        record?.usage_json ? (JSON.parse(record.usage_json) as unknown) : undefined,
+      );
+    })();
+    const tools = restrictAgentTools(
+      offeredTools(conversation.projectId, execution.runId, maxMemories > 0, wiredTools(execution)),
+      {
+        ...(agentToolAllowlist(config) === undefined
+          ? {}
+          : { allowlist: agentToolAllowlist(config)! }),
+        ...(allowedTools === undefined ? {} : { legacyNames: allowedTools }),
+        recordedCatalog,
+        owner,
+      },
     );
 
     const results: DurableMessagePart[] = [];
@@ -903,10 +958,10 @@ export function createAgentNodeExecutor(
         continue;
       }
       try {
-        const outcome = await tool.invoke(
-          call.arguments as JsonObject,
-          invocationContext(execution, `${execution.logicalEffectId}:${call.callId}`),
-        );
+        const outcome = await tool.invoke(call.arguments as JsonObject, {
+          ...invocationContext(execution, `${execution.logicalEffectId}:${call.callId}`),
+          toolScope: Object.freeze(tools.map((candidate) => candidate.manifest.id)),
+        });
         results.push({ kind: "tool-result", callId: call.callId, value: outcome.value });
       } catch (error) {
         execution.signal.throwIfAborted();

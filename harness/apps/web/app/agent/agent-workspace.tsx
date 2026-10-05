@@ -10,6 +10,8 @@ import {
   mutationApprovals,
   type AgentRun,
 } from "./agent-view";
+import { ChatGraphPanel } from "./chat-graph-panel";
+import { ChatMessages } from "./chat-messages";
 import { MutationApprovalCard } from "./mutation-approval";
 import { ApprovalCards } from "../runs/[id]/approval-cards";
 
@@ -26,11 +28,11 @@ const preStyle = {
   overflow: "auto",
 } as const;
 
-export function AgentWorkspace() {
+export function AgentWorkspace({ initialSessionId = "" }: { initialSessionId?: string }) {
   const [models, setModels] = useState<Value[]>([]);
   const [sessions, setSessions] = useState<Value[]>([]);
   const [modelId, setModelId] = useState("");
-  const [sessionId, setSessionId] = useState("");
+  const [sessionId, setSessionId] = useState(initialSessionId);
   const [archived, setArchived] = useState(false);
   const [transcript, setTranscript] = useState<unknown>(null);
   const [prompt, setPrompt] = useState("");
@@ -47,6 +49,7 @@ export function AgentWorkspace() {
   const generation = useRef<number | null>(null);
   const actionVersion = useRef(0);
   const currentRun = runs[sessionId];
+  const runStatus = currentRun?.status;
   const active = currentRun !== undefined && !terminal.has(currentRun.status);
 
   const action = useCallback(async (name: string, params: Value = {}) => {
@@ -103,20 +106,48 @@ export function AgentWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (!sessionId || !currentRun?.status || !terminal.has(currentRun.status)) return;
+    if (!sessionId || !runStatus) return;
     let disposed = false;
-    void action("session/read", { sessionId })
-      .then((result) => {
-        if (!disposed) setTranscript(result);
-      })
-      .catch((cause) => {
-        if (!disposed)
-          setError(cause instanceof Error ? cause.message : "Transcript could not be refreshed.");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expected = generation.current;
+    async function readProgress() {
+      const result = await workspaceRequest<{ result: unknown }>("agent", {
+        action: "session/read",
+        params: { sessionId },
       });
+      if (disposed || generation.current !== expected) return;
+      if (result.ok) setTranscript(result.data.result);
+      else setPollError(result.reason);
+      if (runStatus && !terminal.has(runStatus))
+        timer = setTimeout(() => {
+          void readProgress();
+        }, 2000);
+    }
+    void readProgress();
     return () => {
       disposed = true;
+      if (timer) clearTimeout(timer);
     };
-  }, [action, sessionId, currentRun?.id, currentRun?.status]);
+  }, [sessionId, currentRun?.id, runStatus]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (sessionId) url.searchParams.set("session", sessionId);
+    else url.searchParams.delete("session");
+    window.history.replaceState(null, "", url);
+    if (!sessionId) return;
+    let stale = false;
+    void action("session/read", { sessionId })
+      .then((result) => {
+        if (!stale) setTranscript(result);
+      })
+      .catch((cause) => {
+        if (!stale) setError(cause instanceof Error ? cause.message : "Chat could not be loaded.");
+      });
+    return () => {
+      stale = true;
+    };
+  }, [action, sessionId]);
 
   async function run(work: () => Promise<void>) {
     setBusy(true);
@@ -161,8 +192,8 @@ export function AgentWorkspace() {
 
   return (
     <>
-      <section className="panel" aria-label="Coding runtime">
-        <h2 className="panelTitle">Runtime and provider models</h2>
+      <details className="panel" aria-label="Coding runtime">
+        <summary>Runtime and provider models</summary>
         <p role="status">
           {snapshot
             ? snapshot.available === false
@@ -182,7 +213,7 @@ export function AgentWorkspace() {
           <Link href="/models">Manage provider models and credentials</Link>. This workspace uses
           configured provider inference and the harness agent loop.
         </p>
-      </section>
+      </details>
       {error ? (
         <p role="alert" className="panel panel--warn">
           {error}
@@ -193,244 +224,261 @@ export function AgentWorkspace() {
           {pollError}
         </p>
       ) : null}
-      <section className="panel" aria-label="Coding sessions">
-        <h2 className="panelTitle">Session</h2>
-        <label>
-          Provider model{" "}
-          <select
-            disabled={busy}
-            value={modelId}
-            onChange={(event) => setModelId(event.target.value)}
-          >
-            <option value="">Choose a configured model</option>
-            {models.map((model) => (
-              <option key={text(model.id)} value={text(model.id)}>
-                {text(model.displayName) || text(model.id)}
-                {text(model.provider) ? ` (${text(model.provider)})` : ""}
-              </option>
-            ))}
-          </select>
-        </label>{" "}
-        <button
-          disabled={busy}
-          onClick={() => {
-            void run(() => loadSession("session/start"));
-          }}
-        >
-          Start session
-        </button>
-        <p>
+      <div className="chatWorkspace">
+        <section className="panel chatWorkspaceMain" aria-label="Coding sessions">
+          <h2 className="panelTitle">Chat</h2>
           <label>
-            Saved session{" "}
+            Provider model{" "}
             <select
               disabled={busy}
-              value={sessionId}
-              onChange={(event) => {
-                setSessionId(event.target.value);
-                setTranscript(null);
-              }}
+              value={modelId}
+              onChange={(event) => setModelId(event.target.value)}
             >
-              <option value="">Choose a session</option>
-              {sessionId && !sessions.some((session) => session.id === sessionId) ? (
-                <option value={sessionId}>{sessionId}</option>
-              ) : null}
-              {sessions.map((session) => (
-                <option key={text(session.id)} value={text(session.id)}>
-                  {text(session.preview) || text(session.id)}
+              <option value="">Choose a configured model</option>
+              {models.map((model) => (
+                <option key={text(model.id)} value={text(model.id)}>
+                  {text(model.displayName) || text(model.id)}
+                  {text(model.provider) ? ` (${text(model.provider)})` : ""}
                 </option>
               ))}
             </select>
           </label>{" "}
-          <label>
-            <input
-              type="checkbox"
-              checked={archived}
-              disabled={busy}
-              onChange={(event) => {
-                const value = event.target.checked;
-                setArchived(value);
-                setSessionId("");
-                setTranscript(null);
-                void run(() => loadSessions(value));
+          <button
+            disabled={busy}
+            onClick={() => {
+              void run(() => loadSession("session/start"));
+            }}
+          >
+            New chat
+          </button>
+          <p>
+            <label>
+              Saved chat{" "}
+              <select
+                disabled={busy}
+                value={sessionId}
+                onChange={(event) => {
+                  setSessionId(event.target.value);
+                  setTranscript(null);
+                }}
+              >
+                <option value="">Choose a session</option>
+                {sessionId && !sessions.some((session) => session.id === sessionId) ? (
+                  <option value={sessionId}>{sessionId}</option>
+                ) : null}
+                {sessions.map((session) => (
+                  <option key={text(session.id)} value={text(session.id)}>
+                    {text(session.preview) || text(session.id)}
+                  </option>
+                ))}
+              </select>
+            </label>{" "}
+            <label>
+              <input
+                type="checkbox"
+                checked={archived}
+                disabled={busy}
+                onChange={(event) => {
+                  const value = event.target.checked;
+                  setArchived(value);
+                  setSessionId("");
+                  setTranscript(null);
+                  void run(() => loadSessions(value));
+                }}
+              />{" "}
+              Browse archived sessions
+            </label>{" "}
+            <button
+              disabled={busy || archived || !sessionId}
+              onClick={() => {
+                void run(() => loadSession("session/resume"));
               }}
-            />{" "}
-            Browse archived sessions
-          </label>{" "}
-          <button
-            disabled={busy || archived || !sessionId}
-            onClick={() => {
-              void run(() => loadSession("session/resume"));
-            }}
-          >
-            Resume
-          </button>{" "}
-          <button
-            disabled={busy || !sessionId}
-            onClick={() => {
-              void run(() => loadSession("session/read"));
-            }}
-          >
-            Read transcript
-          </button>{" "}
-          <button
-            disabled={busy || !sessionId || active}
-            onClick={() => {
-              void run(async () => {
-                await action(archived ? "session/restore" : "session/archive", { sessionId });
-                setSessionId("");
-                setTranscript(null);
-                await loadSessions(archived);
-              });
-            }}
-          >
-            {archived ? "Restore session" : "Archive session"}
-          </button>
-        </p>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void run(async () => {
-              await action("session/resume", { sessionId });
-              const result = object(
-                await action("turn/start", {
-                  sessionId,
-                  text: prompt,
-                  modelId,
-                  mutationConsent,
-                  subagentsEnabled,
-                  searchEnabled,
-                  browserEnabled,
-                  ...(instructions.trim() ? { instructions } : {}),
-                }),
-              );
-              const turn = object(result.turn);
-              const id = text(turn.id);
-              if (!id) throw new Error("The runtime did not return a task ID.");
-              setRuns((previous) => ({
-                ...previous,
-                [sessionId]: { id, status: text(turn.status) || "pending" },
-              }));
-              setPrompt("");
-              setMutationConsent(false);
-              setSubagentsEnabled(false);
-              setSearchEnabled(false);
-              setBrowserEnabled(false);
-            });
-          }}
-        >
-          <label htmlFor="coding-instructions">Session instructions (optional)</label>
-          <br />
-          <textarea
-            id="coding-instructions"
-            rows={2}
-            style={{ width: "100%" }}
-            value={instructions}
-            onChange={(event) => setInstructions(event.target.value)}
-          />
-          <label htmlFor="coding-prompt">Coding task</label>
-          <br />
-          <textarea
-            id="coding-prompt"
-            rows={5}
-            style={{ width: "100%" }}
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            required
-          />
-          <p>
-            <label>
-              <input
-                type="checkbox"
-                disabled={busy || active}
-                checked={mutationConsent}
-                onChange={(event) => setMutationConsent(event.target.checked)}
-              />{" "}
-              Allow workspace mutation requests for the next task. Each requested action still needs
-              separate approval.
-            </label>
-          </p>
-          <p>
-            <label>
-              <input
-                type="checkbox"
-                disabled={busy || active}
-                checked={subagentsEnabled}
-                onChange={(event) => setSubagentsEnabled(event.target.checked)}
-              />{" "}
-              Allow bounded read-only subagents for the next task (additional model inference).
-            </label>
-          </p>
-          <p>
-            <label>
-              <input
-                type="checkbox"
-                disabled={busy || active}
-                checked={searchEnabled}
-                onChange={(event) => setSearchEnabled(event.target.checked)}
-              />{" "}
-              Allow Codex web research for the next task (requires a connected account and
-              configured search model).
-            </label>
-            <br />
-            <small>
-              Only search queries and findings are exchanged. This research helper receives no
-              coding, filesystem or shell permissions.
-            </small>
-          </p>
-          <p>
-            <label>
-              <input
-                type="checkbox"
-                disabled={busy || active}
-                checked={browserEnabled}
-                onChange={(event) => setBrowserEnabled(event.target.checked)}
-              />{" "}
-              Allow tools from an explicitly armed isolated browser session for the next task. Every
-              browser input still needs approval.
-            </label>
-          </p>
-          <p>
-            <Link
-              href={currentRun ? `/desktop?task=${encodeURIComponent(currentRun.id)}` : "/desktop"}
             >
-              Open a separate local desktop session
-            </Link>
-            . Desktop capture and input are disabled until explicitly armed and are not enabled by
-            this browser checkbox.
+              Resume
+            </button>{" "}
+            <button
+              disabled={busy || !sessionId}
+              onClick={() => {
+                void run(() => loadSession("session/read"));
+              }}
+            >
+              Read transcript
+            </button>{" "}
+            <button
+              disabled={busy || !sessionId || active}
+              onClick={() => {
+                void run(async () => {
+                  await action(archived ? "session/restore" : "session/archive", { sessionId });
+                  setSessionId("");
+                  setTranscript(null);
+                  await loadSessions(archived);
+                });
+              }}
+            >
+              {archived ? "Restore session" : "Archive session"}
+            </button>
           </p>
-          <p role="status">
-            {currentRun ? `Task ${currentRun.status}.` : "Ready for a task."}
-            {currentRun ? (
-              <>
-                {" "}
-                <Link href={`/runs/${encodeURIComponent(currentRun.id)}`}>
-                  Run details and live tool progress
-                </Link>
-              </>
-            ) : null}
-          </p>
-          <button disabled={busy || archived || active || !sessionId || !modelId || !prompt.trim()}>
-            Send task
-          </button>{" "}
-          <button
-            type="button"
-            disabled={busy || !active || !currentRun}
-            onClick={() => {
+          <ChatMessages transcript={transcript} />
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
               void run(async () => {
-                await action("turn/interrupt", { sessionId, turnId: currentRun?.id });
+                await action("session/resume", { sessionId });
+                const result = object(
+                  await action("turn/start", {
+                    sessionId,
+                    text: prompt,
+                    modelId,
+                    mutationConsent,
+                    subagentsEnabled,
+                    searchEnabled,
+                    browserEnabled,
+                    ...(instructions.trim() ? { instructions } : {}),
+                  }),
+                );
+                const turn = object(result.turn);
+                const id = text(turn.id);
+                if (!id) throw new Error("The runtime did not return a task ID.");
+                setRuns((previous) => ({
+                  ...previous,
+                  [sessionId]: { id, status: text(turn.status) || "pending" },
+                }));
+                setPrompt("");
+                setMutationConsent(false);
+                setSubagentsEnabled(false);
+                setSearchEnabled(false);
+                setBrowserEnabled(false);
               });
             }}
           >
-            Cancel task
-          </button>
-        </form>
-        {transcript !== null ? (
-          <details open>
-            <summary>Saved transcript</summary>
-            <pre style={preStyle}>{pretty(transcript)}</pre>
-          </details>
-        ) : null}
-      </section>
+            <details>
+              <summary>Task instructions (optional)</summary>
+              <label htmlFor="coding-instructions">Session instructions (optional)</label>
+              <br />
+              <textarea
+                id="coding-instructions"
+                rows={2}
+                style={{ width: "100%" }}
+                value={instructions}
+                onChange={(event) => setInstructions(event.target.value)}
+              />
+            </details>
+            <label htmlFor="coding-prompt">Coding task</label>
+            <br />
+            <textarea
+              id="coding-prompt"
+              rows={5}
+              style={{ width: "100%" }}
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              required
+            />
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  disabled={busy || active}
+                  checked={mutationConsent}
+                  onChange={(event) => setMutationConsent(event.target.checked)}
+                />{" "}
+                Allow workspace mutation requests for the next task. Each requested action still
+                needs separate approval.
+              </label>
+            </p>
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  disabled={busy || active}
+                  checked={subagentsEnabled}
+                  onChange={(event) => setSubagentsEnabled(event.target.checked)}
+                />{" "}
+                Allow bounded read-only subagents for the next task (additional model inference).
+              </label>
+            </p>
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  disabled={busy || active}
+                  checked={searchEnabled}
+                  onChange={(event) => setSearchEnabled(event.target.checked)}
+                />{" "}
+                Allow Codex web research for the next task (requires a connected account and
+                configured search model).
+              </label>
+              <br />
+              <small>
+                Only search queries and findings are exchanged. This research helper receives no
+                coding, filesystem or shell permissions.
+              </small>
+            </p>
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  disabled={busy || active}
+                  checked={browserEnabled}
+                  onChange={(event) => setBrowserEnabled(event.target.checked)}
+                />{" "}
+                Allow tools from an explicitly armed isolated browser session for the next task.
+                Every browser input still needs approval.
+              </label>
+            </p>
+            <p>
+              <Link
+                href={
+                  currentRun ? `/desktop?task=${encodeURIComponent(currentRun.id)}` : "/desktop"
+                }
+              >
+                Open a separate local desktop session
+              </Link>
+              . Desktop capture and input are disabled until explicitly armed and are not enabled by
+              this browser checkbox.
+            </p>
+            <p role="status">
+              {currentRun ? `Task ${currentRun.status}.` : "Ready for a task."}
+              {currentRun ? (
+                <>
+                  {" "}
+                  <Link href={`/runs/${encodeURIComponent(currentRun.id)}`}>
+                    Run details and live tool progress
+                  </Link>
+                </>
+              ) : null}
+            </p>
+            <button
+              disabled={busy || archived || active || !sessionId || !modelId || !prompt.trim()}
+            >
+              Send task
+            </button>{" "}
+            <button
+              type="button"
+              disabled={busy || !active || !currentRun}
+              onClick={() => {
+                void run(async () => {
+                  await action("turn/interrupt", { sessionId, turnId: currentRun?.id });
+                });
+              }}
+            >
+              Cancel task
+            </button>
+          </form>
+        </section>
+        {sessionId ? (
+          <ChatGraphPanel
+            key={`${String(snapshot?.scopeGeneration)}:${sessionId}`}
+            sessionId={sessionId}
+            revision={currentRun?.id ? `${currentRun.id}:${currentRun.status}` : ""}
+            action={action}
+          />
+        ) : (
+          <aside className="panel">
+            <h2 className="panelTitle">Connected graph</h2>
+            <p>Select or start a chat to view its graph connection.</p>
+          </aside>
+        )}
+      </div>
       {mutationApprovals(snapshot?.toolApprovals, sessionId, currentRun?.id).map((request) => (
         <MutationApprovalCard
           key={`${String(snapshot?.scopeGeneration)}:${request.requestGeneration}:${request.id}`}

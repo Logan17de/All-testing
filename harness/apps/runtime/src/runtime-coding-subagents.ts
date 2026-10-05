@@ -7,6 +7,8 @@ import type {
   ToolAdapter,
 } from "@zet-harness/plugin-api";
 
+import { inheritedReadTools } from "./runtime-agent-tool-policy.js";
+
 export interface RuntimeCodingSubagentOptions {
   /** Trusted host supplies the parent's selected, authorized inference adapter. */
   readonly generate: (
@@ -20,14 +22,8 @@ export interface RuntimeCodingSubagentOptions {
 export function createRuntimeCodingSubagentTool(
   options: RuntimeCodingSubagentOptions,
 ): ToolAdapter {
-  const tools = options.readTools.filter(
-    (tool) =>
-      ["harness.fs.read", "harness.fs.list"].includes(tool.manifest.id) &&
-      tool.manifest.behavior.effect === "external-read" &&
-      tool.manifest.behavior.requiredCapabilities.every((capability) => capability === "fs:read"),
-  );
   const calls = new Map<string, number>();
-  const names = tools.map((tool) => ({ tool, name: tool.manifest.id.replaceAll(".", "_") }));
+
   return {
     manifest: {
       id: "harness.agent.delegate",
@@ -61,6 +57,8 @@ export function createRuntimeCodingSubagentTool(
         Buffer.byteLength(input.task) > 8000
       )
         throw new Error("Invalid child task.");
+      const tools = inheritedReadTools(options.readTools, context.toolScope);
+      const names = tools.map((tool) => ({ tool, name: tool.manifest.id.replaceAll(".", "_") }));
       const count = calls.get(context.runId) ?? 0;
       if (count >= 4) throw new Error("Child agent budget exhausted.");
       // Never evict a remembered run and accidentally reset its authority budget.
@@ -78,6 +76,7 @@ export function createRuntimeCodingSubagentTool(
       const childContext = {
         ...context,
         signal: controller.signal,
+        toolScope: Object.freeze(tools.map((tool) => tool.manifest.id)),
         logicalEffectId: `${context.logicalEffectId}:child:${count}`,
       };
       const messages: ModelMessage[] = [
