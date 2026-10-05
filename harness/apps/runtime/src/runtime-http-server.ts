@@ -242,9 +242,7 @@ export class RuntimeHttpServer {
     this.modelServices = services.models;
     this.setupServices = services.setup;
     this.connectionHandler =
-      services.connections === undefined
-        ? undefined
-        : createConnectionHttpHandler(services.connections);
+      services.connections === undefined ? undefined : createConnectionHttpHandler();
     this.triggerServices = services.triggers;
     this.clientServices = services.clients;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();

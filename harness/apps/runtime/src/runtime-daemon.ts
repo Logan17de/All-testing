@@ -61,7 +61,6 @@ import {
 import { GITHUB_PLUGIN_ID, createGitHubPlugin } from "@zet-harness/github";
 import { createAgentNodeExecutor } from "./runtime-agent-nodes.js";
 import { RuntimeModels } from "./runtime-models.js";
-import { OPENROUTER_BASE_URL } from "./runtime-connection-http.js";
 import type { ModelCheckResult } from "./runtime-model-http.js";
 import { createCompositeNodeResolver } from "./runtime-graphs.js";
 import { createPluginNodeExecutor } from "./runtime-plugin-executor.js";
@@ -225,7 +224,6 @@ export class RuntimeDaemon {
           }),
     });
     // A test or a proxy may stand in for OpenRouter; its sign-in and its models follow.
-    const openRouterUrl = process.env["OPENROUTER_URL"] ?? OPENROUTER_BASE_URL;
     this.httpServer = new RuntimeHttpServer(
       options.api,
       this.eventStream,
@@ -263,10 +261,6 @@ export class RuntimeDaemon {
         setup: { database: this.database },
         connections: {
           database: this.database,
-          registerSecret: (secret: string) => {
-            this.redaction.registerSecret(secret);
-          },
-          openRouterUrl,
         },
         models: {
           database: this.database,
@@ -277,7 +271,6 @@ export class RuntimeDaemon {
             this.models?.remove(modelId);
           },
           check: (modelId: string) => this.checkModel(modelId),
-          connectionOrigins: { openrouter: new URL(openRouterUrl).origin },
         },
         clients: {
           database: this.database,

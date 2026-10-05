@@ -145,8 +145,9 @@ Phase 11 Packaging + optional scale-out     🚧 4/9 (start, setup, backup, grap
 ```
 
 To try it, run `npm start` and open `http://127.0.0.1:3000`: the first screen asks for the
-workspace folder, then for a model — sign in with OpenRouter, or paste a key for OpenAI,
-Anthropic, Gemini or xAI, or use Ollama. More in [Running the harness](./PLUGINS.md#running-the-harness) and
+workspace folder, then for a model — use direct API credentials for OpenAI, Claude or Grok,
+or use Ollama. For native Codex and ChatGPT login use `npm run codex -- help`; see
+[Supported coding paths](./CODEX-CAPABILITIES.md). More in [Running the harness](./PLUGINS.md#running-the-harness) and
 [Building and running a graph](./PLUGINS.md#building-and-running-a-graph). Plugins can be
 copied into the plugins directory or, where the host allows it, installed from npm or an https
 Git repository on the Plugins page — see

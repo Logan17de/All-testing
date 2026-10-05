@@ -1,3 +1,6 @@
+> Historical implementation report. The OpenRouter sign-in described below is retired;
+> current provider behavior is documented in [CODEX-CAPABILITIES.md](./CODEX-CAPABILITIES.md).
+
 # Phase 6.6–6.11 — Endpoint profiles, model routing, streaming and usage
 
 ## Delivered scope

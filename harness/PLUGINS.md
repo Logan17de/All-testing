@@ -158,79 +158,13 @@ the runtime: installing is still not enabling, and enabling is still a file you 
 
 Agent steps need a model to call. Open **Models** (`http://127.0.0.1:3000/models`) and add one:
 
-- **Sign in (OAuth) with OpenRouter.** Choose **Sign in (OAuth)**, then **Sign in with
-  OpenRouter**. You approve the harness on openrouter.ai and come straight back; then search
-  OpenRouter's models — newest first, with quick filters for OpenAI, Anthropic, Google and xAI —
-  and pick one.
-  One sign-in reaches GPT, Claude, Gemini, Grok and many others, billed to your OpenRouter account.
-- **API key** for **OpenAI**, **Anthropic (Claude)**, **Google Gemini**, **xAI (Grok)** or
-  **OpenRouter**: pick the provider (its endpoint is filled in), type the model name, and either
-  paste the API key or name the environment variable that holds it.
-- **Ollama** or **llama.cpp** running on this machine: pick it, type the model name exactly as the
-  server knows it (for example `llama3.1:8b`), and keep **No key**. The endpoint is filled in with
-  the server's usual local address.
-- **Anything else** that speaks the OpenAI Chat Completions format: choose **Other compatible
-  API** and type the endpoint.
+- **API credentials.** Pick OpenAI, Anthropic (Claude), Gemini or xAI (Grok), set the
+  model name and use a provider API key. Prefer an environment variable to avoid storing it.
+  Local Ollama/llama.cpp endpoints need no key by default.
+- **Codex native coding agent.** Run `npm run codex -- help`. The official CLI owns login,
+  approvals, skills, tools and saved sessions. Its history is separate from Zet graph runs.
+  Claude and Grok subscription OAuth are not offered. See [capability evidence](./CODEX-CAPABILITIES.md).
 
-Saving checks the model straight away with a one-token request, and says what went wrong in plain
-words — a refused key, a wrong URL, a server that is not running. **Check** repeats it at any time.
-
-- **Where a key lives.** A pasted key is kept in this harness's own database on this machine and is
-  never returned by the API or shown again; editing a model with the key field left empty keeps it.
-  Anyone who can read the database file can read the key, exactly as with a `.env` file. If you
-  would rather it never touch the database, choose the environment variable instead — the key is
-  read at the moment a request is made — and set the variable before starting the runtime.
-- **Where a key goes.** Only to that model's endpoint, only over https or to an address on this
-  machine, and it is removed from everything the harness records.
-- **Which model a step uses.** Models belong to the harness, not to a project: connect as many as
-  you like and choose between them in a conversation, with the **Model** box beside **Answered
-  by**. Leave it on **Any model that can answer** and the runtime picks one that can call tools;
-  pick one and that conversation keeps using it. An **Agent model step** in a graph of your own
-  still uses the model named in its **Model id** setting. A model you add is available
-  immediately, without restarting the runtime.
-
-### Why only OpenRouter offers sign-in
-
-OpenAI (Codex), Anthropic (Claude Code), Google (Gemini CLI) and xAI (Grok) keep their account
-sign-ins for their own apps; they do not let another app use your subscription. Their models are
-reached here with an API key from each provider's console. OpenRouter offers a sign-in built for
-apps like this one, so it is the way to use those models without handling a key.
-
-How the sign-in works, and what it keeps:
-
-- The runtime starts the sign-in with a one-time secret only it holds (PKCE, S256) and sends you
-  to `openrouter.ai`. OpenRouter sends you back to `http://localhost:<port>/models/openrouter`
-  with a code, and the runtime trades the code and its secret for a key. A code that was not
-  started here, has expired (after ten minutes) or was already tried is refused.
-- The key is kept in this harness's database like a pasted key, named "Zet Harness" on your
-  OpenRouter account, never returned by any endpoint, and removed from everything the harness
-  records. Every model you add through the sign-in uses it, and it is sent only to OpenRouter —
-  the runtime refuses a sign-in model that points anywhere else.
-- **Sign out** removes the key from this harness; models that used it stay configured and say they
-  need the sign-in until you sign in again. The key itself stays on your OpenRouter account until
-  you delete it there.
-
-## Chatting
-
-Open **Projects**, create a project, and start a conversation in it. Under the message box,
-**Answered by** says what replies:
-
-- **Chat** — a normal conversation. The model answers each message, and can use the project's
-  goals, todos and memory when that helps.
-- **Chat with GitHub** — the same conversation with a GitHub component wired in, so the model can
-  read repositories, issues, pull requests and files.
-- **Nobody** — messages are only saved.
-
-Beside it, **Model** chooses which connected model answers this conversation — it is remembered for
-that conversation, and falls back to any available model if you later remove it.
-
-Pressing **Send** saves your message and starts the chosen workflow; the page shows "Thinking…"
-until the reply is in, with a link to watch the run. If it does not finish, the page says why in
-the same words the Models page uses — a refused key, a 404 from the endpoint, no model that could
-take the step — and the run's own page repeats it above the recorded failure. If no model is connected yet, the page says so
-and links to **Models**. **Open this workflow in the editor** shows the exact graph that answers the
-conversation — a Loop around an **Agent model step** and an **Agent tools step**, plus the
-**GitHub** component when it is used — so you can change it and run your own version.
 
 ### The GitHub component
 

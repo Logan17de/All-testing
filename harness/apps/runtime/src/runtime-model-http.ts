@@ -223,6 +223,13 @@ function saveInput(
   origins: Readonly<Partial<Record<ProviderConnectionId, string>>>,
 ): Parameters<typeof saveModelConfig>[1] {
   const credential = credentialOf(body);
+  if (body["profile"] === "openrouter" || body["credential"] === "connection") {
+    throw new DurableModelError(
+      "MODEL_CONFIG_INVALID",
+      "OpenRouter and shared OAuth connections are retired. Use direct provider credentials.",
+      "profile",
+    );
+  }
   const connection = body["connection"];
   if (
     connection !== undefined &&

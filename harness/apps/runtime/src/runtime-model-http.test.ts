@@ -207,6 +207,27 @@ describe("the models a person configures", () => {
     expect((await send("POST", "/api/models", LOCAL_MODEL)).status).toBe(409);
   });
 
+  it.each(["anthropic", "xai"] as const)(
+    "uses direct %s API credentials without a shared OAuth grant (fixture)",
+    async (profile) => {
+      const endpoint = await fakeEndpoint();
+      const { send } = await startDaemon();
+      const created = await send("POST", "/api/models", {
+        ...LOCAL_MODEL,
+        profile,
+        baseUrl: endpoint.baseUrl,
+        credential: "stored",
+        apiKey: "fixture-provider-key",
+      });
+      expect(created.status).toBe(201);
+      expect(JSON.stringify(created.body)).not.toContain("fixture-provider-key");
+      expect((await send("POST", "/api/models/local-llama/check")).body["check"]).toMatchObject({
+        ok: true,
+      });
+      expect(endpoint.authorizations).toEqual(["Bearer fixture-provider-key"]);
+    },
+  );
+
   it("calls the endpoint with the stored key when a model is checked", async () => {
     const endpoint = await fakeEndpoint();
     const { send } = await startDaemon();

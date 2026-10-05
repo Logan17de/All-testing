@@ -100,7 +100,9 @@ export class RuntimeModels {
 
   /** Register every configured model. Called once the database is open. */
   load(): readonly string[] {
-    for (const model of listModelConfigs(this.#database.connection())) this.#add(model);
+    for (const model of listModelConfigs(this.#database.connection())) {
+      if (model.profile !== "openrouter" && model.credential !== "connection") this.#add(model);
+    }
     return [...this.#registered.keys()];
   }
 
@@ -108,7 +110,8 @@ export class RuntimeModels {
   refresh(modelId: string): void {
     this.remove(modelId);
     const model = readModelConfig(this.#database.connection(), modelId);
-    if (model !== undefined) this.#add(model);
+    if (model !== undefined && model.profile !== "openrouter" && model.credential !== "connection")
+      this.#add(model);
   }
 
   /** Take a model away, so nothing new can be routed to it. */

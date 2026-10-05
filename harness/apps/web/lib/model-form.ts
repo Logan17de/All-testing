@@ -13,7 +13,6 @@ export const MODEL_PROFILES = [
   "anthropic",
   "gemini",
   "xai",
-  "openrouter",
   "ollama",
   "llama-cpp",
   "custom",
@@ -90,15 +89,6 @@ export const MODEL_PRESETS: Readonly<Record<ModelProfile, ModelPreset>> = {
     modelPlaceholder: "grok-4",
     contextWindowTokens: 256_000,
   },
-  openrouter: {
-    label: "OpenRouter",
-    hint: "One key for models from OpenAI, Anthropic, Google, xAI and more. You can also sign in instead of pasting a key.",
-    baseUrl: "https://openrouter.ai/api/v1",
-    credential: "stored",
-    credentialEnv: "OPENROUTER_API_KEY",
-    modelPlaceholder: "anthropic/claude-sonnet-4",
-    contextWindowTokens: 200_000,
-  },
   ollama: {
     label: "Ollama",
     hint: "A local Ollama server on this machine. No key needed.",
@@ -158,17 +148,6 @@ export function draftFor(profile: ModelProfile): ModelDraft {
     connection: "",
     tools: true,
     contextWindowTokens: String(preset.contextWindowTokens),
-  };
-}
-
-/** A model reached through the OpenRouter sign-in, at the address the runtime reports. */
-export function draftForSignIn(apiBaseUrl: string): ModelDraft {
-  return {
-    ...draftFor("openrouter"),
-    baseUrl: apiBaseUrl,
-    credential: "connection",
-    credentialEnv: "",
-    connection: "openrouter",
   };
 }
 
@@ -259,8 +238,8 @@ export function checkModelDraft(draft: ModelDraft, editing: boolean): ModelDraft
   if (draft.credential === "environment" && !ENV_NAME.test(env)) {
     return { ok: false, reason: "Name the environment variable that holds the key." };
   }
-  if (draft.credential === "connection" && draft.connection === "") {
-    return { ok: false, reason: "Sign in first, then pick a model." };
+  if (draft.credential === "connection") {
+    return { ok: false, reason: "This connection is retired. Choose a direct provider API key." };
   }
 
   const title = draft.title.trim();
@@ -275,7 +254,6 @@ export function checkModelDraft(draft: ModelDraft, editing: boolean): ModelDraft
       credential: draft.credential,
       ...(draft.credential === "stored" && key.length > 0 ? { apiKey: key } : {}),
       ...(draft.credential === "environment" ? { credentialEnv: env } : {}),
-      ...(draft.credential === "connection" ? { connection: draft.connection } : {}),
       tools: draft.tools,
       contextWindowTokens,
     },
@@ -286,6 +264,7 @@ export function isModelView(value: unknown): value is ModelView {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   return (
+    record["profile"] !== "openrouter" &&
     typeof record["modelId"] === "string" &&
     typeof record["baseUrl"] === "string" &&
     typeof record["credential"] === "string"

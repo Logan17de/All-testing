@@ -302,9 +302,10 @@ export class WorkspacePathResolver {
 
     // `path.resolve` collapses `..` before containment is tested, so a path
     // that climbs out and back in is judged on where it actually lands.
-    const candidate = DRIVE_PREFIX_PATTERN.test(requestedPath)
-      ? resolve(requestedPath)
-      : resolve(this.#root, requestedPath);
+    const normalizedPath = requestedPath.replace(/\\/gu, sep);
+    const candidate = DRIVE_PREFIX_PATTERN.test(normalizedPath)
+      ? resolve(normalizedPath)
+      : resolve(this.#root, normalizedPath);
 
     if (!this.#contains(candidate, this.#root)) {
       throw new WorkspacePathError(

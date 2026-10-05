@@ -79,10 +79,9 @@ The web app is a client. A long-lived lightweight Node daemon owns execution, pe
   instead of showing internal names like `harness.agent-model`.
 - **Also just finished:** first-run setup. A new harness asks for its workspace folder before
   anything else, then for a model; new projects start in that folder (migration 21).
-- **Also just finished:** API key or sign-in on the Models page. Presets for OpenAI, Anthropic
-  (Claude), Google Gemini, xAI (Grok) and OpenRouter; **Sign in with OpenRouter** (OAuth PKCE)
-  reaches all of them without a key, and its key is only ever sent to OpenRouter (migration 22).
-  Codex, Claude Code, Gemini CLI and Grok sign-ins are kept by those providers for their own apps.
+- **Provider integration update:** direct API credentials for OpenAI, Claude and Grok; OpenRouter
+  sign-in has been retired. Native Codex uses the official CLI bridge, with its own login,
+  sandbox, approvals and sessions. See [supported coding paths](./CODEX-CAPABILITIES.md).
 - **Also just finished:** more than one workspace. The overview leads with New project, Models
   and Plugins and lists every folder the harness has worked in; opening one shows its projects
   (migration 23). A conversation also chooses which connected model answers it.
