@@ -77,6 +77,8 @@ async function bridge(
     const parsed: unknown = JSON.parse(result);
     if (!parsed || typeof parsed !== "object") throw new Error("Invalid sandbox result.");
     const value = parsed as Record<string, unknown>;
+    if (typeof value["failure"] === "string" && /^[a-z-]+:-?\d{1,12}$/.test(value["failure"]))
+      throw new Error(`Windows process sandbox refused (${value["failure"]}); no host fallback.`);
     if (
       typeof value["code"] !== "number" ||
       typeof value["stdout"] !== "string" ||
@@ -94,8 +96,15 @@ async function bridge(
       stderrTruncated: false,
       durationMs: Date.now() - started,
     };
-  } catch {
+  } catch (error) {
     signal?.throwIfAborted();
+    if (
+      error instanceof Error &&
+      /^Windows process sandbox refused \([a-z-]+:-?\d{1,12}\); no host fallback\.$/.test(
+        error.message,
+      )
+    )
+      throw error;
     throw new Error("Windows process sandbox failed; no host fallback.");
   } finally {
     // A terminated host closes the JobObject. A second bridge removes its profile after cancellation.
@@ -214,7 +223,9 @@ public static class ZetProcessSandbox {
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern SafeFileHandle CreateFile(string path,uint access,uint share,IntPtr sa,uint disposition,uint flags,IntPtr template);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle file,out INFO info);
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern uint GetFinalPathNameByHandle(SafeFileHandle file,StringBuilder path,uint size,uint flags);
- static void Check(bool ok) { if(!ok) throw new InvalidOperationException("Sandbox refused."); }
+ static string phase="init"; static int nativeError;
+ public static string Failure() { return phase+":"+nativeError; }
+ static void Check(bool ok) { if(!ok) {nativeError=Marshal.GetLastWin32Error();throw new InvalidOperationException("Sandbox refused.");} }
  public static void Cleanup(string name) { DeleteAppContainerProfile(name); }
  static string Quote(string value) { Check(!value.Contains("\"") && !value.EndsWith("\\")); return "\"" + value + "\""; }
  static bool Blocked(string name) {
@@ -230,11 +241,11 @@ public static class ZetProcessSandbox {
     string[] parts=full.Substring(root.Length).Split(new char[]{'\\'},StringSplitOptions.RemoveEmptyEntries);Check(parts.Length<=128);
     for(int i=-1;i<parts.Length;i++) {
      if(i>=0) {Check(parts[i].IndexOf(':')<0);current=Path.Combine(current,parts[i]);}
-     SafeFileHandle handle=CreateFile(current,0,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero);held.Add(handle);Check(!handle.IsInvalid);
+     phase="source-directory";SafeFileHandle handle=CreateFile(current,0,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero);held.Add(handle);Check(!handle.IsInvalid);
      INFO info;Check(GetFileInformationByHandle(handle,out info));Check((info.attrs&0x400)==0 && (info.attrs&0x10)!=0);
      StringBuilder actual=new StringBuilder(32768);Check(GetFinalPathNameByHandle(handle,actual,32768,0)>0);
      string canonical=actual.ToString();if(canonical.StartsWith(@"\\?\"))canonical=canonical.Substring(4);
-     Check(String.Equals(current.TrimEnd('\\'),canonical.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase));
+     phase="directory-canonical";Check(String.Equals(current.TrimEnd('\\'),canonical.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase));
     }
    } catch {Dispose();throw;}
   }
@@ -253,11 +264,11 @@ public static class ZetProcessSandbox {
  }
  static void CopyFile(string source,string target) {
   using(Locks locked=new Locks(Path.GetDirectoryName(source))) using(SafeFileHandle handle=CreateFile(source,0x80000000,1,IntPtr.Zero,3,0x00200000,IntPtr.Zero)) {
-   Check(!handle.IsInvalid); INFO info; Check(GetFileInformationByHandle(handle,out info));
+   phase="source-file";Check(!handle.IsInvalid); INFO info; Check(GetFileInformationByHandle(handle,out info));
    Check((info.attrs&0x410)==0 && info.links==1 && info.sizeHigh==0 && info.sizeLow<=134217728);
    StringBuilder actual=new StringBuilder(32768); Check(GetFinalPathNameByHandle(handle,actual,32768,0)>0);
    string canonical=actual.ToString(); if(canonical.StartsWith(@"\\?\")) canonical=canonical.Substring(4);
-   Check(String.Equals(Path.GetFullPath(source),canonical,StringComparison.OrdinalIgnoreCase));
+   phase="file-canonical";Check(String.Equals(Path.GetFullPath(source),canonical,StringComparison.OrdinalIgnoreCase));
    bytes+=info.sizeLow; Check(bytes<=byteLimit);
    using(FileStream input=new FileStream(handle,FileAccess.Read)) using(FileStream output=new FileStream(target,FileMode.CreateNew,FileAccess.Write)) {
     byte[] buffer=new byte[65536]; long remaining=info.sizeLow; while(remaining>0) { int n=input.Read(buffer,0,(int)Math.Min(buffer.Length,remaining)); Check(n>0); output.Write(buffer,0,n); remaining-=n; } Check(input.ReadByte()==-1);
@@ -280,9 +291,9 @@ public static class ZetProcessSandbox {
   IntPtr outR=IntPtr.Zero,outW=IntPtr.Zero,errR=IntPtr.Zero,errW=IntPtr.Zero,inR=IntPtr.Zero,inW=IntPtr.Zero; PI pi=new PI();
   bool created=false; DateTime started=DateTime.UtcNow;
   try {
-   Check(CreateAppContainerProfile(profile,profile,"Temporary Zet diagnostic isolation",IntPtr.Zero,0,out sid)==0); created=true;
+   phase="profile";int profileResult=CreateAppContainerProfile(profile,profile,"Temporary Zet diagnostic isolation",IntPtr.Zero,0,out sid);if(profileResult!=0){nativeError=profileResult;throw new InvalidOperationException();} created=true;
    string workspace=Path.Combine(temporary,"workspace"),runner=Path.Combine(temporary,"runner"); Directory.CreateDirectory(workspace); Directory.CreateDirectory(runner);
-   bytes=0;entries=0;byteLimit=536870912;scanStarted=DateTime.UtcNow; string executable,args;
+   phase="snapshot";bytes=0;entries=0;byteLimit=536870912;scanStarted=DateTime.UtcNow; string executable,args;
    if(command=="node-version" || command=="probe" || command=="probe-hold") { executable=Path.Combine(runner,"node.exe"); CopyFile(node,executable); args="--version";
     if(command.StartsWith("probe")) {
      string script=Path.Combine(workspace,"probe.js");
@@ -297,17 +308,17 @@ public static class ZetProcessSandbox {
     executable=Path.Combine(runner,"cmd","git.exe"); Check(File.Exists(executable));
     args="-c core.fsmonitor=false -c core.untrackedCache=false status --porcelain=v1 --ignore-submodules=all";
    } else throw new InvalidOperationException();
-   Grant(temporary,new SecurityIdentifier(sid));
-   SA sa=new SA();sa.size=Marshal.SizeOf(typeof(SA));sa.inherit=1;
+   phase="temporary-acl";Grant(temporary,new SecurityIdentifier(sid));
+   phase="pipes";SA sa=new SA();sa.size=Marshal.SizeOf(typeof(SA));sa.inherit=1;
    Check(CreatePipe(out outR,out outW,ref sa,0));Check(SetHandleInformation(outR,1,0));
    Check(CreatePipe(out errR,out errW,ref sa,0));Check(SetHandleInformation(errR,1,0));
    Check(CreatePipe(out inR,out inW,ref sa,0));Check(SetHandleInformation(inW,1,0)); CloseHandle(inW);inW=IntPtr.Zero;
-   IntPtr size=IntPtr.Zero; InitializeProcThreadAttributeList(IntPtr.Zero,3,0,ref size); list=Marshal.AllocHGlobal(size);Check(InitializeProcThreadAttributeList(list,3,0,ref size));
+   phase="attributes";IntPtr size=IntPtr.Zero; InitializeProcThreadAttributeList(IntPtr.Zero,3,0,ref size); list=Marshal.AllocHGlobal(size);Check(InitializeProcThreadAttributeList(list,3,0,ref size));
    SC sc=new SC();sc.sid=sid; scmem=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SC)));Marshal.StructureToPtr(sc,scmem,false);
    Check(UpdateProcThreadAttribute(list,0,new IntPtr(0x20009),scmem,new IntPtr(Marshal.SizeOf(typeof(SC))),IntPtr.Zero,IntPtr.Zero));
    handles=Marshal.AllocHGlobal(3*IntPtr.Size);Marshal.WriteIntPtr(handles,0,inR);Marshal.WriteIntPtr(handles,IntPtr.Size,outW);Marshal.WriteIntPtr(handles,2*IntPtr.Size,errW);
    Check(UpdateProcThreadAttribute(list,0,new IntPtr(0x20002),handles,new IntPtr(3*IntPtr.Size),IntPtr.Zero,IntPtr.Zero));
-   job=CreateJobObject(IntPtr.Zero,null);Check(job!=IntPtr.Zero);EXT limits=new EXT();limits.limit.flags=0x2000;Check(SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf(typeof(EXT))));
+   phase="job";job=CreateJobObject(IntPtr.Zero,null);Check(job!=IntPtr.Zero);EXT limits=new EXT();limits.limit.flags=0x2000;Check(SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf(typeof(EXT))));
    // Atomic job membership prevents an orphan if the host dies between CreateProcess and assignment.
    jobmem=Marshal.AllocHGlobal(IntPtr.Size);Marshal.WriteIntPtr(jobmem,job);
    Check(UpdateProcThreadAttribute(list,0,new IntPtr(0x2000D),jobmem,new IntPtr(IntPtr.Size),IntPtr.Zero,IntPtr.Zero));
@@ -316,14 +327,14 @@ public static class ZetProcessSandbox {
    if(command.StartsWith("probe")) environment=environment.TrimEnd('\0')+"\0ZET_PROBE_OUTSIDE="+outside+"\0ZET_PROBE_PORT="+port+"\0\0";
    env=Marshal.StringToHGlobalUni(environment);
    SIX startup=new SIX();startup.si.cb=Marshal.SizeOf(typeof(SIX));startup.si.flags=0x100;startup.si.input=inR;startup.si.output=outW;startup.si.error=errW;startup.list=list;
-   Check(CreateProcess(executable,new StringBuilder(Quote(executable)+" "+args),IntPtr.Zero,IntPtr.Zero,true,0x80000|0x400|4|0x08000000,env,workspace,ref startup,out pi));
-   bool assigned;Check(IsProcessInJob(pi.process,job,out assigned) && assigned); Check(ResumeThread(pi.thread)!=0xffffffff);
+   phase="launch";Check(CreateProcess(executable,new StringBuilder(Quote(executable)+" "+args),IntPtr.Zero,IntPtr.Zero,true,0x80000|0x400|4|0x08000000,env,workspace,ref startup,out pi));
+   phase="resume";bool assigned;Check(IsProcessInJob(pi.process,job,out assigned) && assigned); Check(ResumeThread(pi.thread)!=0xffffffff);
    CloseHandle(outW);outW=IntPtr.Zero;CloseHandle(errW);errW=IntPtr.Zero;CloseHandle(inR);inR=IntPtr.Zero;
    IntPtr stdoutPipe=outR,stderrPipe=errR;outR=errR=IntPtr.Zero;
    var stdout=System.Threading.Tasks.Task.Factory.StartNew(()=>ReadPipe(stdoutPipe));var stderr=System.Threading.Tasks.Task.Factory.StartNew(()=>ReadPipe(stderrPipe));
-   bool timedOut=WaitForSingleObject(pi.process,10000)!=0; if(timedOut) Check(TerminateJobObject(job,1));
+   phase="wait";bool timedOut=WaitForSingleObject(pi.process,10000)!=0; if(timedOut) Check(TerminateJobObject(job,1));
    CloseHandle(job);job=IntPtr.Zero;Check(WaitForSingleObject(pi.process,1000)==0);
-   Check(System.Threading.Tasks.Task.WaitAll(new System.Threading.Tasks.Task[]{stdout,stderr},2000));
+   phase="output";Check(System.Threading.Tasks.Task.WaitAll(new System.Threading.Tasks.Task[]{stdout,stderr},2000));
    uint code;Check(GetExitCodeProcess(pi.process,out code));return new {code=code,stdout=stdout.Result,stderr=stderr.Result,timedOut=timedOut};
   } finally {
    if(pi.process!=IntPtr.Zero) TerminateProcess(pi.process,1);
@@ -338,6 +349,7 @@ Add-Type -TypeDefinition $source
 $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
 if ($request.mode -eq 'compile') { [Console]::Out.Write('{}'); exit 0 }
 if ($request.mode -eq 'cleanup') { [ZetProcessSandbox]::Cleanup($request.profile); [Console]::Out.Write('{}'); exit 0 }
-$result = [ZetProcessSandbox]::Run($request.temporary, $request.profile, $request.command, $request.cwd, $request.node, $request.gitRoot, $request.outside, $request.port)
+try { $result = [ZetProcessSandbox]::Run($request.temporary, $request.profile, $request.command, $request.cwd, $request.node, $request.gitRoot, $request.outside, $request.port) }
+catch { $result = @{ failure = [ZetProcessSandbox]::Failure() } }
 [Console]::Out.Write(($result | ConvertTo-Json -Compress))
 `;
