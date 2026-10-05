@@ -1,3 +1,4 @@
+import { providerAwaitingDecision } from "./runtime-provider-policy.js";
 import { resolve } from "node:path";
 import { createRequire } from "node:module";
 
@@ -625,7 +626,12 @@ export class RuntimeDaemon {
   private configuredModelIds(): ReadonlySet<string> {
     return new Set(
       listModelConfigs(this.database.connection())
-        .filter((model) => model.profile !== "openrouter" && model.credential !== "connection")
+        .filter(
+          (model) =>
+            model.profile !== "openrouter" &&
+            model.credential !== "connection" &&
+            !providerAwaitingDecision(model),
+        )
         .map((model) => model.modelId),
     );
   }

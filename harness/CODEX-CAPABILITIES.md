@@ -13,12 +13,12 @@ PHASE-6.6-6.11.md. Zet does not claim full proprietary Codex product parity.
   [Authentication](https://developers.openai.com/codex/auth) supports ChatGPT login and API keys.
   Login is an explicit user action with `--confirm-persist-login` or the page's persistent-login checkbox; the user must complete real browser consent.
   Zet never imports browser tokens or Codex credential files. The CLI owns credential persistence.
-- **Claude:** direct Anthropic API credentials, using its documented
+- **Claude (inactive pending user decision):** implemented compatibility option for separately billed Anthropic API credentials, using its documented
   [OpenAI compatibility API](https://platform.claude.com/docs/en/api/openai-sdk).
   The [Agent SDK policy](https://code.claude.com/docs/en/agent-sdk/overview) prohibits third-party
   claude.ai login/rate-limit access unless previously approved. No subscription OAuth is offered.
   Native Claude Agent SDK tools/computer use are not advertised by this compatibility adapter.
-- **Grok:** direct xAI API credentials and documented OpenAI-compatible Chat Completions.
+- **Grok (inactive pending user decision):** implemented compatibility option for separately billed xAI API credentials and documented OpenAI-compatible Chat Completions.
   [xAI docs](https://docs.x.ai/overview) document API keys and currently recommend Responses for
   new integrations. No supported third-party Grok subscription OAuth was found in the reviewed
   material. This is a documented API-key option, not a substitute subscription login.
@@ -26,6 +26,12 @@ PHASE-6.6-6.11.md. Zet does not claim full proprietary Codex product parity.
   routes return 410; new OpenRouter profiles/shared connections are rejected. Existing database
   rows and keys are retained unchanged but never registered. Historical migration schemas and
   database readers remain to preserve upgrades. Delete obsolete models/keys explicitly if wanted.
+
+The user has not approved substituting separately billed Claude/xAI API access. Their picker,
+credential creation/replacement, model registration, secret accessor and endpoint checks are
+disabled. Existing records remain untouched and removable. Official Anthropic/xAI endpoint
+URLs are also blocked under custom profiles. No credentials should be requested until the
+parent resolves this decision.
 
 ## Milestones
 
@@ -37,7 +43,7 @@ PHASE-6.6-6.11.md. Zet does not claim full proprietary Codex product parity.
 
 ## Concrete capability evidence
 
-Implementation milestones above are complete for the supported integration scope. Validation:
+First checkpoint validation (before the follow-up regression work):
 186 test files passed (1,599 tests passed, one existing skip); lint, typecheck, production build
 and both startup smoke checks passed using Node 24.20.0/npm 12.0.2. Native protocol/approval
 and provider transport tests use fixtures. A separate real installed Codex 0.160.0 app-server
@@ -84,6 +90,25 @@ satisfy an interactive escalation; switch to `chat` if approval is needed. Works
 access is disabled. Native CLI config, MCP connections and skills remain the user's trust
 boundary; the bridge does not turn untrusted third-party servers/plugins into safe tools.
 
+## Cloud login handoff (user action only)
+
+The cloud mount used by this session is not a place to import existing credential files.
+After explicitly consenting to credential persistence, the user can create a dedicated home
+outside the Git checkout and run the installed official CLI:
+
+```sh
+cd /workspace/All-testing/harness
+mkdir -m 700 -p /workspace/.zet-codex
+CODEX_HOME=/workspace/.zet-codex npm run codex -- login --confirm-persist-login --device
+CODEX_HOME=/workspace/.zet-codex npm run codex -- status
+```
+
+Complete the official URL/code consent yourself; never send the code or tokens to the harness
+or another person. Device login must be enabled for the account; otherwise use the official
+CLI browser login on a host where its callback is reachable. Start the harness with the same
+`CODEX_HOME=/workspace/.zet-codex`; `/codex` then refreshes account/session status. The home is
+private runtime state, outside Git. These steps were documented, **not executed**.
+
 ## Native Codex page
 
 Open `/codex`, or choose **Codex agent** from Overview/Models. The runtime lazily launches the
@@ -93,12 +118,16 @@ and user approval policy to every turn. Defaults are read-only; workspace-write 
 explicit selection. Native workspace network and additional writable roots are disabled.
 
 The page supports explicit ChatGPT login consent/cancellation, account/model/session refresh,
+workspace-scoped session pagination, archive/restore and native context compaction,
 start/resume/read, streamed native events, task interruption, command/file approvals,
 user-input questions, constrained MCP form elicitation and explicit HTTPS URL-mode consent.
 MCP URL acceptance acknowledges consent, not verified completion or authentication, as the
 [official MCP specification](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation) requires. Native events are polled every
 1.5 seconds with a bounded history. Command/file approvals are once only; stale requests,
-unknown response IDs and invalid answers are refused. External consent is always the user's
+unknown response IDs and invalid answers are refused. Changing workspace stops the old native
+process, rejects stale responses, clears approvals/events/thread authorization and removes the
+previous workspace content from the browser. Pending request payloads are bounded to 4 MB.
+Archived/restored sessions must be resumed before execution. External consent is always the user's
 real action; the harness does not obtain or replay browser tokens.
 
 Codex sessions remain **separate from Zet graph runs**: the `/codex` page reads the official
@@ -115,6 +144,20 @@ servers and hooks retain their native trust/authority; process sandbox rules can
 side effects performed by a remote tool service.
 
 ## Provider validation boundary
+
+Follow-up independent work implements native compact/archive/restore and workspace-scoped
+pagination, persistent per-session turn state, event gap notices, and workspace/process
+invalidation. Security fixtures cover stale child output, old write authorization, old
+approvals and the aggregate request-size bound. Claude/xAI remains inactive while its separate
+billing decision is pending. Real production browser checks confirmed the inactive picker,
+native model catalog, archive/context controls and login gating without inference or login.
+Follow-up validation: 188 test files passed, 1,612 tests passed and one existing skip;
+lint, typecheck, build, both startup checks and isolated installed Codex protocol check passed.
+
+Remaining boundaries: authenticated coding/approval/resume/compaction behavior needs user
+consent and a live account check. Permission-profile grants, dynamic client tools, external
+token refresh, attestation, complex MCP forms and proprietary hosted/desktop capabilities
+remain unsupported and fail closed; these are explicit gaps rather than parity claims.
 
 No new credentials or OAuth grants were created during development. Live inference requires
 user-approved credentials, provider billing/access and a writable official credential/session

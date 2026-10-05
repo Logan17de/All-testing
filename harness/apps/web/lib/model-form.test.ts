@@ -37,6 +37,23 @@ describe("starting a model from a preset", () => {
 });
 
 describe("what the Models page sends", () => {
+  it.each(["anthropic", "xai"] as const)(
+    "does not request a credential for inactive %s",
+    (profile) => {
+      expect(checkModelDraft({ ...draftFor(profile), apiKey: "fixture-key" }, false)).toMatchObject(
+        { ok: false },
+      );
+    },
+  );
+  it("blocks an inactive official endpoint under a custom profile", () => {
+    expect(
+      checkModelDraft(
+        { ...draftFor("custom"), baseUrl: "https://api.x.ai/v1", apiKey: "fixture-key" },
+        false,
+      ),
+    ).toMatchObject({ ok: false });
+  });
+
   it("sends a local model with no key", () => {
     expect(checkModelDraft(draft({}), false)).toEqual({
       ok: true,

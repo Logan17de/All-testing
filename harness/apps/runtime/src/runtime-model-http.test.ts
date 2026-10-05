@@ -1,8 +1,15 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { SQLITE_MEMORY_PATH } from "@zet-harness/db";
+import {
+  DURABLE_MODEL_CONFIGS_MIGRATION,
+  DURABLE_MODEL_CONNECTIONS_MIGRATION,
+  readModelApiKey,
+  saveModelConfig,
+} from "@zet-harness/db/durable-model-records";
+import { SqliteDatabase, runSqliteMigrations, SQLITE_MEMORY_PATH } from "@zet-harness/db";
 
+import { RuntimeModels } from "./runtime-models.js";
 import { RuntimeDaemon } from "./runtime-daemon.js";
 
 const daemons: RuntimeDaemon[] = [];
@@ -208,7 +215,7 @@ describe("the models a person configures", () => {
   });
 
   it.each(["anthropic", "xai"] as const)(
-    "uses direct %s API credentials without a shared OAuth grant (fixture)",
+    "keeps %s inactive without storing credentials or calling the endpoint",
     async (profile) => {
       const endpoint = await fakeEndpoint();
       const { send } = await startDaemon();
@@ -219,14 +226,62 @@ describe("the models a person configures", () => {
         credential: "stored",
         apiKey: "fixture-provider-key",
       });
-      expect(created.status).toBe(201);
+      expect(created.status).toBe(400);
       expect(JSON.stringify(created.body)).not.toContain("fixture-provider-key");
-      expect((await send("POST", "/api/models/local-llama/check")).body["check"]).toMatchObject({
-        ok: true,
-      });
-      expect(endpoint.authorizations).toEqual(["Bearer fixture-provider-key"]);
+      expect((await send("GET", "/api/models")).body["models"]).toEqual([]);
+      expect(endpoint.authorizations).toEqual([]);
     },
   );
+
+  it.each(["https://api.anthropic.com/v1", "https://api.x.ai/v1"])(
+    "rejects pending provider endpoint %s under a custom profile",
+    async (baseUrl) => {
+      const { send } = await startDaemon();
+      expect(
+        (
+          await send("POST", "/api/models", {
+            ...LOCAL_MODEL,
+            profile: "custom",
+            baseUrl,
+            credential: "environment",
+            credentialEnv: "UNSET_FIXTURE_KEY",
+          })
+        ).status,
+      ).toBe(400);
+    },
+  );
+
+  it("preserves existing inactive records but exposes no secrets or routed adapters", () => {
+    const database = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
+    database.open();
+    try {
+      runSqliteMigrations(database.connection(), [
+        DURABLE_MODEL_CONFIGS_MIGRATION,
+        DURABLE_MODEL_CONNECTIONS_MIGRATION,
+      ]);
+      saveModelConfig(database.connection(), {
+        ...LOCAL_MODEL,
+        profile: "anthropic",
+        credential: "stored",
+        apiKey: "fixture-private-key",
+        nowMs: 1,
+      });
+      const models = new RuntimeModels({
+        database,
+        register: () => {
+          throw new Error("Inactive provider registered");
+        },
+      });
+      expect(models.load()).toEqual([]);
+      models.refresh(LOCAL_MODEL.modelId);
+      expect(models.secretsFor(LOCAL_MODEL.modelId)).toBeUndefined();
+      expect(readModelApiKey(database.connection(), LOCAL_MODEL.modelId)).toBe(
+        "fixture-private-key",
+      );
+    } finally {
+      database.close();
+    }
+  });
 
   it("calls the endpoint with the stored key when a model is checked", async () => {
     const endpoint = await fakeEndpoint();

@@ -194,7 +194,29 @@ const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
  * `editing` means the model already exists: an empty key field then keeps the key
  * that is stored rather than asking for it again.
  */
+export function modelAwaitingDecision(model: {
+  readonly profile?: unknown;
+  readonly baseUrl?: unknown;
+}): boolean {
+  if (model.profile === "anthropic" || model.profile === "xai") return true;
+  if (typeof model.baseUrl !== "string") return false;
+  try {
+    const host = new URL(model.baseUrl).hostname.toLowerCase();
+    return ["anthropic.com", "x.ai"].some(
+      (domain) => host === domain || host.endsWith(`.${domain}`),
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function checkModelDraft(draft: ModelDraft, editing: boolean): ModelDraftCheck {
+  if (modelAwaitingDecision(draft)) {
+    return {
+      ok: false,
+      reason: "Claude/xAI API integration is inactive pending your billing decision.",
+    };
+  }
   const modelId = draft.modelId.trim();
   if (!MODEL_ID.test(modelId)) {
     return {

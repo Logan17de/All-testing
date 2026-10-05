@@ -3,12 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { workspaceRequest } from "../../lib/workspace-client";
 import { CodexRequest } from "./codex-request";
-import { eventView, turnProgress } from "./codex-event-view";
+import { eventView, mergeNativeEvents, updateTurnStates, type TurnState } from "./codex-event-view";
 
 type RecordValue = Record<string, unknown>;
 type Event = { sequence: number; method: string; params: unknown };
 type Approval = { id: string | number; method: string; params: unknown };
-type Status = { available: boolean; events: Event[]; pendingApprovals: Approval[]; cursor: number };
+type Status = {
+  scopeGeneration: number;
+  available: boolean;
+  events: Event[];
+  pendingApprovals: Approval[];
+  cursor: number;
+};
 const record = (value: unknown): RecordValue =>
   value !== null && typeof value === "object" ? (value as RecordValue) : {};
 const string = (value: unknown): string => (typeof value === "string" ? value : "");
@@ -28,7 +34,11 @@ export function CodexWorkspace() {
   const [model, setModel] = useState("");
   const [sandbox, setSandbox] = useState("read-only");
   const [threadId, setThreadId] = useState("");
-  const [turnId, setTurnId] = useState("");
+  const [turns, setTurns] = useState<Record<string, TurnState>>({});
+  const [pollError, setPollError] = useState("");
+  const [historyNotice, setHistoryNotice] = useState("");
+  const [archived, setArchived] = useState(false);
+  const [nextCursor, setNextCursor] = useState("");
   const [transcript, setTranscript] = useState<unknown>(null);
   const [prompt, setPrompt] = useState("");
   const [account, setAccount] = useState("Account status has not been checked.");
@@ -38,9 +48,15 @@ export function CodexWorkspace() {
   const [loginConsent, setLoginConsent] = useState(false);
   const [login, setLogin] = useState<{ id: string; url: string } | null>(null);
   const cursor = useRef(0);
+  const scopeGeneration = useRef<number | null>(null);
 
   const action = useCallback(async (name: string, params: RecordValue = {}) => {
+    const expectedScope = scopeGeneration.current;
     const response = await workspaceRequest<{ result: unknown }>("codex", { action: name, params });
+    if (expectedScope !== scopeGeneration.current)
+      throw new Error(
+        "The workspace changed while this request was running. Select a session in the current workspace.",
+      );
     if (!response.ok) throw new Error(response.reason);
     return response.data.result;
   }, []);
@@ -52,10 +68,48 @@ export function CodexWorkspace() {
       const result = await workspaceRequest<Status>(`codex?since=${cursor.current}`);
       if (disposed) return;
       if (result.ok) {
+        const scopeChanged =
+          scopeGeneration.current !== null &&
+          result.data.scopeGeneration !== scopeGeneration.current;
+        scopeGeneration.current = result.data.scopeGeneration;
+        if (scopeChanged) {
+          setModels([]);
+          setThreads([]);
+          setModel("");
+          setSandbox("read-only");
+          setThreadId("");
+          setTranscript(null);
+          setPrompt("");
+          setAccount("Workspace changed. Refresh account and sessions.");
+          setLogin(null);
+          setLoginConsent(false);
+          setResponding(null);
+          setArchived(false);
+          setNextCursor("");
+          setError("");
+        }
         setStatus(result.data);
+        const reset = scopeChanged || result.data.cursor < cursor.current;
+        const first = result.data.events[0]?.sequence;
+        if (scopeChanged)
+          setHistoryNotice("Workspace changed. Previous workspace content has been cleared.");
+        else if (reset)
+          setHistoryNotice(
+            "The runtime restarted. Read the saved transcript to recover earlier history.",
+          );
+        else if (first !== undefined && first > cursor.current + 1)
+          setHistoryNotice(
+            "Some events have expired from the runtime buffer. Read the saved transcript for full history.",
+          );
         cursor.current = result.data.cursor;
-        setEvents((previous) => [...previous, ...result.data.events].slice(-200));
-      } else setError(result.reason);
+        setEvents((previous) => mergeNativeEvents(previous, result.data.events, reset));
+        setTurns((previous) =>
+          reset
+            ? updateTurnStates({}, result.data.events)
+            : updateTurnStates(previous, result.data.events),
+        );
+        setPollError("");
+      } else setPollError(result.reason);
       timer = setTimeout(() => {
         void poll();
       }, 1500);
@@ -79,10 +133,26 @@ export function CodexWorkspace() {
     }
   }
 
+  async function loadSessions(showArchived: boolean, pageCursor?: string) {
+    const result = record(
+      await action("thread/list", {
+        archived: showArchived,
+        ...(pageCursor ? { cursor: pageCursor } : {}),
+      }),
+    );
+    const data = (Array.isArray(result.data) ? result.data : []).map(record);
+    setThreads((previous) =>
+      pageCursor
+        ? [...new Map([...previous, ...data].map((item) => [string(item.id), item])).values()]
+        : data,
+    );
+    setNextCursor(string(result.nextCursor));
+  }
+
   async function refresh() {
     const [modelResult, threadResult, accountResult] = await Promise.all([
       action("model/list"),
-      action("thread/list"),
+      action("thread/list", { archived }),
       action("account/read"),
     ]);
     setModels(
@@ -96,6 +166,7 @@ export function CodexWorkspace() {
         : []
       ).map(record),
     );
+    setNextCursor(string(record(threadResult).nextCursor));
     const value = record(accountResult);
     const kind = string(record(value.account).type);
     if (kind) {
@@ -119,8 +190,19 @@ export function CodexWorkspace() {
     );
     const thread = record(result.thread);
     setThreadId(string(thread.id));
-    setTurnId("");
+    restoreTurn(thread);
     setTranscript(thread);
+  }
+
+  function restoreTurn(thread: RecordValue) {
+    const last = Array.isArray(thread.turns) ? record(thread.turns.at(-1)) : {};
+    const id = string(last.id);
+    const currentThread = string(thread.id);
+    if (id && currentThread)
+      setTurns((previous) => ({
+        ...previous,
+        [currentThread]: { id, status: string(last.status) || "completed" },
+      }));
   }
 
   async function respond(approval: Approval, decision: "accept" | "decline") {
@@ -144,7 +226,19 @@ export function CodexWorkspace() {
     }
   }
 
-  const progress = turnProgress(events, threadId, turnId);
+  const turnId = turns[threadId]?.id || "";
+  const turnStatus = turns[threadId]?.status;
+  const progress = {
+    active: turnStatus === "inProgress" || turnStatus === "interruptRequested",
+    label:
+      turnStatus === "interruptRequested"
+        ? "Interrupt requested. Waiting for Codex to stop."
+        : turnStatus === "inProgress"
+          ? "Codex is working. Tool output and approvals appear below."
+          : turnStatus
+            ? `Task ${turnStatus}.`
+            : "Ready for a task.",
+  };
 
   return (
     <>
@@ -221,6 +315,11 @@ export function CodexWorkspace() {
           installed Codex version and its MCP configuration.
         </p>
       </section>
+      {pollError ? (
+        <p role="alert" className="panel panel--warn">
+          {pollError} Live task status may be stale.
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="panel panel--warn">
           {error}
@@ -258,10 +357,10 @@ export function CodexWorkspace() {
           <label>
             Saved session{" "}
             <select
+              disabled={busy}
               value={threadId}
               onChange={(event) => {
                 setThreadId(event.target.value);
-                setTurnId("");
                 setTranscript(null);
               }}
             >
@@ -276,8 +375,33 @@ export function CodexWorkspace() {
               ))}
             </select>
           </label>{" "}
+          <label>
+            <input
+              type="checkbox"
+              checked={archived}
+              disabled={busy}
+              onChange={(event) => {
+                const value = event.target.checked;
+                setArchived(value);
+                setThreadId("");
+                setTranscript(null);
+                void run(() => loadSessions(value));
+              }}
+            />{" "}
+            Browse archived sessions
+          </label>{" "}
+          {nextCursor ? (
+            <button
+              disabled={busy}
+              onClick={() => {
+                void run(() => loadSessions(archived, nextCursor));
+              }}
+            >
+              Load more sessions
+            </button>
+          ) : null}{" "}
           <button
-            disabled={busy || !threadId}
+            disabled={busy || archived || !threadId}
             onClick={() => {
               void run(() => selectThread("thread/resume"));
             }}
@@ -288,11 +412,42 @@ export function CodexWorkspace() {
             disabled={busy || !threadId}
             onClick={() => {
               void run(async () => {
-                setTranscript(await action("thread/read", { threadId }));
+                const result = await action("thread/read", { threadId });
+                restoreTurn(record(record(result).thread));
+                setTranscript(result);
               });
             }}
           >
             Read transcript
+          </button>{" "}
+          <button
+            disabled={busy || archived || !threadId || progress.active}
+            onClick={() => {
+              void run(async () => {
+                await action("thread/resume", { threadId, sandbox, ...(model ? { model } : {}) });
+                await action("thread/compact/start", { threadId });
+                setHistoryNotice(
+                  "Context compaction requested. Follow native agent events for completion.",
+                );
+              });
+            }}
+          >
+            Compact context
+          </button>{" "}
+          <button
+            disabled={busy || !threadId || progress.active}
+            onClick={() => {
+              void run(async () => {
+                if (!archived)
+                  await action("thread/resume", { threadId, sandbox, ...(model ? { model } : {}) });
+                await action(archived ? "thread/unarchive" : "thread/archive", { threadId });
+                setThreadId("");
+                setTranscript(null);
+                await loadSessions(archived);
+              });
+            }}
+          >
+            {archived ? "Restore session" : "Archive session"}
           </button>
         </p>
         <form
@@ -308,7 +463,11 @@ export function CodexWorkspace() {
                   ...(model ? { model } : {}),
                 }),
               );
-              setTurnId(string(record(result.turn).id));
+              const turn = record(result.turn);
+              setTurns((previous) => ({
+                ...previous,
+                [threadId]: { id: string(turn.id), status: string(turn.status) || "inProgress" },
+              }));
               setPrompt("");
             });
           }}
@@ -324,7 +483,7 @@ export function CodexWorkspace() {
             required
           />
           <p role="status">{progress.label}</p>
-          <button disabled={busy || progress.active || !threadId || !prompt.trim()}>
+          <button disabled={busy || archived || progress.active || !threadId || !prompt.trim()}>
             Send task
           </button>{" "}
           <button
@@ -332,8 +491,21 @@ export function CodexWorkspace() {
             disabled={busy || !threadId || !progress.active}
             onClick={() => {
               void run(async () => {
-                await action("turn/interrupt", { threadId, turnId });
-                setTurnId("");
+                setTurns((previous) => ({
+                  ...previous,
+                  [threadId]: { id: turnId, status: "interruptRequested" },
+                }));
+                try {
+                  await action("turn/interrupt", { threadId, turnId });
+                } catch (cause) {
+                  setTurns((previous) =>
+                    previous[threadId]?.id === turnId &&
+                    previous[threadId]?.status === "interruptRequested"
+                      ? { ...previous, [threadId]: { id: turnId, status: "inProgress" } }
+                      : previous,
+                  );
+                  throw cause;
+                }
               });
             }}
           >
@@ -353,7 +525,7 @@ export function CodexWorkspace() {
           <p>No pending approvals.</p>
         ) : (
           status.pendingApprovals.map((approval) => (
-            <div className="card" key={approval.id}>
+            <div className="card" key={`${status.scopeGeneration}:${String(approval.id)}`}>
               <p>{approval.method}</p>
               <p>
                 Session:{" "}
@@ -421,6 +593,7 @@ export function CodexWorkspace() {
           Polled every 1.5 seconds; latest 200 events. Events may include generated text and tool
           output.
         </p>
+        {historyNotice ? <p role="status">{historyNotice}</p> : null}
         {events.length ? (
           events.map((event) => (
             <details key={event.sequence} open={event.method.includes("delta")}>

@@ -1,3 +1,4 @@
+import { providerAwaitingDecision } from "./runtime-provider-policy.js";
 import { createNodeSecretAccessor } from "@zet-harness/core";
 import type { SqliteDatabase } from "@zet-harness/db";
 import {
@@ -101,7 +102,12 @@ export class RuntimeModels {
   /** Register every configured model. Called once the database is open. */
   load(): readonly string[] {
     for (const model of listModelConfigs(this.#database.connection())) {
-      if (model.profile !== "openrouter" && model.credential !== "connection") this.#add(model);
+      if (
+        model.profile !== "openrouter" &&
+        model.credential !== "connection" &&
+        !providerAwaitingDecision(model)
+      )
+        this.#add(model);
     }
     return [...this.#registered.keys()];
   }
@@ -110,7 +116,12 @@ export class RuntimeModels {
   refresh(modelId: string): void {
     this.remove(modelId);
     const model = readModelConfig(this.#database.connection(), modelId);
-    if (model !== undefined && model.profile !== "openrouter" && model.credential !== "connection")
+    if (
+      model !== undefined &&
+      model.profile !== "openrouter" &&
+      model.credential !== "connection" &&
+      !providerAwaitingDecision(model)
+    )
       this.#add(model);
   }
 
@@ -135,7 +146,8 @@ export class RuntimeModels {
    */
   secretsFor(modelId: string): NodeSecretAccessor | undefined {
     const model = readModelConfig(this.#database.connection(), modelId);
-    if (model === undefined || model.credential === "none") return undefined;
+    if (model === undefined || model.credential === "none" || providerAwaitingDecision(model))
+      return undefined;
     return createNodeSecretAccessor(
       [{ port: MODEL_CREDENTIAL_PORT, secretRef: `model:${modelId}` }],
       {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { eventView, turnProgress } from "./codex-event-view";
+import { eventView, turnProgress, mergeNativeEvents, updateTurnStates } from "./codex-event-view";
 
 describe("native Codex event views", () => {
   it("displays streamed text without exposing protocol details in the label", () => {
@@ -35,5 +35,30 @@ describe("native Codex event views", () => {
         "turn",
       ),
     ).toEqual({ active: false, label: "Task interrupted." });
+  });
+});
+
+describe("native polling continuity", () => {
+  it("deduplicates and sorts overlapping responses, and drops pre-restart history", () => {
+    const event = (sequence: number) => ({ sequence, method: "test", params: {} });
+    expect(
+      mergeNativeEvents([event(2), event(1)], [event(2), event(3)]).map((item) => item.sequence),
+    ).toEqual([1, 2, 3]);
+    expect(mergeNativeEvents([event(100)], [event(1)], true).map((item) => item.sequence)).toEqual([
+      1,
+    ]);
+  });
+  it("retains terminal turn status when rolling event history expires", () => {
+    const terminal = {
+      sequence: 1,
+      method: "turn/completed",
+      params: { threadId: "thread", turn: { id: "turn", status: "interrupted" } },
+    };
+    const states = updateTurnStates({}, [terminal]);
+    expect(
+      updateTurnStates(states, [
+        { sequence: 205, method: "item/agentMessage/delta", params: { delta: "another session" } },
+      ]).thread,
+    ).toEqual({ id: "turn", status: "interrupted" });
   });
 });

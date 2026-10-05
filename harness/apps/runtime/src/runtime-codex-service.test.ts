@@ -10,6 +10,18 @@ function service(timeoutMs = 1000) {
   });
 }
 describe("official Codex JSONL service (fixture only; no provider calls)", () => {
+  it("defers workspace getters until the database-backed runtime is ready", () => {
+    let ready = false;
+    const codex = new RuntimeCodexService({
+      get cwd() {
+        if (!ready) throw new Error("Database not open.");
+        return process.cwd();
+      },
+    });
+    ready = true;
+    expect(codex.snapshot()).toMatchObject({ available: false, scopeGeneration: 0 });
+    codex.close();
+  });
   it("initializes, enforces safe sandbox, tracks notifications and approval response", async () => {
     const codex = service();
     try {
@@ -76,6 +88,42 @@ describe("official Codex JSONL service (fixture only; no provider calls)", () =>
       codex.close();
     }
     await expect(codex.action("account/read")).rejects.toThrow();
+  });
+  it("compacts only safely loaded threads and archives without preserving execution authorization", async () => {
+    const codex = service();
+    try {
+      for (const action of ["thread/compact/start", "thread/archive"]) {
+        await expect(codex.action(action, { threadId: "t" })).rejects.toThrow("Resume or start");
+      }
+      await codex.action("thread/resume", { threadId: "t" });
+      expect(
+        await codex.action("thread/compact/start", { threadId: "t", cwd: "/", model: "safe" }),
+      ).toMatchObject({ method: "thread/compact/start", params: { threadId: "t" } });
+      expect(await codex.action("thread/archive", { threadId: "t" })).toMatchObject({
+        method: "thread/archive",
+        params: { threadId: "t" },
+      });
+      await expect(codex.action("turn/start", { threadId: "t", text: "hello" })).rejects.toThrow(
+        "Resume or start",
+      );
+      expect(await codex.action("thread/unarchive", { threadId: "t" })).toMatchObject({
+        method: "thread/unarchive",
+        params: { threadId: "t" },
+      });
+      await expect(codex.action("thread/compact/start", { threadId: "t" })).rejects.toThrow(
+        "Resume or start",
+      );
+      expect(await codex.action("thread/list", { archived: true, cursor: "opaque" })).toMatchObject(
+        { params: { archived: true, cursor: "opaque", limit: 50, cwd: process.cwd() } },
+      );
+      await expect(codex.action("thread/list", { archived: "true" })).rejects.toThrow();
+      await expect(
+        codex.action("thread/unarchive", { threadId: "x".repeat(513) }),
+      ).rejects.toThrow();
+      await expect(codex.action("thread/unarchive", { threadId: "t\0" })).rejects.toThrow();
+    } finally {
+      codex.close();
+    }
   });
   it("expires resolved approvals and refuses duplicate request identifiers", async () => {
     const make = (duplicate: boolean) =>

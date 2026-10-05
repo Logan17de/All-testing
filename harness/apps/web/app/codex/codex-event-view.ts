@@ -44,3 +44,35 @@ export function turnProgress(
   }
   return { active: true, label: "Codex is working. Tool output and approvals appear below." };
 }
+
+/** Server restarts reset the sequence; drop stale history rather than mixing transports. */
+export function mergeNativeEvents(
+  previous: readonly NativeEvent[],
+  incoming: readonly NativeEvent[],
+  reset = false,
+): NativeEvent[] {
+  const merged = new Map<number, NativeEvent>();
+  for (const event of [...(reset ? [] : previous), ...incoming]) merged.set(event.sequence, event);
+  return [...merged.values()].sort((left, right) => left.sequence - right.sequence).slice(-200);
+}
+
+export type TurnState = { id: string; status: string };
+export function updateTurnStates(
+  previous: Readonly<Record<string, TurnState>>,
+  events: readonly NativeEvent[],
+): Record<string, TurnState> {
+  const result = { ...previous };
+  for (const event of events) {
+    if (event.method !== "turn/started" && event.method !== "turn/completed") continue;
+    const params = object(event.params);
+    const turn = object(params.turn);
+    const threadId = text(params.threadId);
+    const id = text(turn.id);
+    if (threadId && id)
+      result[threadId] = {
+        id,
+        status: text(turn.status) || (event.method === "turn/started" ? "inProgress" : "completed"),
+      };
+  }
+  return result;
+}

@@ -29,8 +29,20 @@ export function createConnectionHttpHandler() {
             method: "official-cli",
             login: "npm run codex -- login --confirm-persist-login",
           },
-          { provider: "anthropic", method: "api-key", subscriptionOAuth: false },
-          { provider: "xai", method: "api-key", subscriptionOAuth: false },
+          {
+            provider: "anthropic",
+            method: "api-key",
+            active: false,
+            pendingDecision: true,
+            subscriptionOAuth: false,
+          },
+          {
+            provider: "xai",
+            method: "api-key",
+            active: false,
+            pendingDecision: true,
+            subscriptionOAuth: false,
+          },
         ],
       });
     } else {

@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 
 import {
+  modelAwaitingDecision,
   MODEL_PRESETS,
   MODEL_PROFILES,
   checkModelDraft,
@@ -179,7 +180,10 @@ export function ModelsWorkspace({
         <div className="cards">
           {models.map((model) => {
             const state = checks[model.modelId];
-            const badge = credentialBadge(model);
+            const inactive = modelAwaitingDecision(model);
+            const badge = inactive
+              ? { text: "Inactive: billing decision pending", on: false }
+              : credentialBadge(model);
             return (
               <article className="card" key={model.modelId} aria-label={`Model ${model.title}`}>
                 <header className="cardHead">
@@ -239,7 +243,7 @@ export function ModelsWorkspace({
                     <button
                       type="button"
                       className="btn btn--primary"
-                      disabled={state?.busy === true}
+                      disabled={inactive || state?.busy === true}
                       onClick={() => {
                         void check(model.modelId);
                       }}
@@ -249,6 +253,7 @@ export function ModelsWorkspace({
                     <button
                       type="button"
                       className="btn"
+                      disabled={inactive}
                       onClick={() => {
                         setError(null);
                         setEditing(model.modelId);
@@ -304,7 +309,9 @@ export function ModelsWorkspace({
           >
             <>
               <div className="btnRow" role="group" aria-label="Kind of endpoint">
-                {MODEL_PROFILES.map((profile) => (
+                {MODEL_PROFILES.filter(
+                  (profile) => profile !== "anthropic" && profile !== "xai",
+                ).map((profile) => (
                   <button
                     key={profile}
                     type="button"

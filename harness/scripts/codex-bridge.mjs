@@ -23,7 +23,7 @@ are subject to the installed CLI, account, platform and configuration.
 Login may persist credentials in Codex's own credential store. Run login yourself,
 only after choosing --confirm-persist-login, and complete the real consent flow.
 This bridge never reads, copies or prints credential files. Claude/Grok subscription
-OAuth is unavailable; connect their supported API keys on Zet's Models page.
+OAuth is unavailable. Separately billed API integration awaits your decision.
 `;
 
 export function bridgeArgs(argv, cwd = process.cwd()) {

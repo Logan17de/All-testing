@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { resolve } from "node:path";
 
 export type CodexDecision = "accept" | "decline" | "cancel";
 export interface CodexEvent {
@@ -169,6 +170,8 @@ const fail = () => new Error("Codex app-server unavailable or protocol request f
 /** Official app-server JSONL transport. No credentials are read, returned, or persisted here. */
 export class RuntimeCodexService extends EventEmitter {
   readonly #options: CodexServiceOptions;
+  #scope = "";
+  #scopeGeneration = 0;
   #child: ChildProcessWithoutNullStreams | undefined;
   #ready: Promise<void> | undefined;
   #buffer = "";
@@ -183,9 +186,23 @@ export class RuntimeCodexService extends EventEmitter {
     super();
     this.#options = options;
   }
+  #syncScope(): void {
+    const scope = resolve(this.#options.cwd);
+    if (!this.#scope) {
+      this.#scope = scope;
+      return;
+    }
+    if (scope === this.#scope) return;
+    this.#stop();
+    this.#events = [];
+    this.#scope = scope;
+    this.#scopeGeneration += 1;
+  }
   snapshot(since = 0) {
+    this.#syncScope();
     return {
       available: this.#child !== undefined,
+      scopeGeneration: this.#scopeGeneration,
       cursor: this.#sequence,
       events: this.#events.filter((event) => event.sequence > since),
       pendingApprovals: [...this.#approvals.values()],
@@ -198,12 +215,14 @@ export class RuntimeCodexService extends EventEmitter {
       const child =
         this.#options.spawnProcess?.() ??
         spawn(this.#options.command ?? "codex", this.#options.args ?? ["app-server", "--stdio"], {
-          cwd: this.#options.cwd,
+          cwd: this.#scope,
           stdio: "pipe",
         });
       this.#child = child;
       child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => this.#consume(chunk));
+      child.stdout.on("data", (chunk: string) => {
+        if (this.#child === child) this.#consume(chunk);
+      });
       child.stderr.resume(); // Private provider diagnostics must never enter API responses or logs.
       child.on("error", () => {
         if (this.#child === child) this.#stop();
@@ -217,17 +236,19 @@ export class RuntimeCodexService extends EventEmitter {
       });
       this.#write({ method: "initialized" });
     })();
+    const startup = this.#ready;
     try {
-      await this.#ready;
+      await startup;
     } catch {
-      this.#stop();
+      if (this.#ready === startup) this.#stop();
       throw fail();
     }
   }
   #write(value: unknown): void {
     if (!this.#child || this.#child.stdin.destroyed) throw fail();
-    this.#child.stdin.write(`${JSON.stringify(value)}\n`, (error) => {
-      if (error) this.#stop();
+    const child = this.#child;
+    child.stdin.write(`${JSON.stringify(value)}\n`, (error) => {
+      if (error && this.#child === child) this.#stop();
     });
   }
   #request(method: string, params: unknown): Promise<unknown> {
@@ -278,7 +299,16 @@ export class RuntimeCodexService extends EventEmitter {
             this.#stop();
             return;
           }
-          if (APPROVAL_METHODS.has(method) && this.#approvals.size < 100)
+          if (
+            APPROVAL_METHODS.has(method) &&
+            this.#approvals.size < 100 &&
+            Buffer.byteLength(
+              JSON.stringify([
+                ...this.#approvals.values(),
+                { id, method, params: message["params"] },
+              ]),
+            ) <= 4_000_000
+          )
             this.#approvals.set(id, { id, method, params: message["params"] });
           else
             this.#write({
@@ -320,6 +350,7 @@ export class RuntimeCodexService extends EventEmitter {
     }
   }
   async action(action: string, params: Record<string, unknown> = {}): Promise<unknown> {
+    this.#syncScope();
     if (action === "user-input/respond" || action === "elicitation/respond") {
       const id = params["id"];
       const pending =
@@ -419,7 +450,8 @@ export class RuntimeCodexService extends EventEmitter {
     }
     const string = (key: string) => {
       const value = params[key];
-      if (typeof value !== "string" || !value || value.length > 100_000)
+      const maxLength = key === "text" ? 100_000 : key === "cursor" ? 16_384 : 512;
+      if (typeof value !== "string" || !value || value.length > maxLength || value.includes("\0"))
         throw new Error(`Invalid ${key}.`);
       return value;
     };
@@ -440,7 +472,7 @@ export class RuntimeCodexService extends EventEmitter {
     if (sandbox !== "read-only" && sandbox !== "workspace-write")
       throw new Error("Unsupported sandbox.");
     const policy = {
-      cwd: this.#options.cwd,
+      cwd: this.#scope,
       sandbox,
       approvalPolicy: "on-request",
       approvalsReviewer: "user",
@@ -469,7 +501,23 @@ export class RuntimeCodexService extends EventEmitter {
         args = {};
         break;
       case "thread/list":
-        args = { limit: 50 };
+        if (params["archived"] !== undefined && typeof params["archived"] !== "boolean")
+          throw new Error("Invalid archived filter.");
+        args = {
+          limit: 50,
+          cwd: this.#scope,
+          ...(params["archived"] !== undefined ? { archived: params["archived"] } : {}),
+          ...(params["cursor"] !== undefined ? { cursor: string("cursor") } : {}),
+        };
+        break;
+      case "thread/compact/start":
+      case "thread/archive":
+        if (!this.#threads.has(string("threadId")))
+          throw new Error("Resume or start this thread before modifying it.");
+        args = { threadId: string("threadId") };
+        break;
+      case "thread/unarchive":
+        args = { threadId: string("threadId") };
         break;
       case "thread/start":
         args = {
@@ -491,7 +539,7 @@ export class RuntimeCodexService extends EventEmitter {
         if (!this.#threads.has(string("threadId")))
           throw new Error("Resume or start this thread before sending a turn.");
         args = {
-          cwd: this.#options.cwd,
+          cwd: this.#scope,
           approvalPolicy: "on-request",
           approvalsReviewer: "user",
           sandboxPolicy:
@@ -499,7 +547,7 @@ export class RuntimeCodexService extends EventEmitter {
               ? { type: "readOnly", networkAccess: false }
               : {
                   type: "workspaceWrite",
-                  writableRoots: [this.#options.cwd],
+                  writableRoots: [this.#scope],
                   networkAccess: false,
                   excludeTmpdirEnvVar: true,
                   excludeSlashTmp: true,
@@ -522,6 +570,14 @@ export class RuntimeCodexService extends EventEmitter {
       if (typeof thread?.id !== "string") throw fail();
       if (this.#threads.size >= 1000 && !this.#threads.has(thread.id)) throw fail();
       this.#threads.set(thread.id, sandbox);
+    }
+    if (action === "thread/archive") {
+      const threadId = string("threadId");
+      this.#threads.delete(threadId);
+      for (const [id, approval] of this.#approvals) {
+        if (object(approval.params) && approval.params.threadId === threadId)
+          this.#approvals.delete(id);
+      }
     }
     return result;
   }

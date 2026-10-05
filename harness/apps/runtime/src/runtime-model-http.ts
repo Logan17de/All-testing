@@ -1,3 +1,4 @@
+import { providerAwaitingDecision } from "./runtime-provider-policy.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { SqliteDatabase } from "@zet-harness/db";
@@ -199,6 +200,12 @@ function checkConnectionOrigin(
   body: Record<string, unknown>,
   origins: Readonly<Partial<Record<ProviderConnectionId, string>>>,
 ): void {
+  if (providerAwaitingDecision(body)) {
+    throw invalidRequest(
+      "Claude/xAI API integration is inactive pending your billing decision. No credential is stored.",
+      "profile",
+    );
+  }
   const connection = body["connection"];
   if (body["credential"] !== "connection" || typeof connection !== "string") return;
   const origin = origins[connection as ProviderConnectionId];
@@ -227,6 +234,12 @@ function saveInput(
     throw new DurableModelError(
       "MODEL_CONFIG_INVALID",
       "OpenRouter and shared OAuth connections are retired. Use direct provider credentials.",
+      "profile",
+    );
+  }
+  if (providerAwaitingDecision(body)) {
+    throw invalidRequest(
+      "Claude/xAI API integration is inactive pending your billing decision. No credential is stored.",
       "profile",
     );
   }
@@ -296,7 +309,9 @@ export async function handleModelHttp(
       if (request.method === "GET") {
         writeRuntimeJson(response, 200, {
           models: listModelConfigs(database.connection()),
-          profiles: MODEL_PROFILES.filter((profile) => profile !== "openrouter"),
+          profiles: MODEL_PROFILES.filter(
+            (profile) => profile !== "openrouter" && profile !== "anthropic" && profile !== "xai",
+          ),
         });
         return;
       }
@@ -318,7 +333,13 @@ export async function handleModelHttp(
       if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
       security.checkMutation(request);
       const modelId = idFrom(checkMatch[1] ?? "");
-      if (readModelConfig(database.connection(), modelId) === undefined) throw modelNotFound();
+      const configured = readModelConfig(database.connection(), modelId);
+      if (configured === undefined) throw modelNotFound();
+      if (providerAwaitingDecision(configured))
+        throw invalidRequest(
+          "Claude/xAI API integration is inactive pending your billing decision.",
+          "profile",
+        );
       if (services.check === undefined) {
         writeRuntimeJson(response, 503, {
           error: {
