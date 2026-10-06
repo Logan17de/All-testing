@@ -27,6 +27,7 @@
     "format:check": "prettier --check .",
     "agent": "node scripts/agent-cli.mjs",
     "browser": "node scripts/browser-cli.mjs",
+    "windows:sandbox-plan": "node scripts/windows-sandbox-plan.mjs",
     "inventory:refresh": "node scripts/refresh-model-message-inventory.mjs",
     "inventory:check": "node scripts/refresh-model-message-inventory.mjs --check",
     "test:native-linux": "node scripts/native-linux-acceptance.mjs"

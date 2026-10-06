@@ -52,6 +52,19 @@ inherited future sidecar integrity. These guards and their synthetic native
 fixtures have source/local verification only until the Windows prerequisite is
 resolved. They do not remove the availability gate.
 
+Checkpoint `934ba0072b27ff0f36f8445f35dad58c943132cd`, run `37410703826`,
+passed Ubuntu and failed Windows focused acceptance (six passed, seven failed):
+five token-policy prerequisite refusals `1314` and two `Get-Acl` module-loading
+errors during private fixture setup. The test-only module-path adjustment did
+not fix those setup errors; they are separate from the native privilege blocker.
+No further unchanged blocked kernel rerun is requested.
+
+The [dedicated-user preparation design](../WINDOWS-SANDBOX-REVIEW.md) and
+`windows:sandbox-plan` CLI produce disabled review metadata only. They neither
+repair the AppContainer refusal nor provision or enable a new backend. The native
+candidate needs administrator and persistent-credential approval, reviewed
+implementation and new kernel proof; the accepted Linux route remains available.
+
 Two test-only durability fixtures have explicit bounded setup budgets after
 observed Windows I/O timeouts. Assertions, SQLite settings, production deadlines
 and numeric performance guards are unchanged.
