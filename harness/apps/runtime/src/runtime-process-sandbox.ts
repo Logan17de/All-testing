@@ -427,8 +427,29 @@ export async function runSandboxedProjectCommand(
   } = {},
 ): Promise<ProcessRunResult> {
   const runner = options.runner ?? runBoundedProcess;
+  const platform = options.platform ?? process.platform;
+  if (platform === "win32") {
+    if (runner !== runBoundedProcess || !PROJECT_COMMANDS.includes(request.command))
+      throw new Error("Independent project sandbox unavailable or request refused.");
+    const snapshot = Object.freeze({
+      cwd: request.cwd,
+      command: request.command,
+      ...(request.signal ? { signal: request.signal } : {}),
+    });
+    const npmCliPath = options.npmCliPath ?? process.env["ZET_NPM_CLI"];
+    const nativeOptions = Object.freeze({
+      ...(npmCliPath !== undefined ? { npmCliPath } : {}),
+      privatePaths: Object.freeze([...(options.privatePaths ?? [])]),
+    });
+    snapshot.signal?.throwIfAborted();
+    const { executeWindowsSandboxedProjectScript } =
+      await import("./runtime-windows-project-sandbox.js");
+    const result = await executeWindowsSandboxedProjectScript(snapshot, nativeOptions);
+    snapshot.signal?.throwIfAborted();
+    return result;
+  }
   if (
-    (options.platform ?? process.platform) !== "linux" ||
+    platform !== "linux" ||
     !PROJECT_COMMANDS.includes(request.command) ||
     (runner === runBoundedProcess && !existsSync("/usr/bin/bwrap"))
   )

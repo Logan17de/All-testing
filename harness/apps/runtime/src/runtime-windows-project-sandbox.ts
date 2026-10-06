@@ -11,7 +11,7 @@ export const WINDOWS_PROJECT_COMMANDS = [
 ] as const;
 export type WindowsProjectCommand = (typeof WINDOWS_PROJECT_COMMANDS)[number];
 
-/** Experimental native entry point. Tool factories remain withheld until native acceptance. */
+/** Native fixed-command entry point; availability requires exact-head kernel acceptance. */
 export async function executeWindowsSandboxedProjectScript(
   request: { cwd: string; command: WindowsProjectCommand; signal?: AbortSignal },
   options: { npmCliPath?: string; privatePaths?: readonly string[] } = {},

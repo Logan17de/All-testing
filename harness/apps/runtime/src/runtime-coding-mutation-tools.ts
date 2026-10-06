@@ -233,6 +233,7 @@ export function createRuntimeMutationTools(
                 },
                 { privatePaths: privateGuard.paths },
               );
+              context.signal.throwIfAborted();
               return {
                 value: {
                   ...outcome,
