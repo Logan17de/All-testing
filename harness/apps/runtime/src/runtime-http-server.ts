@@ -1,3 +1,5 @@
+import { createPluginMakerHttpHandler } from "./runtime-plugin-maker-http.js";
+import type { RuntimePluginMakerController } from "./runtime-plugin-maker-controller.js";
 import { createAssistantHttpHandler } from "./runtime-assistant-http.js";
 import type { RuntimeAssistantController } from "./runtime-assistant-controller.js";
 import {
@@ -195,6 +197,7 @@ export class RuntimeHttpServer {
   private readonly chatGPTAuthHandler: ReturnType<typeof createChatGPTAuthHttpHandler> | undefined;
   private readonly desktopHandler: ReturnType<typeof createDesktopHttpHandler> | undefined;
   private readonly browserHandler: ReturnType<typeof createBrowserHttpHandler> | undefined;
+  private readonly pluginMakerHandler: ReturnType<typeof createPluginMakerHttpHandler> | undefined;
   private readonly assistantHandler: ReturnType<typeof createAssistantHttpHandler> | undefined;
   private readonly codingHandler: ReturnType<typeof createCodingHttpHandler> | undefined;
   private readonly connectionHandler: ReturnType<typeof createConnectionHttpHandler> | undefined;
@@ -245,6 +248,7 @@ export class RuntimeHttpServer {
       readonly connections?: RuntimeConnectionHttpServices;
       readonly agent?: RuntimeCodingService;
       readonly assistant?: RuntimeAssistantController;
+      readonly pluginMaker?: RuntimePluginMakerController;
       readonly browser?: RuntimeBrowserService;
       readonly desktop?: RuntimeDesktopController;
       readonly chatGPTAuth?: { controller: ChatGPTLoginController; search?: CodexSearchBridge };
@@ -275,6 +279,9 @@ export class RuntimeHttpServer {
         : createChatGPTAuthHttpHandler(services.chatGPTAuth);
     this.desktopHandler = services.desktop ? createDesktopHttpHandler(services.desktop) : undefined;
     this.browserHandler = services.browser ? createBrowserHttpHandler(services.browser) : undefined;
+    this.pluginMakerHandler = services.pluginMaker
+      ? createPluginMakerHttpHandler(services.pluginMaker)
+      : undefined;
     this.assistantHandler = services.assistant
       ? createAssistantHttpHandler(services.assistant)
       : undefined;
@@ -482,6 +489,16 @@ export class RuntimeHttpServer {
         }
         void this.browserHandler(request, response, url, this.security).catch((error: unknown) =>
           writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (url.pathname === "/api/plugin-maker") {
+        if (!this.pluginMakerHandler) {
+          writeJson(response, 503, { error: "plugin_maker_unavailable" });
+          return;
+        }
+        void this.pluginMakerHandler(request, response, url, this.security).catch(
+          (error: unknown) => writeRuntimeApiError(response, error),
         );
         return;
       }

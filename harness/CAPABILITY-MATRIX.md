@@ -48,3 +48,9 @@ The native personal-assistant layer is a separate authorization graph exposed at
 4. **Remaining engineering gaps:** Windows sandbox acceptance and unrestricted shell decisions, Linux delete/rename and recursive file operations, Git push/PR and Windows worktree/process expansion, full instruction/skill ecosystem semantics, broader provider/SDK integration, all-output-item/phase semantics, and actual consented desktop/provider acceptance. These are not accepted by passing narrow fixtures.
 
 See [acceptance evidence](CODEX-ACCEPTANCE.md), [provider contract](standalone-provider-auth.md) and [exact message inventory](Harness%20msgs%20to%20the%20models.md). Official repository source links above are moving public references, not a pinned imported runtime. No private Codex prompts, proprietary endpoints or undocumented client identities are required or reproduced.
+
+## Native assistant and plugin authoring follow-up
+
+Child tool requests, direct-parent grant/deny, finite user-delegated ceilings and explicit human assignment are implemented with durable audit and immediate epoch revocation. Current frozen model/execution authority and mutation consent bound parent decisions. Actual scripted-model daemon tests verify fresh-turn tool attenuation; this does not grant unavailable external integrations.
+
+The native `zet.plugin-maker` plugin exposes inert scaffold/edit/inspect/manifest-check tools. Its web workspace adds exact-hash human materialization, review, real required-sandbox testing, and separately confirmed zero-grant trusted installation for restart. Linux held-descriptor filesystem and actual temporary OS-sandbox/loader fixtures support this boundary. Windows maker effects fail closed. Trusted activation runs arbitrary reviewed JavaScript with daemon authority; declaration lists are not OS confinement. Marketplace publication and Zetbros site integration are deferred.

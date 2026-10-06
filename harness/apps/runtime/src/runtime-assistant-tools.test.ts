@@ -38,6 +38,9 @@ it("model catalog excludes grant/reconnect and stale immutable binding denies be
     "harness.assistant.create",
     "harness.assistant.delegate",
     "harness.assistant.control",
+    "harness.assistant.tools_request",
+    "harness.assistant.tools_requests",
+    "harness.assistant.tools_decide",
   ]);
   f.service.disconnect(f.authority, "root", "existing");
   await expect(

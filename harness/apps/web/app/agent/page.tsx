@@ -17,6 +17,7 @@ export default async function AgentPage({
         <span>/</span>
         <span>Coding workspace</span>
         <Link href="/assistant">Personal assistant</Link>
+        <Link href="/plugin-maker">Plugin maker</Link>
         <Link href="/models">Models</Link>
       </nav>
       <h1 className="pageTitle">Coding workspace</h1>

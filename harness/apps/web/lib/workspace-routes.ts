@@ -27,6 +27,7 @@ const ALLOWED_PATHS: readonly RegExp[] = [
   /^connections$/u,
   /^agent$/u,
   /^assistant$/u,
+  /^plugin-maker$/u,
   /^desktop$/u,
   /^browser$/u,
   /^auth\/chatgpt(?:\/(login|cancel|search))?$/u,

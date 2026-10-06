@@ -140,7 +140,7 @@ it("real daemon scripted inference revocation aborts original signal and exclude
     ]);
     expect(
       requests[0]?.tools?.filter((tool) => tool.name.startsWith("harness_assistant_")).length,
-    ).toBe(6);
+    ).toBe(9);
     expect(JSON.stringify(requests[1])).toContain("CONNECTED-SOURCE-PRIVATE-CONTENT");
     await post("assistant", "disconnect", { assistantId: root, chatId: target });
     expect(pendingContext?.signal.aborted).toBe(true);
@@ -737,6 +737,258 @@ it.each(["interrupt", "revoked"] as const)(
     } finally {
       releaseControl?.(answer());
       for (const pending of ordinary.values()) pending.finish(answer());
+      await daemon.stop();
+      db.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it.skipIf(!["linux", "win32"].includes(process.platform))(
+  "actual parent tool decision grants only explicit user-delegated rights for a fresh child turn",
+  async () => {
+    const { writeSetting } = await import("@zet-harness/db/durable-setting-records");
+    const directory = await mkdtemp(join(tmpdir(), "assistant-delegated-tools-")),
+      databasePath = join(directory, "runtime.sqlite");
+    const daemon = new RuntimeDaemon({
+      api: { port: 0 },
+      database: { path: databasePath },
+      plugins: { directory: join(directory, "plugins") },
+      probePathLimits: false,
+    });
+    await daemon.start();
+    const db = new DatabaseSync(databasePath);
+    writeSetting(db, "workspace.root", directory, Date.now());
+    const api = daemon.snapshot().api,
+      base = `http://${api.host}:${String(api.port)}`;
+    let root = "",
+      child = "",
+      requestId = "";
+    const counts = new Map<string, number>();
+    const observed = new Map<string, ModelRequest>();
+    const scopes = { model: ["harness.fs.read"], tools: ["harness.fs.read"] };
+    const answer = (): ModelResult => ({
+      message: { role: "assistant", parts: [{ kind: "text", text: "fixture request complete" }] },
+      finishReason: "stop",
+    });
+    daemon.plugins!.models.register({
+      manifest: {
+        id: "fixture.model",
+        version: "1",
+        title: "Delegation decision fixture",
+        requiredCapabilities: [],
+        features: {
+          streaming: false,
+          tools: true,
+          vision: false,
+          structuredOutput: false,
+          contextWindowTokens: 32000,
+        },
+      },
+      generate: (_request, context) => {
+        observed.set(context.runId, structuredClone(_request));
+        const n = (counts.get(context.runId) ?? 0) + 1;
+        counts.set(context.runId, n);
+        const actor = db
+          .prepare("SELECT actor_chat_id FROM assistant_runs WHERE run_id=?")
+          .get(context.runId)?.actor_chat_id;
+        if (
+          n !== 1 ||
+          (actor === child &&
+            !_request.tools?.some((tool) => tool.name === "harness_assistant_tools_request"))
+        )
+          return Promise.resolve(answer());
+        return Promise.resolve({
+          message: {
+            role: "assistant",
+            parts: [
+              actor === child
+                ? {
+                    kind: "tool-call",
+                    callId: "request-tools",
+                    name: "harness_assistant_tools_request",
+                    arguments: { scopes },
+                  }
+                : {
+                    kind: "tool-call",
+                    callId: "grant-tools",
+                    name: "harness_assistant_tools_decide",
+                    arguments: { requestId, decision: "grant" },
+                  },
+            ],
+          },
+          finishReason: "tool-calls",
+        });
+      },
+    });
+    saveModelConfig(db, {
+      modelId: "fixture.model",
+      title: "Fixture",
+      profile: "custom",
+      baseUrl: "http://127.0.0.1:1/v1",
+      model: "fixture",
+      tools: true,
+      contextWindowTokens: 32000,
+      nowMs: Date.now(),
+    });
+    try {
+      const { csrfToken } = (await (await fetch(`${base}/api/session`)).json()) as {
+        csrfToken: string;
+      };
+      const raw = (action: string, params: Record<string, unknown>, token = csrfToken) =>
+        fetch(`${base}/api/assistant`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-zet-csrf": token },
+          body: JSON.stringify({ action, params }),
+        });
+      const post = async (path: string, action: string, params: Record<string, unknown>) => {
+        const response = await fetch(`${base}/api/${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-zet-csrf": csrfToken },
+          body: JSON.stringify({ action, params }),
+        });
+        expect(response.status).toBe(200);
+        return (await response.json()) as { result: Record<string, unknown> };
+      };
+      root = ((await post("assistant", "create", {})).result.binding as { assistantId: string })
+        .assistantId;
+      let epoch = Number(
+        (await post("assistant", "tools/read", { assistantId: root })).result.epoch,
+      );
+      expect(
+        (
+          await raw(
+            "tools/authority",
+            { assistantId: root, actorChatId: root, scopes, epoch, confirm: true },
+            "",
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await raw("tools/authority", {
+            assistantId: root,
+            actorChatId: root,
+            scopes,
+            epoch,
+            confirm: false,
+          })
+        ).status,
+      ).toBe(400);
+      const ceiling = await post("assistant", "tools/authority", {
+        assistantId: root,
+        actorChatId: root,
+        scopes,
+        epoch,
+        confirm: true,
+      });
+      epoch = Number(ceiling.result.epoch);
+      expect(
+        (
+          await raw("tools/authority", {
+            assistantId: root,
+            actorChatId: root,
+            scopes,
+            epoch: epoch - 1,
+            confirm: true,
+          })
+        ).status,
+      ).toBe(400);
+      child = String(
+        (await post("assistant", "child/create", { assistantId: root, grants: [] })).result.chatId,
+      );
+      const childRun = (
+        (
+          await post("agent", "turn/start", {
+            sessionId: child,
+            text: "Ask parent for read tool access",
+            modelId: "fixture.model",
+          })
+        ).result.turn as { id: string }
+      ).id;
+      for (let i = 0; i < 200; i++) {
+        const row = db
+          .prepare(
+            "SELECT request_id FROM assistant_tool_requests WHERE child_chat_id=? AND status='pending'",
+          )
+          .get(child);
+        if (row) {
+          requestId = String(row.request_id);
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(requestId).not.toBe("");
+      const queue = await post("assistant", "tools/read", { assistantId: root });
+      expect(
+        (queue.result.requests as { id: string; requiresUser: boolean }[]).find(
+          (item) => item.id === requestId,
+        )?.requiresUser,
+      ).toBe(false);
+      for (let i = 0; i < 200; i++) {
+        if (
+          ["completed", "failed", "cancelled"].includes(
+            String(db.prepare("SELECT status FROM runs WHERE run_id=?").get(childRun)?.status),
+          )
+        )
+          break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      await post("agent", "turn/start", {
+        sessionId: root,
+        text: "Review and grant the bounded pending child request",
+        modelId: "fixture.model",
+      });
+      for (let i = 0; i < 200; i++) {
+        if (
+          db.prepare("SELECT status FROM assistant_tool_requests WHERE request_id=?").get(requestId)
+            ?.status === "granted"
+        )
+          break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(
+        db.prepare("SELECT status FROM assistant_tool_requests WHERE request_id=?").get(requestId)
+          ?.status,
+      ).toBe("granted");
+      const current = await post("assistant", "tools/read", { assistantId: root });
+      expect(Number(current.result.epoch)).toBeGreaterThan(epoch);
+      expect(
+        (current.result.actors as { chatId: string; scopes: unknown }[]).find(
+          (actor) => actor.chatId === child,
+        )?.scopes,
+      ).toEqual(scopes);
+      expect(
+        (current.result.audit as { action: string }[]).some(
+          (entry) => entry.action === "child-tools-parent",
+        ),
+      ).toBe(true);
+      const freshChild = (
+        (
+          await post("agent", "turn/start", {
+            sessionId: child,
+            text: "Use only the freshly assigned read tool",
+            modelId: "fixture.model",
+          })
+        ).result.turn as { id: string }
+      ).id;
+      for (let i = 0; i < 200 && !observed.has(freshChild); i++)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(observed.get(freshChild)?.tools?.map((tool) => tool.name)).toEqual([
+        "harness_fs_read",
+      ]);
+      expect(
+        (
+          await raw("tools/decide", {
+            assistantId: root,
+            requestId,
+            decision: "grant",
+            confirm: true,
+            epoch,
+          })
+        ).status,
+      ).toBe(400);
+    } finally {
       await daemon.stop();
       db.close();
       await rm(directory, { recursive: true, force: true });

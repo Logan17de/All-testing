@@ -310,7 +310,17 @@ export class RuntimeCodingService {
       },
     ];
     entries.push(
-      ...["list", "read", "status", "create", "delegate", "control"].map((operation) => ({
+      ...[
+        "list",
+        "read",
+        "status",
+        "create",
+        "delegate",
+        "control",
+        "tools_request",
+        "tools_requests",
+        "tools_decide",
+      ].map((operation) => ({
         id: `harness.assistant.${operation}`,
         title: `Assistant ${operation}`,
         pluginId: "harness.native",

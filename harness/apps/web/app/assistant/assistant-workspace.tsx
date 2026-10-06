@@ -1,4 +1,5 @@
 "use client";
+import { ChildToolRights } from "./child-tool-rights";
 import { ChildChatScope } from "./child-chat-scope";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -398,6 +399,7 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
               Connect selected chat
             </button>
           </section>
+          <ChildToolRights key={assistantId} assistantId={assistantId} />
           <ChildChatScope
             key={`${assistantId}:${current.binding.epoch}`}
             grants={connectedGrants}

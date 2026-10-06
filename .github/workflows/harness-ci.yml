@@ -99,6 +99,7 @@ jobs:
           export ZET_NPM_CLI="$(dirname "$(dirname "$(command -v npm)")")/lib/node_modules/npm/bin/npm-cli.js"
           test -f "$ZET_NPM_CLI" || export ZET_NPM_CLI="$(npm root -g)/npm/bin/npm-cli.js"
           npm run test:native-linux
+          node scripts/native-plugin-maker-acceptance.mjs
           # The fixed synthetic fixture also proves payload capabilities are dropped
           # when the host daemon starts as UID 0. No user project is executed.
           sudo env ZET_NPM_CLI="$ZET_NPM_CLI" "$(command -v node)" scripts/native-linux-acceptance.mjs
@@ -110,6 +111,8 @@ jobs:
         id: startup
         run: npm run test:startup
 
+      - name: Native CLI acceptance
+        run: node scripts/native-cli-acceptance.mjs
       - name: Build
         run: npm run build
 

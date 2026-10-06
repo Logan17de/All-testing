@@ -1,3 +1,7 @@
+import {
+  createAssistantToolAccess,
+  type AssistantToolAccessHost,
+} from "./runtime-assistant-tool-access.js";
 import type { DatabaseSync } from "node:sqlite";
 import {
   AssistantAccessDenied,
@@ -11,7 +15,7 @@ import {
   type AssistantGrant,
   type AssistantPermission,
 } from "./runtime-assistant-access.js";
-export interface RuntimeAssistantHost {
+export interface RuntimeAssistantHost extends AssistantToolAccessHost {
   read(chatId: string, signal: AbortSignal, binding: AssistantBinding): Promise<unknown>;
   status(chatId: string, signal: AbortSignal, binding: AssistantBinding): Promise<unknown>;
   create(parentChatId: string, signal: AbortSignal, binding: AssistantBinding): Promise<string>;
@@ -105,6 +109,7 @@ export function createRuntimeAssistantService(
     return result;
   };
   return Object.freeze({
+    ...createAssistantToolAccess({ db, userAuthority, host, binding, mutate }),
     createRoot(authority: object, id: string) {
       user(authority);
       assistantId(id);

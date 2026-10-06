@@ -117,6 +117,11 @@ export default async function PluginsPage() {
       </nav>
 
       <h1 className="pageTitle">Plugins</h1>
+      <p className="pageActions">
+        <Link className="btn" href="/plugin-maker">
+          Make a plugin
+        </Link>
+      </p>
 
       {!report.ok ? (
         <div className="panel">

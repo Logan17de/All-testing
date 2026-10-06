@@ -81,3 +81,8 @@ it("allows only the scoped assistant endpoint", () => {
   expect(runtimeWorkspacePath(["assistant"], new URLSearchParams())).toBe("/api/assistant");
   expect(runtimeWorkspacePath(["assistant", "connect"], new URLSearchParams())).toBeUndefined();
 });
+
+it("allows only the scoped plugin maker endpoint", () => {
+  expect(runtimeWorkspacePath(["plugin-maker"], new URLSearchParams())).toBe("/api/plugin-maker");
+  expect(runtimeWorkspacePath(["plugin-maker", "enable"], new URLSearchParams())).toBeUndefined();
+});

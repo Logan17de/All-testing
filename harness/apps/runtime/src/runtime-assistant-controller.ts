@@ -52,6 +52,10 @@ export class RuntimeAssistantController {
       connect: ["assistantId", "chatId", "permissions", "confirm"],
       disconnect: ["assistantId", "chatId"],
       "child/create": ["assistantId", "title", "grants"],
+      "tools/read": ["assistantId"],
+      "tools/authority": ["assistantId", "actorChatId", "scopes", "confirm", "epoch"],
+      "child/tools": ["assistantId", "chatId", "scopes", "confirm", "epoch"],
+      "tools/decide": ["assistantId", "requestId", "decision", "confirm", "epoch"],
     };
     if (!fields[action] || Object.keys(params).some((key) => !fields[action]!.includes(key)))
       throw new Error("Invalid assistant action.");
@@ -89,6 +93,42 @@ export class RuntimeAssistantController {
       throw new Error("Unknown assistant in this workspace.");
     current();
     if (action === "read") return assistant.snapshot(assistant.issueBinding(id));
+    if (action === "tools/read") return assistant.toolAccessSnapshot(assistant.issueBinding(id));
+    if (["tools/authority", "child/tools", "tools/decide"].includes(action)) {
+      if (!Number.isSafeInteger(params.epoch) || params.epoch !== assistant.issueBinding(id).epoch)
+        throw new Error("Stale assistant tool authority.");
+      if (params.confirm !== true && !(action === "tools/decide" && params.decision === "deny"))
+        throw new Error("Explicit tool assignment confirmation required.");
+      let binding;
+      if (action === "tools/authority")
+        binding = assistant.setToolAuthority(
+          this.services.userAuthority,
+          id,
+          chat(params.actorChatId),
+          params.scopes,
+        );
+      else if (action === "child/tools")
+        binding = assistant.assignChildTools(
+          this.services.userAuthority,
+          id,
+          chat(params.chatId),
+          params.scopes,
+        );
+      else {
+        if (
+          typeof params.requestId !== "string" ||
+          !["grant", "deny"].includes(String(params.decision))
+        )
+          throw new Error("Invalid tool decision.");
+        binding = assistant.decideToolsUser(
+          this.services.userAuthority,
+          id,
+          params.requestId,
+          params.decision as "grant" | "deny",
+        );
+      }
+      return assistant.toolAccessSnapshot(binding);
+    }
     if (action === "connect") {
       if (params.confirm !== true)
         throw new Error("Explicit user confirmation is required for a chat connection.");

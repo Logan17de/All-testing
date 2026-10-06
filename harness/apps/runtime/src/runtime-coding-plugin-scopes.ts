@@ -56,7 +56,7 @@ function allowlist(value: unknown): string[] | null {
   }
   return result;
 }
-function scopes(value: unknown): NativeChatToolScopes {
+export function normalizeNativeChatToolScopes(value: unknown): NativeChatToolScopes {
   if (
     !value ||
     typeof value !== "object" ||
@@ -82,7 +82,7 @@ export function readNativeChatToolScopes(
     .get(conversationId);
   if (!row) return { model: null, tools: null };
   try {
-    return scopes({
+    return normalizeNativeChatToolScopes({
       model: row.model === null ? null : (JSON.parse(row.model as string) as unknown),
       tools: row.tools === null ? null : (JSON.parse(row.tools as string) as unknown),
     });
@@ -99,7 +99,7 @@ export function saveNativeChatToolScopes(
   updatedAtMs: number,
 ): NativeChatToolScopes {
   identifier(conversationId);
-  const normalized = scopes(input);
+  const normalized = normalizeNativeChatToolScopes(input);
   if (!Number.isSafeInteger(updatedAtMs) || updatedAtMs < 0) throw invalid();
   connection
     .prepare(

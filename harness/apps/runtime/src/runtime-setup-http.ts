@@ -18,6 +18,8 @@ import { writeRuntimeJson } from "./runtime-approval-http.js";
 
 export interface RuntimeSetupHttpServices {
   readonly database: SqliteDatabase;
+  /** Synchronous host revocation boundary for every explicit workspace selection. */
+  readonly onWorkspaceSelection?: () => void;
   /** UTC epoch milliseconds. Defaults to the system clock. */
   readonly now?: () => number;
   /** Where the folder browser starts. Defaults to the person's home folder. */
@@ -285,6 +287,7 @@ export async function handleSetupHttp(
     await services.database.commit((connection) => {
       writeSetting(connection, "workspace.root", path, now());
       rememberWorkspace(connection, path, now());
+      services.onWorkspaceSelection?.();
     });
     writeRuntimeJson(response, 200, {
       workspace: { path, exists: true },

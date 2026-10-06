@@ -1,3 +1,14 @@
+import {
+  createRuntimePluginMakerController,
+  type RuntimePluginMakerController,
+} from "./runtime-plugin-maker-controller.js";
+import { createRuntimePluginMakerHost } from "./runtime-plugin-maker-host.js";
+import { createRuntimePluginMaker, type RuntimePluginMaker } from "./runtime-plugin-maker.js";
+import { createPluginMakerPlugin } from "./runtime-plugin-maker-tools.js";
+import {
+  DURABLE_ASSISTANT_TOOL_ACCESS_MIGRATION,
+  PARENT_DELEGABLE_NATIVE_TOOL_IDS,
+} from "./runtime-assistant-tool-access.js";
 import { DURABLE_NATIVE_CHAT_RUNS_MIGRATION } from "./runtime-native-chat-runs.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
@@ -162,6 +173,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_NATIVE_CHAT_SCOPES_MIGRATION,
   DURABLE_ASSISTANT_ACCESS_MIGRATION,
   DURABLE_NATIVE_CHAT_RUNS_MIGRATION,
+  DURABLE_ASSISTANT_TOOL_ACCESS_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
@@ -223,6 +235,21 @@ export class RuntimeDaemon {
   private models: RuntimeModels | undefined;
   private readonly agent: RuntimeCodingService;
   private readonly assistantUserAuthority = Object.freeze({});
+  private readonly pluginMakerUserAuthority = Object.freeze({});
+  private pluginMakerGeneration = 0;
+  private pluginMakerWorkspace: string | undefined;
+  private pluginMakerScope: string | undefined;
+  private pluginMakerState: RuntimePluginMaker | undefined;
+  private pluginMakerController: RuntimePluginMakerController | undefined;
+  private readonly pluginMaker = new Proxy({} as RuntimePluginMaker, {
+    get: (_target, key) => {
+      const current = this.currentPluginMaker();
+      const value: unknown = Reflect.get(current, key) as unknown;
+      return typeof value === "function"
+        ? (...args: unknown[]) => Reflect.apply(value, current, args) as unknown
+        : value;
+    },
+  });
   private assistantService: RuntimeAssistantService | undefined;
   private readonly assistantSignals = new Map<string, AbortController>();
   private readonly assistantInvocation = new AsyncLocalStorage<AdapterInvocationContext>();
@@ -332,7 +359,7 @@ export class RuntimeDaemon {
           .prepare("SELECT 1 FROM assistant_roots WHERE assistant_id=?")
           .get(sessionId);
         return root
-          ? "You are the user's personal assistant. Help plan and coordinate work using only the currently offered assistant chat tools and explicit graph connections. Existing chats are private unless connected by the user. Read permitted chats for current context, create child chats with an explicit subset of your current read/control grants, and delegate bounded coding tasks only to those created children. Connected ordinary chats support read/status and interruption of their own native turns with current read/control grants; they cannot be delegated into. Children receive scoped chat and native coding tools within inherited user-granted tool restrictions. Mutation opt-in is inherited from the originating user turn, but each write/process/Git/worktree action still requires its own exact human approval. Private runtime database files and sidecars are excluded from filesystem and sandbox execution. Plugin/MCP, browser and desktop tools remain unavailable in assistant-bound turns; use a separately authorized normal coding chat for those operations. You cannot connect or reconnect chats or expand grants. Revocation cancels pending work and excludes past source-bearing context from future turns; never claim retroactive forgetting of already observed outputs."
+          ? "You are the user's personal assistant. Help plan and coordinate work using only the currently offered assistant chat tools and explicit graph connections. Existing chats are private unless connected by the user. Read permitted chats for current context, create child chats with an explicit subset of your current read/control grants, and delegate bounded coding tasks only to those created children. Connected ordinary chats support read/status and interruption of their own native turns with current read/control grants; they cannot be delegated into. Children receive scoped chat and native coding tools within inherited user-granted tool restrictions. Mutation opt-in is inherited from the originating user turn, but each write/process/Git/worktree action still requires its own exact human approval. Private runtime database files and sidecars are excluded from filesystem and sandbox execution. Plugin/MCP, browser and desktop tools remain unavailable in assistant-bound turns; use a separately authorized normal coding chat for those operations. You cannot connect or reconnect chats. You may decide child tool requests only within an explicit user-delegated ceiling and your current frozen tool authority; requests beyond that ceiling require the user. Grant changes cancel active turns and take effect on a fresh turn. Revocation cancels pending work and excludes past source-bearing context from future turns; never claim retroactive forgetting of already observed outputs."
           : undefined;
       },
       restrictToolScopes: (sessionId, scope) => {
@@ -445,7 +472,17 @@ export class RuntimeDaemon {
             }),
         projects: { database: this.database },
         memories: { database: this.database },
-        setup: { database: this.database },
+        setup: {
+          database: this.database,
+          onWorkspaceSelection: () => {
+            this.pluginMakerGeneration++;
+            this.pluginMakerController?.invalidateScope();
+            this.pluginMakerState = undefined;
+            this.pluginMakerScope = undefined;
+            this.agent.close();
+          },
+        },
+        pluginMaker: this.createPluginMakerController(),
         agent: this.agent,
         assistant: new RuntimeAssistantController({
           database: this.database,
@@ -680,6 +717,7 @@ export class RuntimeDaemon {
         await host.activate(createAgentPlugin());
         // Text box, Model and Output box: text in, text out, no conversation needed.
         await host.activate(createBoxesPlugin());
+        await host.activate(createPluginMakerPlugin(this.pluginMaker));
         // GitHub exposes first-party read components and owned read tools to authorized agents.
         // Its token, when there is one, is read per request and never recorded.
         const githubToken = process.env["GITHUB_TOKEN"];
@@ -1063,6 +1101,7 @@ export class RuntimeDaemon {
         installed.some(({ adapter }) =>
           adapter.manifest.behavior.requiredCapabilities.includes(capability),
         ) ||
+        (capability === "plugin:author" && !assistantRun) ||
         this.pluginAuthority(capability).decision === "allow",
       configuredModels: () => this.configuredModelIds(),
       providerStatePolicy: (context, sessionId, modelId) => {
@@ -1112,18 +1151,52 @@ export class RuntimeDaemon {
     return collectInstalledAgentPluginTools({
       host,
       allows: (pluginId, capability) =>
-        pluginId === GITHUB_PLUGIN_ID
-          ? capability === "network:https"
-          : this.pluginPolicies.get(pluginId)?.allows(capability) === true,
+        pluginId === "zet.plugin-maker"
+          ? capability === "plugin:author"
+          : pluginId === GITHUB_PLUGIN_ID
+            ? capability === "network:https"
+            : this.pluginPolicies.get(pluginId)?.allows(capability) === true,
       approve: (request, context) => this.agent.approveTool(request, context),
-    }).filter(({ adapter }) => {
-      const pluginId = host.tools.getResolution(adapter.manifest.id, adapter.manifest.version)
-        ?.plugin.id;
-      return (
-        pluginId !== GITHUB_PLUGIN_ID ||
-        ["none", "external-read"].includes(adapter.manifest.behavior.effect)
-      );
-    });
+    })
+      .map((entry) => {
+        const pluginId = host.tools.getResolution(
+          entry.adapter.manifest.id,
+          entry.adapter.manifest.version,
+        )?.plugin.id;
+        if (pluginId !== "zet.plugin-maker") return entry;
+        const captured = entry.adapter;
+        return {
+          ...entry,
+          adapter: {
+            ...captured,
+            invoke: async (input: JsonObject, context: AdapterInvocationContext) => {
+              context.signal.throwIfAborted();
+              const policy = this.agent.toolPolicy(context.runId);
+              const root = readWorkspace(this.database)?.path;
+              const generation = this.pluginMakerScopeGeneration();
+              if (!policy || !root || policy.root !== root || this.assistantRun(context.runId))
+                throw new Error("Plugin maker invocation authority expired.");
+              const result = await captured.invoke(input, context);
+              context.signal.throwIfAborted();
+              if (
+                this.agent.toolPolicy(context.runId) !== policy ||
+                readWorkspace(this.database)?.path !== root ||
+                this.pluginMakerScopeGeneration() !== generation
+              )
+                throw new Error("Plugin maker invocation authority expired.");
+              return result;
+            },
+          },
+        };
+      })
+      .filter(({ adapter }) => {
+        const pluginId = host.tools.getResolution(adapter.manifest.id, adapter.manifest.version)
+          ?.plugin.id;
+        return (
+          pluginId !== GITHUB_PLUGIN_ID ||
+          ["none", "external-read"].includes(adapter.manifest.behavior.effect)
+        );
+      });
   }
   private installedAgentToolCatalog(): readonly NativeAgentToolCatalogEntry[] {
     const host = this.pluginHost;
@@ -1136,6 +1209,97 @@ export class RuntimeDaemon {
         ? "enabled-host-granted"
         : "requires-turn-and-per-call-mutation-consent",
     }));
+  }
+
+  private pluginMakerScopeGeneration(): number {
+    const root =
+      this.database.snapshot().state === "open" &&
+      this.database
+        .connection()
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_settings'")
+        .get()
+        ? readWorkspace(this.database)?.path
+        : undefined;
+    if (root !== this.pluginMakerWorkspace) {
+      this.pluginMakerWorkspace = root;
+      this.pluginMakerGeneration++;
+      this.pluginMakerState = undefined;
+      this.pluginMakerScope = undefined;
+      this.pluginMakerController?.invalidateScope();
+    }
+    return this.pluginMakerGeneration;
+  }
+
+  private createPluginMakerController(): RuntimePluginMakerController {
+    const host = createRuntimePluginMakerHost(
+      {
+        workspaceRoot: () => {
+          const root = readWorkspace(this.database)?.path;
+          if (!root) throw new Error("Select a workspace before authoring plugins.");
+          return root;
+        },
+        scopeGeneration: () => this.pluginMakerScopeGeneration(),
+        privatePaths: () =>
+          this.openedDatabasePath
+            ? [
+                this.openedDatabasePath,
+                `${this.openedDatabasePath}-wal`,
+                `${this.openedDatabasePath}-shm`,
+              ]
+            : [],
+        pluginOptions: () => this.pluginOptions ?? {},
+        // This callback is reached only through the opaque human controller authority
+        // after exact artifact/directory/scopes/execution confirmation; models cannot call it.
+        approve: (_request, signal) => {
+          signal.throwIfAborted();
+          return Promise.resolve(true);
+        },
+      },
+      this.pluginMakerUserAuthority,
+    );
+    this.pluginMakerController = createRuntimePluginMakerController({
+      maker: this.pluginMaker,
+      userAuthority: this.pluginMakerUserAuthority,
+      scopeGeneration: () => this.pluginMakerScopeGeneration(),
+      host: {
+        materialize: async (artifact, directory, operation) => {
+          await host.materialize(this.pluginMakerUserAuthority, artifact, directory, operation);
+        },
+        test: (artifact, directory, operation) =>
+          host.test(this.pluginMakerUserAuthority, artifact, directory, operation),
+        enable: async (artifact, directory, _scopes, operation) => {
+          const result = await host.enable(
+            this.pluginMakerUserAuthority,
+            artifact,
+            directory,
+            { confirmTrustedCodeExecution: true },
+            operation,
+          );
+          operation.check();
+          await this.rescanPlugins();
+          operation.check();
+          return result;
+        },
+      },
+    });
+    return this.pluginMakerController;
+  }
+
+  private currentPluginMaker(): RuntimePluginMaker {
+    const root = readWorkspace(this.database)?.path;
+    if (!root) throw new Error("Plugin maker requires a selected workspace.");
+    const scope = `${this.pluginMakerScopeGeneration()}:${root}`;
+    if (this.pluginMakerScope !== scope || !this.pluginMakerState) {
+      this.pluginMakerScope = scope;
+      this.pluginMakerState = createRuntimePluginMaker(
+        {
+          write: () =>
+            Promise.reject(new Error("Use the human-confirmed plugin maker materialize action.")),
+        },
+        this.pluginMakerUserAuthority,
+      );
+    }
+    return this.pluginMakerState;
   }
 
   private hasAssistantSchema(): boolean {
@@ -1158,6 +1322,54 @@ export class RuntimeDaemon {
     this.assistantService = createRuntimeAssistantService(
       db,
       {
+        toolCatalog: () =>
+          PARENT_DELEGABLE_NATIVE_TOOL_IDS.filter(
+            (id) =>
+              ["linux", "win32"].includes(process.platform) &&
+              (process.platform === "win32" ||
+                !["harness.fs.rename", "harness.fs.delete"].includes(id)),
+          ),
+        parentToolAuthority: (binding, context) => {
+          const invocation = this.assistantInvocation.getStore();
+          if (invocation !== context || context.signal.aborted) return undefined;
+          const run = this.assistants().assertRunAccess(context.runId);
+          const policy = this.agent.toolPolicy(context.runId);
+          if (
+            !policy ||
+            run.binding.assistantId !== binding.assistantId ||
+            run.binding.actorChatId !== binding.actorChatId ||
+            run.binding.epoch !== binding.epoch ||
+            policy.sessionId !== run.targetChatId ||
+            run.targetChatId !== binding.actorChatId
+          )
+            return undefined;
+          const catalog = PARENT_DELEGABLE_NATIVE_TOOL_IDS.filter(
+            (id) =>
+              (process.platform === "win32" ||
+                !["harness.fs.rename", "harness.fs.delete"].includes(id)) &&
+              (policy.mutationConsent ||
+                ![
+                  "harness.fs.write",
+                  "harness.fs.apply_patch",
+                  "harness.fs.mkdir",
+                  "harness.fs.rename",
+                  "harness.fs.delete",
+                  "harness.shell.run",
+                  "harness.git.add",
+                  "harness.git.commit",
+                  "harness.git.worktree.create",
+                  "harness.git.worktree.remove",
+                ].includes(id)),
+          );
+          const model = catalog.filter(
+            (id) => policy.modelToolScope === null || policy.modelToolScope.includes(id),
+          );
+          const tools = catalog.filter(
+            (id) => policy.executionToolScope === null || policy.executionToolScope.includes(id),
+          );
+          const intersection = model.filter((id) => tools.includes(id));
+          return { model: intersection, tools: intersection };
+        },
         read: async (chatId, signal, binding) => {
           signal.throwIfAborted();
           await this.agent.action("session/graph", { sessionId: chatId });
@@ -1580,6 +1792,10 @@ export class RuntimeDaemon {
   }
 
   private async stopOnce(): Promise<boolean> {
+    this.pluginMakerGeneration++;
+    this.pluginMakerController?.invalidateScope();
+    this.pluginMakerState = undefined;
+    this.pluginMakerScope = undefined;
     const schedule = this.triggerSchedule.stop();
     this.desktop.close();
     this.images.clear();

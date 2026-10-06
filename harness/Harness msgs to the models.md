@@ -23,7 +23,7 @@ This inventories **this repository's own public, model-facing wording and relate
 | Search instructions | `Search the web for the user's query. Return a concise factual answer with source citations. You have only web search. Never request local tools, filesystem, shell, functions, or computer actions.` | Search-only Responses call; `runtime-codex-search.ts`. | Search model instruction, implemented. Request also constrains tools to `web_search`; wording alone is not the boundary. |
 | Namespace description | `Tools offered by the independent harness. Execution and permission decisions remain in the harness.` | Offered native functions are grouped under `harness`; `runtime-chatgpt-model.ts`. | Provider tool metadata, implemented. Stable encoded tool names map back only to currently offered native tools. |
 
-The provider-neutral engine uses system/developer/user/assistant/tool roles. The ChatGPT plan adapter converts system instruction messages to developer messages because its documented route rejects explicit system items. It sends the required text/function-call/function-output history with `store:false` and `stream:true`. Opaque provider reasoning/encrypted reasoning continuation remains a documented gap; this inventory does not invent missing provider prompts.
+The provider-neutral engine uses system/developer/user/assistant/tool roles. The ChatGPT plan adapter converts system instruction messages to developer messages because its documented route rejects explicit system items. It sends the required text/function-call/function-output history with `store:false` and `stream:true`. Supported Responses reasoning/encrypted reasoning items are retained in order, bound to account and model, and withheld from public DTOs. Incompatible continuation requires explicit model selection to reset; this inventory does not invent provider prompts.
 
 ## Tool contracts and model-visible outcomes
 
@@ -709,57 +709,63 @@ The following appendix inventories fixed error/description expressions in the li
 |---|---|---|
 | 210 | Error construction; see delivery rules; trigger/context #session; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid session.")</code> |
 | 213 | Error construction; see delivery rules; trigger/context #session; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Session is outside the current workspace.")</code> |
-| 526 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Unsupported action or parameter.")</code> |
-| 536 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid or expired tool approval.")</code> |
-| 549 | Error construction; see delivery rules; trigger/context text; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error(&#96;Invalid ${key}.&#96;)</code> |
-| 565 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid archived filter.")</code> |
-| 581 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Project is outside the current workspace.")</code> |
-| 613 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Select canonical tools from the current catalog.")</code> |
-| 623 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed while saving plugin scope.")</code> |
-| 653 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Session no longer exists.")</code> |
-| 659 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Turn is outside this session.")</code> |
-| 668 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Unsupported native agent action.")</code> |
-| 669 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Restore this archived session first.")</code> |
-| 677 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("This session already has an unfinished turn.")</code> |
-| 686 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid turn consent.")</code> |
-| 693 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Select a configured inference model.")</code> |
-| 709 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid skill mode.")</code> |
-| 718 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid skill selection.")</code> |
-| 728 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed while preparing this turn.")</code> |
-| 755 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Native agent graph could not be prepared.")</code> |
-| 756 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed while preparing this turn.")</code> |
-| 759 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed before prompt commit.")</code> |
-| 775 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed before run commit.")</code> |
-| 781 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed before dispatch.")</code> |
-| 785 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Native session policy capacity reached.")</code> |
+| 536 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Unsupported action or parameter.")</code> |
+| 546 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid or expired tool approval.")</code> |
+| 559 | Error construction; see delivery rules; trigger/context text; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error(&#96;Invalid ${key}.&#96;)</code> |
+| 575 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid archived filter.")</code> |
+| 591 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Project is outside the current workspace.")</code> |
+| 623 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Select canonical tools from the current catalog.")</code> |
+| 633 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed while saving plugin scope.")</code> |
+| 663 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Session no longer exists.")</code> |
+| 669 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Turn is outside this session.")</code> |
+| 678 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Unsupported native agent action.")</code> |
+| 679 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Restore this archived session first.")</code> |
+| 687 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("This session already has an unfinished turn.")</code> |
+| 696 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid turn consent.")</code> |
+| 703 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Select a configured inference model.")</code> |
+| 719 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid skill mode.")</code> |
+| 728 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Invalid skill selection.")</code> |
+| 738 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed while preparing this turn.")</code> |
+| 765 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Native agent graph could not be prepared.")</code> |
+| 766 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed while preparing this turn.")</code> |
+| 769 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed before prompt commit.")</code> |
+| 785 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed before run commit.")</code> |
+| 791 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Workspace changed before dispatch.")</code> |
+| 795 | Error construction; see delivery rules; trigger/context #action; user/runtime; no automatic model injection; recovery: applicable family above; implemented | <code>new Error("Native session policy capacity reached.")</code> |
 
 ### apps/runtime/src/runtime-assistant-tools.ts
 
 | Line | Trigger/delivery category | Exact source expression |
 |---|---|---|
-| 18 | Tool/schema description when offered; trigger/context createRuntimeAssistantTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>"Operate only within explicit user-connected chat grants and the current durable access epoch. Cannot connect or grant access."</code> |
-| 19 | Exact tool schema source; referenced constants resolve in this module; trigger/context createRuntimeAssistantTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>{ type: "object", additionalProperties: false, properties: action === "list" ? {} : action === "create" ? { grants: { type: "array", maxItems: 200, items: { type: "object", additionalProperties: false, required: ["chatId", "permissions"], properties: { chatId: { type: "string" }, permissions: { type: "array", items: { type: "string", enum: ["read", "control"] }, }, }, }, }, } : { chatId: { type: "string" }, ...(["delegate", "control"].includes(action) ? { input: { type: "object" } } : {}), }, required: action === "list" ? [] : action === "create" ? ["grants"] : ["chatId", ...(["delegate", "control"].includes(action) ? ["input"] : [])], }</code> |
-| 57 | Exact tool schema source; referenced constants resolve in this module; trigger/context createRuntimeAssistantTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>{ type: "object" }</code> |
+| 23 | Tool/schema description when offered; trigger/context createRuntimeAssistantTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>"Operate only within explicit user-connected chat grants and the current durable access epoch. Cannot connect or grant access."</code> |
+| 24 | Exact tool schema source; referenced constants resolve in this module; trigger/context createRuntimeAssistantTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>{ type: "object", additionalProperties: false, properties: action === "list" ? {} : action === "create" ? { grants: { type: "array", maxItems: 200, items: { type: "object", additionalProperties: false, required: ["chatId", "permissions"], properties: { chatId: { type: "string" }, permissions: { type: "array", items: { type: "string", enum: ["read", "control"] }, }, }, }, }, } : { chatId: { type: "string" }, ...(["delegate", "control"].includes(action) ? { input: { type: "object" } } : {}), }, required: action === "list" ? [] : action === "create" ? ["grants"] : ["chatId", ...(["delegate", "control"].includes(action) ? ["input"] : [])], }</code> |
+| 62 | Exact tool schema source; referenced constants resolve in this module; trigger/context createRuntimeAssistantTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>{ type: "object" }</code> |
+| 140 | Tool/schema description when offered; trigger/context createRuntimeAssistantTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>"Request or decide a direct child's finite future-turn tool restrictions. Parent grants require an explicit user-delegated ceiling and this invocation's frozen authority. Never grants host capabilities or bypasses per-call approval. A grant revokes current graph turns; restart with a fresh authorized turn."</code> |
+| 141 | Exact tool schema source; referenced constants resolve in this module; trigger/context createRuntimeAssistantTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>{ type: "object", additionalProperties: false, required: expected, properties: action === "tools_request" ? { scopes: { type: "object", additionalProperties: false, required: ["model", "tools"], properties: { model: { type: "array", maxItems: 200, items: { type: "string" } }, tools: { type: "array", maxItems: 200, items: { type: "string" } }, }, }, } : action === "tools_requests" ? {} : { requestId: { type: "string" }, decision: { type: "string", enum: ["grant", "deny"] }, }, }</code> |
+| 165 | Exact tool schema source; referenced constants resolve in this module; trigger/context createRuntimeAssistantTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>{ type: "object" }</code> |
 
 ### apps/runtime/src/runtime-assistant-service.ts
 
 | Line | Trigger/delivery category | Exact source expression |
 |---|---|---|
-| 81 | Error construction; see delivery rules; trigger/context mutate; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new TypeError("Assistant context invalidation must be synchronous.")</code> |
+| 85 | Error construction; see delivery rules; trigger/context mutate; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new TypeError("Assistant context invalidation must be synchronous.")</code> |
 
 ### apps/runtime/src/runtime-assistant-controller.ts
 
 | Line | Trigger/delivery category | Exact source expression |
 |---|---|---|
 | 27 | Error construction; see delivery rules; trigger/context snapshot; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Workspace changed.")</code> |
-| 57 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Invalid assistant action.")</code> |
-| 62 | Error construction; see delivery rules; trigger/context chat; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Chat is outside this workspace.")</code> |
-| 68 | Error construction; see delivery rules; trigger/context current; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Workspace changed.")</code> |
-| 89 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Unknown assistant in this workspace.")</code> |
-| 94 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Explicit user confirmation is required for a chat connection.")</code> |
-| 106 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Select an explicit bounded child grant subset.")</code> |
-| 109 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Invalid child title.")</code> |
-| 119 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Child chat unavailable.")</code> |
+| 61 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Invalid assistant action.")</code> |
+| 66 | Error construction; see delivery rules; trigger/context chat; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Chat is outside this workspace.")</code> |
+| 72 | Error construction; see delivery rules; trigger/context current; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Workspace changed.")</code> |
+| 93 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Unknown assistant in this workspace.")</code> |
+| 99 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Stale assistant tool authority.")</code> |
+| 101 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Explicit tool assignment confirmation required.")</code> |
+| 122 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Invalid tool decision.")</code> |
+| 134 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Explicit user confirmation is required for a chat connection.")</code> |
+| 146 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Select an explicit bounded child grant subset.")</code> |
+| 149 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Invalid child title.")</code> |
+| 159 | Error construction; see delivery rules; trigger/context action; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Child chat unavailable.")</code> |
 
 ### apps/runtime/src/runtime-assistant-http.ts
 
@@ -773,6 +779,120 @@ The following appendix inventories fixed error/description expressions in the li
 |---|---|---|
 | 27 | Error construction; see delivery rules; trigger/context assistantId; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new TypeError("Invalid canonical assistant/chat ID.")</code> |
 | 37 | Error construction; see delivery rules; trigger/context assistantPermissions; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new TypeError("Invalid assistant permissions.")</code> |
+
+### apps/runtime/src/runtime-plugin-maker.ts
+
+| Line | Trigger/delivery category | Exact source expression |
+|---|---|---|
+| 20 | Error construction; see delivery rules; trigger/context denied; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Plugin maker request refused.")</code> |
+| 97 | Tool/schema description when offered; trigger/context scaffold; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>input.description \|\| "Generated native harness plugin; review before activation."</code> |
+
+### apps/runtime/src/runtime-plugin-maker-tools.ts
+
+| Line | Trigger/delivery category | Exact source expression |
+|---|---|---|
+| 11 | Tool/schema description when offered; trigger/context createRuntimePluginMakerTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>"Propose quarantined native SDK artifacts or perform offline manifest checks. Does not write, import, install, execute, enable or grant access. Human review and confined filesystem approval are separate."</code> |
+| 12 | Exact tool schema source; referenced constants resolve in this module; trigger/context createRuntimePluginMakerTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>{ type: "object", additionalProperties: false, properties: action === "scaffold" ? { id: { type: "string", maxLength: 120 }, name: { type: "string", maxLength: 120 }, description: { type: "string", maxLength: 2000 }, license: { type: "string", enum: ["UNLICENSED", "MIT", "Apache-2.0"] }, } : action === "edit" ? { hash: { type: "string" }, path: { type: "string" }, content: { type: "string", maxLength: 65536 }, } : { hash: { type: "string" } }, required: action === "scaffold" ? ["id", "name"] : action === "edit" ? ["hash", "path", "content"] : ["hash"], }</code> |
+| 20 | Tool/schema description when offered; trigger/context createRuntimePluginMakerTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>{ type: "string", maxLength: 2000 }</code> |
+| 37 | Exact tool schema source; referenced constants resolve in this module; trigger/context createRuntimePluginMakerTools; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>{ type: "object" }</code> |
+| 57 | Error construction; see delivery rules; trigger/context invoke; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Plugin maker input refused.")</code> |
+| 62 | Error construction; see delivery rules; trigger/context invoke; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Plugin maker input refused.")</code> |
+| 72 | Error construction; see delivery rules; trigger/context invoke; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Plugin maker input refused.")</code> |
+
+### apps/runtime/src/runtime-plugin-maker-host.ts
+
+| Line | Trigger/delivery category | Exact source expression |
+|---|---|---|
+| 48 | Error construction; see delivery rules; trigger/context refused; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Plugin maker host request refused.")</code> |
+
+### apps/runtime/src/runtime-plugin-maker-controller.ts
+
+| Line | Trigger/delivery category | Exact source expression |
+|---|---|---|
+| 34 | Error construction; see delivery rules; trigger/context deny; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Plugin maker action denied or stale.")</code> |
+
+### apps/runtime/src/runtime-plugin-maker-http.ts
+
+| Line | Trigger/delivery category | Exact source expression |
+|---|---|---|
+| 42 | Error construction; see delivery rules; trigger/context createPluginMakerHttpHandler; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Invalid request.")</code> |
+
+### apps/web/app/assistant/child-tool-rights.tsx
+
+| Line | Trigger/delivery category | Exact source expression |
+|---|---|---|
+| 19 | Error construction; see delivery rules; trigger/context request; user UI; recovery: applicable family above; implemented | <code>Error(response.reason)</code> |
+| 24 | Error construction; see delivery rules; trigger/context refresh; user UI; recovery: applicable family above; implemented | <code>Error("Tool rights could not be verified.")</code> |
+| 36 | Error construction; see delivery rules; trigger/context poll; user UI; recovery: applicable family above; implemented | <code>Error(response.reason)</code> |
+| 38 | Error construction; see delivery rules; trigger/context poll; user UI; recovery: applicable family above; implemented | <code>Error("Tool rights could not be verified.")</code> |
+| 62 | Error construction; see delivery rules; trigger/context perform; user UI; recovery: applicable family above; implemented | <code>Error("Refresh verified rights before making a decision.")</code> |
+| 75 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Child tool permissions</code> |
+| 77 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Choose tools already granted by you. Delegation never enables a host capability or bypasses per-action approvals. Changing rights cuts affected active work; the updated scope applies to a fresh turn. </code> |
+| 85 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Agent</code> |
+| 97 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Choose an agent</code> |
+| 100 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>: </code> |
+| 108 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Current model tools: </code> |
+| 108 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>. Current execution tools:</code> |
+| 110 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>. </code> |
+| 113 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Delegation ceiling:</code> |
+| 117 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>. </code> |
+| 120 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Unchecked tools are excluded from this assignment. An empty selection permits no tools. </code> |
+| 163 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>I authorize this exact tool selection and cancellation of affected active work. </code> |
+| 176 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Set delegated ceiling </code> |
+| 189 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Assign child tools </code> |
+| 195 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Tool requests and decisions</code> |
+| 200 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Child </code> |
+| 200 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>→ parent </code> |
+| 203 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Status: </code> |
+| 203 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>.</code> |
+| 224 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>No tool requests. A child can request more tools; its parent may grant only within the authority you delegated. </code> |
+| 229 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Permission audit</code> |
+| 234 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>· epoch </code> |
+| 242 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>No recorded permission changes.</code> |
+| 247 | User-visible JSX wording, not model input; trigger/context ChildToolRights; user UI; recovery: applicable family above; implemented | <code>Loading verified tool rights…</code> |
+| 269 | User-visible JSX wording, not model input; trigger/context RequestDecision; user UI; recovery: applicable family above; implemented | <code>I approve the exact requested scopes shown above. </code> |
+| 278 | User-visible JSX wording, not model input; trigger/context RequestDecision; user UI; recovery: applicable family above; implemented | <code>Grant requested tools </code> |
+| 286 | User-visible JSX wording, not model input; trigger/context RequestDecision; user UI; recovery: applicable family above; implemented | <code>Deny request </code> |
+
+### apps/web/app/plugin-maker/plugin-maker-workspace.tsx
+
+| Line | Trigger/delivery category | Exact source expression |
+|---|---|---|
+| 26 | User-visible UI error, not model input; trigger/context action; user UI; recovery: applicable family above; implemented | <code>"Wait for the scoped plugin maker runtime."</code> |
+| 38 | Error construction; see delivery rules; trigger/context action; user UI; recovery: applicable family above; implemented | <code>Error("Workspace changed; review the draft in its current workspace.")</code> |
+| 39 | Error construction; see delivery rules; trigger/context action; user UI; recovery: applicable family above; implemented | <code>Error(response.reason)</code> |
+| 51 | User-visible UI error, not model input; trigger/context accept; user UI; recovery: applicable family above; implemented | <code>"The runtime did not return a verified quarantined draft."</code> |
+| 129 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Create a draft</code> |
+| 131 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Use a coding chat to ask the agent to propose or edit this native harness plugin, or start from a small local scaffold here. </code> |
+| 135 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Open coding chat</code> |
+| 138 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Plugin ID</code> |
+| 147 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Name</code> |
+| 157 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Description</code> |
+| 173 | Tool/schema description when offered; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>description.trim()</code> |
+| 180 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Create quarantined scaffold </code> |
+| 191 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Draft review</code> |
+| 193 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Immutable quarantined proposal. Scaffolding and validation do not execute or install code. </code> |
+| 197 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Artifact: </code> |
+| 200 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Requested capabilities:</code> |
+| 202 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>. </code> |
+| 205 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>File</code> |
+| 226 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Source</code> |
+| 240 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Editing creates a new artifact and invalidates earlier review. Never put credentials or private logs in plugin source. </code> |
+| 252 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Save new draft revision </code> |
+| 262 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Validate draft </code> |
+| 275 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Test, review and enable</code> |
+| 278 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Save the edited source as a new draft revision before reviewing or executing it. </code> |
+| 282 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Review the exact artifact and requested capabilities above. Materializing writes the displayed files to the chosen workspace folder. Executing tests and enabling the plugin each require separate explicit approval; validation alone does not execute code. </code> |
+| 288 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Workspace-relative plugin folder</code> |
+| 308 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>I reviewed this exact artifact, folder and requested capabilities and authorize the selected action. </code> |
+| 320 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>I authorize code execution for the selected action. Tests run in the required OS sandbox. Enabling trusts this exact code to run with daemon authority after restart; declared or granted capability lists do not sandbox JavaScript. </code> |
+| 355 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Write the draft for the selected folder before testing or recording review. Enabling stays unavailable until required sandbox tests execute successfully and this exact artifact is reviewed. </code> |
+| 360 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Recorded review: </code> |
+| 360 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>. Materialized:</code> |
+| 361 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>. User-enabled configuration:</code> |
+| 362 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>. </code> |
+| 365 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Activation may require a runtime restart.</code> |
+| 366 | User-visible JSX wording, not model input; trigger/context PluginMakerWorkspace; user UI; recovery: applicable family above; implemented | <code>Check installed plugin permissions and active status</code> |
 
 ### apps/runtime/src/runtime-coding-tools.ts
 
@@ -1301,4 +1421,4 @@ The following appendix inventories fixed error/description expressions in the li
 |---|---|---|
 | 146 | Error construction; see delivery rules; trigger/context fail; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new DurableMemoryError(code, message, field)</code> |
 
-Inventory coverage: 73 selected implementation modules; 859 fixed schema/description/error/UI expressions. Tests, provider-owned text, user files and unrelated llm/tts projects are excluded. Runtime transport serializers and their exact role/result shapes are documented above. New integrations must add their implemented wording and visibility before claiming inventory completion. UI JSX/source expressions preserve code spelling; whitespace follows normal JSX rendering. Per-module entries inherit the applicable trigger/delivery and recovery rules above; errors do not themselves grant authority or automatically authorize a retry.
+Inventory coverage: 81 selected implementation modules; 944 fixed schema/description/error/UI expressions. Tests, provider-owned text, user files and unrelated llm/tts projects are excluded. Runtime transport serializers and their exact role/result shapes are documented above. New integrations must add their implemented wording and visibility before claiming inventory completion. UI JSX/source expressions preserve code spelling; whitespace follows normal JSX rendering. Per-module entries inherit the applicable trigger/delivery and recovery rules above; errors do not themselves grant authority or automatically authorize a retry.
