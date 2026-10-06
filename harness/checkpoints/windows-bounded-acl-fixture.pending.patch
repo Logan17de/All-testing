@@ -1,0 +1,33 @@
+--- a/harness/apps/runtime/src/runtime-windows-project-sandbox.test.ts
++++ b/harness/apps/runtime/src/runtime-windows-project-sandbox.test.ts
+@@ -224,15 +224,27 @@
+           join(root, "package.json"),
+           JSON.stringify({ scripts: { test: "node -e process.exit(99)" } }),
+         );
+-        execFileSync(icacls, [database, "/grant", "*S-1-15-2-1:(R)"], { stdio: "pipe" });
++        execFileSync(icacls, [database, "/grant", "*S-1-15-2-1:(R)"], {
++          stdio: "pipe",
++          timeout: 60_000,
++          maxBuffer: 64 * 1024,
++        });
+         await expect(
+           executeWindowsSandboxedProjectScript(
+             { cwd: root, command: "project-test" },
+             { npmCliPath, privatePaths: [database] },
+           ),
+         ).rejects.toThrow("project-private-host-access");
+-        execFileSync(icacls, [database, "/remove:g", "*S-1-15-2-1"], { stdio: "pipe" });
+-        execFileSync(icacls, [root, "/grant", "*S-1-15-2-1:(OI)(IO)(R)"], { stdio: "pipe" });
++        execFileSync(icacls, [database, "/remove:g", "*S-1-15-2-1"], {
++          stdio: "pipe",
++          timeout: 60_000,
++          maxBuffer: 64 * 1024,
++        });
++        execFileSync(icacls, [root, "/grant", "*S-1-15-2-1:(OI)(IO)(R)"], {
++          stdio: "pipe",
++          timeout: 60_000,
++          maxBuffer: 64 * 1024,
++        });
+         await expect(
+           executeWindowsSandboxedProjectScript(
+             { cwd: root, command: "project-test" },
