@@ -342,8 +342,9 @@ public static class ZetProcessSandbox {
   Check(value.StartsWith(prefix,StringComparison.Ordinal) && UInt32.TryParse(value.Substring(prefix.Length),out rid));return UInt32.Parse(value.Substring(prefix.Length));
  }
  static void RequireSourceTokenPolicy(IntPtr child,IntPtr creator) {
-  phase="project-source-token-policy";Check(TokenIntegrity(child)==4096 && TokenIntegrity(creator)>=8192);
-  IntPtr data=Marshal.AllocHGlobal(4);uint returned;try{Check(GetTokenInformation(child,27,data,4,out returned));Check((uint)Marshal.ReadInt32(data)==3);}finally{Marshal.FreeHGlobal(data);}
+  phase="project-source-child-token-integrity";uint childIntegrity=TokenIntegrity(child);phase="project-source-child-token-integrity-"+childIntegrity.ToString(System.Globalization.CultureInfo.InvariantCulture);Check(childIntegrity==4096);
+  phase="project-source-host-token-integrity";uint hostIntegrity=TokenIntegrity(creator);phase="project-source-host-token-integrity-"+hostIntegrity.ToString(System.Globalization.CultureInfo.InvariantCulture);Check(hostIntegrity>=8192);
+  IntPtr data=Marshal.AllocHGlobal(4);uint returned;try{phase="project-source-token-mandatory-policy";Check(GetTokenInformation(child,27,data,4,out returned));uint policy=(uint)Marshal.ReadInt32(data);phase="project-source-token-mandatory-policy-"+policy.ToString(System.Globalization.CultureInfo.InvariantCulture);Check(policy==3);}finally{Marshal.FreeHGlobal(data);}
  }
  static void RequireFutureIntegrity(IntPtr descriptor) {
   bool present,defaulted;IntPtr sacl;Check(GetSecurityDescriptorSacl(descriptor,out present,out sacl,out defaulted));

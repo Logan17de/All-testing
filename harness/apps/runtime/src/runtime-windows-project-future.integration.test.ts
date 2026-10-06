@@ -79,7 +79,7 @@ public static class LabelFixture {
 [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]public static extern bool ConvertSecurityDescriptorToStringSecurityDescriptor(IntPtr sd,uint r,uint info,out IntPtr text,out uint n);
 [DllImport("kernel32.dll")]public static extern IntPtr LocalFree(IntPtr p);
 }
-'@; $sd=[IntPtr]::Zero;$n=0;if(-not[LabelFixture]::ConvertStringSecurityDescriptorToSecurityDescriptor(${literal(label)},1,[ref]$sd,[ref]$n)){throw 'fixture-label-construct'};try{$present=$false;$default=$false;$sacl=[IntPtr]::Zero;if(-not[LabelFixture]::GetSecurityDescriptorSacl($sd,[ref]$present,[ref]$sacl,[ref]$default)){throw 'fixture-label-read'};$code=[LabelFixture]::SetNamedSecurityInfo(${literal(target)},1,16,[IntPtr]::Zero,[IntPtr]::Zero,[IntPtr]::Zero,$sacl);if($code-ne0){throw 'fixture-label-set'};$o=[IntPtr]::Zero;$g=[IntPtr]::Zero;$d=[IntPtr]::Zero;$sa=[IntPtr]::Zero;$read=[IntPtr]::Zero;$text=[IntPtr]::Zero;$len=0;try{if([LabelFixture]::GetNamedSecurityInfo(${literal(target)},1,16,[ref]$o,[ref]$g,[ref]$d,[ref]$sa,[ref]$read)-ne0){throw 'fixture-label-readback'};if(-not[LabelFixture]::ConvertSecurityDescriptorToStringSecurityDescriptor($read,1,16,[ref]$text,[ref]$len)){throw 'fixture-label-serialize'};if([Runtime.InteropServices.Marshal]::PtrToStringUni($text)-cne${literal(label)}){throw 'fixture-label-normalized'}}finally{if($text-ne[IntPtr]::Zero){[void][LabelFixture]::LocalFree($text)};if($read-ne[IntPtr]::Zero){[void][LabelFixture]::LocalFree($read)}}}finally{[void][LabelFixture]::LocalFree($sd)}`);
+'@; $sd=[IntPtr]::Zero;$n=0;if(-not[LabelFixture]::ConvertStringSecurityDescriptorToSecurityDescriptor(${literal(label)},1,[ref]$sd,[ref]$n)){throw 'fixture-label-construct'};try{$present=$false;$default=$false;$sacl=[IntPtr]::Zero;if(-not[LabelFixture]::GetSecurityDescriptorSacl($sd,[ref]$present,[ref]$sacl,[ref]$default)){throw 'fixture-label-read'};$code=[LabelFixture]::SetNamedSecurityInfo(${literal(target)},1,16,[IntPtr]::Zero,[IntPtr]::Zero,[IntPtr]::Zero,$sacl);if($code-ne0){throw 'fixture-label-set'};$o=[IntPtr]::Zero;$g=[IntPtr]::Zero;$d=[IntPtr]::Zero;$sa=[IntPtr]::Zero;$read=[IntPtr]::Zero;$text=[IntPtr]::Zero;$len=0;try{if([LabelFixture]::GetNamedSecurityInfo(${literal(target)},1,16,[ref]$o,[ref]$g,[ref]$d,[ref]$sa,[ref]$read)-ne0){throw 'fixture-label-readback'};if(-not[LabelFixture]::ConvertSecurityDescriptorToStringSecurityDescriptor($read,1,16,[ref]$text,[ref]$len)){throw 'fixture-label-serialize'};$actual=[Runtime.InteropServices.Marshal]::PtrToStringUni($text);if($actual-cne${literal(label)}){$safe=$actual.Substring(0,[Math]::Min(256,$actual.Length));throw ('fixture-label-normalized: '+$safe)}}finally{if($text-ne[IntPtr]::Zero){[void][LabelFixture]::LocalFree($text)};if($read-ne[IntPtr]::Zero){[void][LabelFixture]::LocalFree($read)}}}finally{[void][LabelFixture]::LocalFree($sd)}`);
         }
         if (mode === "inherited-read") acl(target, ["/grant", "*S-1-15-2-1:(OI)(CI)(IO)(R)"]);
         if (mode === "grandchild-read")
@@ -133,13 +133,23 @@ it.skipIf(process.platform !== "win32")(
         `const fs=require('node:fs'),assert=require('node:assert/strict');const denied=e=>e.code==='EACCES'||e.code==='EPERM';setTimeout(()=>{let attempts=0;const timer=setInterval(()=>{const attemptAt=Date.now();assert.throws(()=>fs.readFileSync(${JSON.stringify(later)}),denied);assert.throws(()=>fs.writeFileSync(${JSON.stringify(later)},'bad'),denied);assert.throws(()=>fs.writeFileSync(${JSON.stringify(join(laterDirectory, "bad.txt"))},'bad'),denied);if(++attempts===3){clearInterval(timer);console.log('future-host-kernel-denial:'+attemptAt);}},500);},15000);`,
       );
       let ended = false;
+      let earlyFailure = "Native sandbox returned without payload readiness.";
       const outcome = executeWindowsSandboxedProjectScript(
         { cwd: f.root, command: "project-test", signal: abort.signal },
         f,
       )
         .then(
           (value) => ({ value }),
-          () => ({ error: true }),
+          (error: unknown) => {
+            const message = error instanceof Error ? error.message : "";
+            earlyFailure =
+              /^Windows process sandbox refused \([a-z-]+:-?\d{1,12}\); no host fallback\.$/.test(
+                message,
+              )
+                ? message
+                : "Native sandbox failed before payload readiness.";
+            return { error: true };
+          },
         )
         .finally(() => {
           ended = true;
@@ -158,7 +168,10 @@ it.skipIf(process.platform !== "win32")(
         }
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
-      expect(ready, "Owned sandbox payload did not reach the post-preflight delay.").toBe(true);
+      expect(
+        ready,
+        `Owned sandbox payload did not reach the post-preflight delay: ${earlyFailure}`,
+      ).toBe(true);
       await mkdir(laterDirectory);
       await writeFile(later, "ordinary host-created bytes");
       const createdAt = Date.now();
