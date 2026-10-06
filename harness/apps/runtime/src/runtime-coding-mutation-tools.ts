@@ -153,7 +153,7 @@ export function createRuntimeMutationTools(
           description:
             operation === "write"
               ? "Replace/create one UTF-8 file up to 64 KiB after explicit approval. Existing parent directory required. Linux only; credentials and links refused."
-              : "Run approved fixed diagnostics or npm test/build/typecheck/lint scripts with required Linux isolation, no network or host fallback. Project scripts run in a bounded private source copy with read-only dependencies; generated outputs are discarded. Requires trusted ZET_NPM_CLI.",
+              : "Run approved fixed diagnostics or npm test/build/typecheck/lint scripts with required native OS containment, no network or host fallback. Project scripts run in a bounded private source copy with read-only dependencies; generated outputs are discarded. Requires trusted ZET_NPM_CLI.",
           inputSchema:
             operation === "write"
               ? {
