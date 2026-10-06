@@ -55,7 +55,7 @@ jobs:
         run: |
           npm run build --workspace @zet-harness/runtime
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm exec -- vitest run apps/runtime/src/runtime-windows-project-sandbox.test.ts
+          npm exec -- vitest run apps/runtime/src/runtime-windows-project-sandbox.test.ts apps/runtime/src/runtime-windows-project-future.integration.test.ts
 
       - name: Typecheck
         run: npm run typecheck
@@ -85,7 +85,7 @@ jobs:
         run: |
           npm run build --workspace @zet-harness/runtime --workspace @zet-harness/client
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm exec -- vitest run --passWithNoTests --exclude apps/runtime/src/runtime-windows-project-sandbox.test.ts
+          npm exec -- vitest run --passWithNoTests --exclude apps/runtime/src/runtime-windows-project-sandbox.test.ts --exclude apps/runtime/src/runtime-windows-project-future.integration.test.ts
 
       - name: Install Linux namespace sandbox
         if: runner.os == 'Linux'

@@ -246,6 +246,9 @@ public static class ZetProcessSandbox {
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool RevertToSelf();
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(IntPtr token,int information,IntPtr value,uint size,out uint returned);
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetAce(IntPtr acl,uint index,out IntPtr ace);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetSecurityDescriptorControl(IntPtr descriptor,out ushort control,out uint revision);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetSecurityDescriptorDacl(IntPtr descriptor,out bool present,out IntPtr dacl,out bool defaulted);
+ [DllImport("advapi32.dll")] static extern bool IsValidSid(IntPtr sid);
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertSecurityDescriptorToStringSecurityDescriptor(IntPtr descriptor,uint revision,uint information,out IntPtr text,out uint length);
  static string phase="init"; static int nativeError;
  public static string Failure() { return phase+":"+nativeError; }
@@ -309,13 +312,26 @@ public static class ZetProcessSandbox {
    // Every right is checked independently. Combined masks could hide an allowed operation.
    uint[] fileRights=new uint[]{1,2,4,16,256,65536,262144,524288};
    uint[] directoryRights=new uint[]{1,2,4,16,64,256,65536,262144,524288};
-   foreach(SourceObject item in sourceObjects)foreach(uint right in item.directory?directoryRights:fileRights) {
+   foreach(SourceObject item in sourceObjects) {
+    phase="project-source-acl-shape";IntPtr descriptor=Descriptor(item.path);try{RequirePlainDacl(descriptor);}finally{LocalFree(descriptor);}
+    foreach(uint right in item.directory?directoryRights:fileRights) {
     phase="project-source-proof-limit";Check((DateTime.UtcNow-started).TotalSeconds<=15);
     phase="project-source-host-access";RequireKernelDenied(item.path,token,right,item.directory);
+    }
    }
    foreach(SourceObject item in sourceObjects)if(item.directory)ProveSourceFuture(item.path,token,creator,started);
    phase="project-source-parent-access";RequireKernelDenied(sourceParent,token,64,true);
   }finally{foreach(IntPtr handle in new IntPtr[]{creator,token,primary})if(handle!=IntPtr.Zero)CloseHandle(handle);}
+ }
+ static void RequirePlainDacl(IntPtr descriptor) {
+  bool present,defaulted;IntPtr acl;Check(GetSecurityDescriptorDacl(descriptor,out present,out acl,out defaulted));Check(present && acl!=IntPtr.Zero);
+  uint length=(ushort)Marshal.ReadInt16(acl,2),count=(ushort)Marshal.ReadInt16(acl,4);byte revision=Marshal.ReadByte(acl);Check((revision==2 || revision==4) && length>=8 && count<=8192);
+  for(uint index=0;index<count;index++) {
+   IntPtr ace;Check(GetAce(acl,index,out ace));long offset=ace.ToInt64()-acl.ToInt64();Check(offset>=8 && offset<=length-4);
+   byte type=Marshal.ReadByte(ace),flags=Marshal.ReadByte(ace,1);uint size=(ushort)Marshal.ReadInt16(ace,2);
+   Check((type==0 || type==1) && (flags&~31)==0 && size>=20 && (size&3)==0 && size<=length-offset);
+   IntPtr sid=IntPtr.Add(ace,8);byte subauthorities=Marshal.ReadByte(sid,1);Check(subauthorities<=15 && size==16u+4u*subauthorities && IsValidSid(sid));
+  }
  }
  static uint TokenIntegrity(IntPtr token) {
   IntPtr data=Marshal.AllocHGlobal(1024);uint returned;
@@ -339,16 +355,17 @@ public static class ZetProcessSandbox {
   }
  }
  static string SecurityText(IntPtr descriptor) {
-  IntPtr value=IntPtr.Zero;uint length;try{Check(ConvertSecurityDescriptorToStringSecurityDescriptor(descriptor,1,0x17,out value,out length));return Marshal.PtrToStringUni(value);}finally{if(value!=IntPtr.Zero)LocalFree(value);}
+  IntPtr value=IntPtr.Zero;uint length,revision;ushort control;try{Check(GetSecurityDescriptorControl(descriptor,out control,out revision));Check(ConvertSecurityDescriptorToStringSecurityDescriptor(descriptor,1,0x17,out value,out length));string text=Marshal.PtrToStringUni(value);Check(length>0 && !String.IsNullOrEmpty(text));return revision.ToString(System.Globalization.CultureInfo.InvariantCulture)+":"+control.ToString(System.Globalization.CultureInfo.InvariantCulture)+":"+text;}finally{if(value!=IntPtr.Zero)LocalFree(value);}
  }
  static void ProveSourceFuture(string path,IntPtr token,IntPtr creator,DateTime started) {
   phase="project-source-future-descriptor";IntPtr owner,group,dacl,sacl,parent;uint error=GetNamedSecurityInfo(path,1,0x17,out owner,out group,out dacl,out sacl,out parent);
   if(error!=0){nativeError=(int)error;throw new InvalidOperationException();}bool derived=false;
-  try {for(int generation=0;generation<8;generation++) {
+  try {phase="project-source-acl-shape";RequirePlainDacl(parent);for(int generation=0;generation<8;generation++) {
    phase="project-source-future-limit";Check((DateTime.UtcNow-started).TotalSeconds<=15);
    IntPtr file=IntPtr.Zero,directory=IntPtr.Zero;bool keep=false;
    try {MAPPING mapping=new MAPPING();mapping.read=0x120089;mapping.write=0x120116;mapping.execute=0x1200a0;mapping.all=0x1f01ff;
     phase="project-source-future-inheritance";Check(CreatePrivateObjectSecurityEx(parent,IntPtr.Zero,out file,IntPtr.Zero,false,3,creator,ref mapping));Check(CreatePrivateObjectSecurityEx(parent,IntPtr.Zero,out directory,IntPtr.Zero,true,3,creator,ref mapping));
+    phase="project-source-acl-shape";RequirePlainDacl(file);RequirePlainDacl(directory);
     phase="project-source-future-access";RequireReadDenied(file,token);RequireReadDenied(directory,token);RequireFutureIntegrity(file);RequireFutureIntegrity(directory);
     if(String.Equals(SecurityText(parent),SecurityText(directory),StringComparison.Ordinal))return;
     if(derived)Check(DestroyPrivateObjectSecurity(ref parent));else{LocalFree(parent);parent=IntPtr.Zero;}parent=directory;derived=true;keep=true;
