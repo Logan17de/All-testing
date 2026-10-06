@@ -17,7 +17,17 @@ function ps(script: string): string {
       "-EncodedCommand",
       Buffer.from(`$ErrorActionPreference='Stop';${script}`, "utf16le").toString("base64"),
     ],
-    { timeout: 15000, maxBuffer: 16384, encoding: "utf8", windowsHide: true },
+    {
+      timeout: 15000,
+      maxBuffer: 16384,
+      encoding: "utf8",
+      windowsHide: true,
+      // The runner may inherit PowerShell 7 modules; this helper executes Windows PowerShell 5.
+      env: {
+        ...process.env,
+        PSModulePath: join(system, "System32", "WindowsPowerShell", "v1.0", "Modules"),
+      },
+    },
   ).trim();
 }
 function literal(value: string): string {
