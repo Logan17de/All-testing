@@ -65,6 +65,14 @@ repair the AppContainer refusal nor provision or enable a new backend. The nativ
 candidate needs administrator and persistent-credential approval, reviewed
 implementation and new kernel proof; the accepted Linux route remains available.
 
+The [broker preparation follow-up](../WINDOWS-BROKER-PREPARATION.md) adds strict
+fixed-command request bindings, bounded expiry, a synthetic ordered launch
+sequence and a readiness report that remains disabled even for imported
+all-reviewed metadata. No OS launcher, provisioner, durable replay custody or
+host attestation is implemented. Cross-user broker privileges, credential
+identity/profile/storage, effective network/IPC enforcement and exact source
+scope remain unresolved. The assessed foreign sandbox identity is not reused.
+
 Two test-only durability fixtures have explicit bounded setup budgets after
 observed Windows I/O timeouts. Assertions, SQLite settings, production deadlines
 and numeric performance guards are unchanged.
