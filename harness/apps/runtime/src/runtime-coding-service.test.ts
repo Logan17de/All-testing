@@ -387,7 +387,7 @@ describe("standalone coding service (scripted inference only)", () => {
       await createRunFromCompiledGraph(db, legacy.compiled);
       expect(
         await coding.action("session/graph", { sessionId: separate.session.id }),
-      ).toMatchObject({ graphId: "chat", revisionId: `1:${separate.session.id}` });
+      ).toMatchObject({ graphId: null, graph: null });
       expect(
         ((await coding.action("session/graph", { sessionId })) as typeof firstGraph).graphId,
       ).toBe(`native-chat:${sessionId}`);

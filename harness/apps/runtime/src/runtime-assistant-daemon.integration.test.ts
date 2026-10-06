@@ -9,7 +9,12 @@ import {
   readConversationMessages,
 } from "@zet-harness/db/durable-conversation-records";
 import { createSortableId } from "@zet-harness/db/sortable-id";
-import type { ModelRequest, ModelResult, AdapterInvocationContext } from "@zet-harness/plugin-api";
+import type {
+  JsonObject,
+  ModelRequest,
+  ModelResult,
+  AdapterInvocationContext,
+} from "@zet-harness/plugin-api";
 import { RuntimeDaemon } from "./runtime-daemon.js";
 it("real daemon scripted inference revocation aborts original signal and excludes disconnected source via actual context floor", async () => {
   const directory = await mkdtemp(join(tmpdir(), "assistant-daemon-"));
@@ -471,6 +476,267 @@ it.skipIf(process.platform !== "linux")(
       expect(content).toBe("exact approved fixture");
       await expect(access(join(directory, "cancelled.txt"))).rejects.toThrow();
     } finally {
+      await daemon.stop();
+      db.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it.each(["interrupt", "revoked"] as const)(
+  "explicitly connected ordinary native chat %s requires current exact authority",
+  async (controlMode) => {
+    const { writeSetting } = await import("@zet-harness/db/durable-setting-records");
+    const directory = await mkdtemp(join(tmpdir(), "assistant-control-daemon-"));
+    const databasePath = join(directory, "runtime.sqlite");
+    const daemon = new RuntimeDaemon({
+      api: { port: 0 },
+      database: { path: databasePath },
+      plugins: { directory: join(directory, "plugins") },
+      probePathLimits: false,
+    });
+    await daemon.start();
+    const db = new DatabaseSync(databasePath);
+    writeSetting(db, "workspace.root", directory, Date.now());
+    const api = daemon.snapshot().api,
+      base = `http://${api.host}:${String(api.port)}`;
+    let root = "",
+      target = "",
+      other = "",
+      targetRun = "",
+      otherRun = "",
+      forgedRun = "";
+    const ordinary = new Map<
+      string,
+      { context: AdapterInvocationContext; finish: (result: ModelResult) => void }
+    >();
+    const rootRequests: ModelRequest[] = [];
+    let releaseControl: ((result: ModelResult) => void) | undefined;
+    let rootPendingContext: AdapterInvocationContext | undefined;
+    const answer = (): ModelResult => ({
+      message: { role: "assistant", parts: [{ kind: "text", text: "control fixture done" }] },
+      finishReason: "stop",
+    });
+    const tool = (callId: string, name: string, args: Record<string, unknown>): ModelResult => ({
+      message: {
+        role: "assistant",
+        parts: [{ kind: "tool-call", callId, name, arguments: args as JsonObject }],
+      },
+      finishReason: "tool-calls",
+    });
+    daemon.plugins!.models.register({
+      manifest: {
+        id: "fixture.model",
+        version: "1",
+        title: "Scripted ordinary control",
+        requiredCapabilities: [],
+        features: {
+          streaming: false,
+          tools: true,
+          vision: false,
+          structuredOutput: false,
+          contextWindowTokens: 32000,
+        },
+      },
+      generate: (request, context) => {
+        const actor = db
+          .prepare("SELECT target_chat_id FROM assistant_runs WHERE run_id=?")
+          .get(context.runId)?.target_chat_id;
+        if (actor !== root)
+          return new Promise((resolve) =>
+            ordinary.set(context.runId, { context, finish: resolve }),
+          );
+        rootRequests.push(structuredClone(request));
+        if (rootRequests.length === 1)
+          return Promise.resolve(
+            tool("ordinary-status", "harness_assistant_status", { chatId: target }),
+          );
+        if (rootRequests.length === 2)
+          return Promise.resolve(
+            tool("wrong-session", "harness_assistant_control", {
+              chatId: target,
+              input: { action: "interrupt", turnId: otherRun },
+            }),
+          );
+        if (rootRequests.length === 3)
+          return Promise.resolve(
+            tool("ungranted-target", "harness_assistant_control", {
+              chatId: other,
+              input: { action: "interrupt", turnId: otherRun },
+            }),
+          );
+        if (rootRequests.length === 4)
+          return Promise.resolve(
+            tool("spoofed-graph", "harness_assistant_control", {
+              chatId: target,
+              input: { action: "interrupt", turnId: forgedRun },
+            }),
+          );
+        if (rootRequests.length === 5) {
+          if (controlMode === "revoked") {
+            rootPendingContext = context;
+            return new Promise((resolve) => {
+              releaseControl = resolve;
+            });
+          }
+          return Promise.resolve(
+            tool("ordinary-interrupt", "harness_assistant_control", {
+              chatId: target,
+              input: { action: "interrupt", turnId: targetRun },
+            }),
+          );
+        }
+        return Promise.resolve(answer());
+      },
+    });
+    saveModelConfig(db, {
+      modelId: "fixture.model",
+      title: "Fixture",
+      profile: "custom",
+      baseUrl: "http://127.0.0.1:1/v1",
+      model: "fixture",
+      tools: true,
+      contextWindowTokens: 32000,
+      nowMs: Date.now(),
+    });
+    try {
+      const { csrfToken } = (await (await fetch(`${base}/api/session`)).json()) as {
+        csrfToken: string;
+      };
+      const post = async (path: string, action: string, params: Record<string, unknown>) => {
+        const response = await fetch(`${base}/api/${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-zet-csrf": csrfToken },
+          body: JSON.stringify({ action, params }),
+        });
+        expect(response.status).toBe(200);
+        return (await response.json()) as { result: Record<string, unknown> };
+      };
+      target = (
+        (await post("agent", "session/start", { title: "Connected ordinary native chat" })).result
+          .session as { id: string }
+      ).id;
+      other = (
+        (await post("agent", "session/start", { title: "Unconnected ordinary native chat" })).result
+          .session as { id: string }
+      ).id;
+      targetRun = (
+        (
+          await post("agent", "turn/start", {
+            sessionId: target,
+            text: "Paused target inference",
+            modelId: "fixture.model",
+          })
+        ).result.turn as { id: string }
+      ).id;
+      otherRun = (
+        (
+          await post("agent", "turn/start", {
+            sessionId: other,
+            text: "Paused unrelated inference",
+            modelId: "fixture.model",
+          })
+        ).result.turn as { id: string }
+      ).id;
+      for (let i = 0; i < 200 && !ordinary.has(targetRun); i++)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(ordinary.has(targetRun)).toBe(true);
+      const { buildWorkflow } = await import("./runtime-workflows.js");
+      const forgedGraph = {
+        ...buildWorkflow("chat", other, { modelId: "fixture.model" }),
+        graphId: `native-chat:${target}`,
+        revisionId: `1:${target}`,
+      };
+      const genericResponse = await fetch(`${base}/api/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-zet-csrf": csrfToken },
+        body: JSON.stringify({ graph: forgedGraph }),
+      });
+      expect(genericResponse.status).toBe(201);
+      forgedRun = ((await genericResponse.json()) as { runId: string }).runId;
+      expect(
+        db.prepare("SELECT 1 FROM native_chat_runs WHERE run_id=?").get(forgedRun),
+      ).toBeUndefined();
+      for (const action of ["turn/read", "turn/interrupt"]) {
+        const denied = await fetch(`${base}/api/agent`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-zet-csrf": csrfToken },
+          body: JSON.stringify({ action, params: { sessionId: target, turnId: forgedRun } }),
+        });
+        expect(denied.status).toBe(400);
+      }
+      const linked = await post("agent", "session/graph", { sessionId: target });
+      expect(linked.result.runId).toBe(targetRun);
+      const readTurn = await post("agent", "turn/read", { sessionId: target, turnId: targetRun });
+      expect((readTurn.result.turn as { runId: string }).runId).toBe(targetRun);
+      root = ((await post("assistant", "create", {})).result.binding as { assistantId: string })
+        .assistantId;
+      await post("assistant", "connect", {
+        assistantId: root,
+        chatId: target,
+        permissions: ["read", "control"],
+        confirm: true,
+      });
+      const rootRun = (
+        (
+          await post("agent", "turn/start", {
+            sessionId: root,
+            text: "Review and interrupt only the connected target",
+            modelId: "fixture.model",
+          })
+        ).result.turn as { id: string }
+      ).id;
+      if (controlMode === "revoked") {
+        for (let i = 0; i < 200 && !releaseControl; i++)
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(releaseControl).toBeDefined();
+        await post("assistant", "disconnect", { assistantId: root, chatId: target });
+        expect(rootPendingContext?.signal.aborted).toBe(true);
+        releaseControl!(
+          tool("ordinary-interrupt", "harness_assistant_control", {
+            chatId: target,
+            input: { action: "interrupt", turnId: targetRun },
+          }),
+        );
+      }
+      for (let i = 0; i < 200; i++) {
+        if (
+          ["completed", "failed", "cancelled"].includes(
+            String(db.prepare("SELECT status FROM runs WHERE run_id=?").get(rootRun)?.status),
+          )
+        )
+          break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const parts = readConversationMessages(db, root).flatMap((message) => message.parts);
+      const status = parts.find(
+        (part) => part.kind === "tool-result" && part.callId === "ordinary-status",
+      );
+      expect(status?.kind === "tool-result" ? JSON.stringify(status.value) : "").toContain(
+        targetRun,
+      );
+      expect(status?.kind === "tool-result" ? JSON.stringify(status.value) : "").not.toContain(
+        forgedRun,
+      );
+      for (const id of ["wrong-session", "ungranted-target", "spoofed-graph"]) {
+        const result = parts.find((part) => part.kind === "tool-result" && part.callId === id);
+        expect(result?.kind === "tool-result" && result.isError).toBe(true);
+      }
+      const controlled = parts.find(
+        (part) => part.kind === "tool-result" && part.callId === "ordinary-interrupt",
+      );
+      if (controlMode === "revoked") expect(controlled).toBeUndefined();
+      else {
+        expect(controlled?.kind).toBe("tool-result");
+        expect(controlled?.kind === "tool-result" && controlled.isError).not.toBe(true);
+      }
+      expect(ordinary.get(targetRun)?.context.signal.aborted).toBe(controlMode === "interrupt");
+      expect(
+        String(db.prepare("SELECT status FROM runs WHERE run_id=?").get(otherRun)?.status),
+      ).not.toBe("cancelled");
+    } finally {
+      releaseControl?.(answer());
+      for (const pending of ordinary.values()) pending.finish(answer());
       await daemon.stop();
       db.close();
       await rm(directory, { recursive: true, force: true });

@@ -1,13 +1,76 @@
 import { mkdtemp, writeFile, rm, mkdir, readFile, readlink, symlink, link } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { runBoundedProcess } from "@zet-harness/tools";
+import * as windowsSandbox from "./runtime-windows-process-sandbox.js";
 import type { ProcessRunRequest } from "@zet-harness/tools";
 import {
   runSandboxedProcess,
   runSandboxedProjectCommand,
   readProjectSnapshotBytes,
 } from "./runtime-process-sandbox.js";
+
+it("allows only the fixed Windows Node version diagnostic with private state configured", async () => {
+  const native = vi.spyOn(windowsSandbox, "executeWindowsSandboxedProjectCommand");
+  native.mockResolvedValue({
+    outcome: "exited",
+    exitCode: 0,
+    signal: null,
+    stdout: process.version,
+    stderr: "",
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    durationMs: 1,
+  });
+  const request = { command: process.execPath, args: ["--version"], cwd: tmpdir(), env: {} };
+  const privatePaths = [join(tmpdir(), "runtime.sqlite"), join(tmpdir(), "runtime.sqlite-wal")];
+  try {
+    const result = await runSandboxedProcess(
+      request,
+      runBoundedProcess,
+      "win32",
+      undefined,
+      privatePaths,
+    );
+    expect(result.stdout).toBe(process.version);
+    expect(native).toHaveBeenCalledOnce();
+    expect(native.mock.calls[0]?.[0]).toEqual({ cwd: request.cwd, command: "node-version" });
+    await expect(
+      runSandboxedProcess(
+        { ...request, args: ["--version", "-e", "source"] },
+        runBoundedProcess,
+        "win32",
+        undefined,
+        privatePaths,
+      ),
+    ).rejects.toThrow("command unsupported");
+    await expect(
+      runSandboxedProcess(
+        {
+          ...request,
+          command: "git",
+          args: [
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.untrackedCache=false",
+            "status",
+            "--porcelain=v1",
+            "--ignore-submodules=all",
+          ],
+        },
+        runBoundedProcess,
+        "win32",
+        undefined,
+        privatePaths,
+      ),
+    ).rejects.toThrow("private state masking unsupported");
+    expect(native).toHaveBeenCalledOnce();
+  } finally {
+    native.mockRestore();
+  }
+});
 
 it("refuses host execution and unsupported OS without fallback", async () => {
   let called = false;

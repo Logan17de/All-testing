@@ -30,7 +30,7 @@ jobs:
           - ubuntu-latest
           - windows-latest
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 12
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: harness
@@ -74,7 +74,18 @@ jobs:
 
       - name: Install Linux namespace sandbox
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap meson ninja-build libcap-dev pkg-config
+          # Pin the same upstream release used by local native-kernel acceptance.
+          curl --fail --location --silent --show-error https://github.com/containers/bubblewrap/releases/download/v0.12.0/bubblewrap-0.12.0.tar.xz -o "$RUNNER_TEMP/zet-bubblewrap.tar.xz"
+          printf '%s  %s\n' '9760d007363e3abba7c747489910f9f82d9fca53ba3bd3282e396fa3c97a3314' "$RUNNER_TEMP/zet-bubblewrap.tar.xz" | sha256sum --check
+          tar -xf "$RUNNER_TEMP/zet-bubblewrap.tar.xz" -C "$RUNNER_TEMP"
+          meson setup "$RUNNER_TEMP/zet-bwrap-build" "$RUNNER_TEMP/bubblewrap-0.12.0" -Dman=disabled -Dtests=false -Dbash_completion=disabled -Dzsh_completion=disabled
+          meson compile -C "$RUNNER_TEMP/zet-bwrap-build"
+          sudo install -m 0755 "$RUNNER_TEMP/zet-bwrap-build/bwrap" /usr/bin/bwrap
+          bwrap --version
+          bwrap --help | grep -- '--ro-bind-fd'
 
       - name: Native Linux kernel acceptance
         if: runner.os == 'Linux'

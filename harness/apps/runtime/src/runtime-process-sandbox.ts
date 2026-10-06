@@ -85,14 +85,16 @@ export async function runSandboxedProcess(
 ): Promise<ProcessRunResult> {
   request.signal?.throwIfAborted();
   if (platform === "win32" && runner === runBoundedProcess) {
-    if (privatePaths?.length)
-      throw new Error("Windows private state masking unsupported by native sandbox.");
     const nodeVersion =
       request.command === process.execPath && JSON.stringify(request.args) === '["--version"]';
     const gitStatus =
       request.command === "git" && JSON.stringify(request.args) === JSON.stringify(GIT_ARGS);
     if (!nodeVersion && !gitStatus)
       throw new Error("Windows command unsupported by native sandbox.");
+    // The fixed version diagnostic copies only trusted Node into an empty workspace.
+    // Git status copies workspace source and still requires private state filtering.
+    if (privatePaths?.length && !nodeVersion)
+      throw new Error("Windows private state masking unsupported by native sandbox.");
     const { executeWindowsSandboxedProjectCommand } =
       await import("./runtime-windows-process-sandbox.js");
     const trustedGitRoot = process.env["ZET_WINDOWS_GIT_ROOT"];
@@ -352,7 +354,9 @@ export async function runSandboxedProcess(
         : await runner(boundedRequest);
     request.signal?.throwIfAborted();
     if (result.outcome !== "exited" || result.exitCode !== 0)
-      throw new Error("Independent process sandbox execution failed; no host fallback.");
+      throw new Error(
+        "Independent process sandbox execution failed; descriptor-bind-capable bubblewrap and user namespaces are required; no host fallback.",
+      );
     return result;
   } finally {
     try {

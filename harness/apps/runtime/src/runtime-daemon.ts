@@ -1,3 +1,4 @@
+import { DURABLE_NATIVE_CHAT_RUNS_MIGRATION } from "./runtime-native-chat-runs.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   DURABLE_ASSISTANT_ACCESS_MIGRATION,
@@ -160,6 +161,7 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_WORKSPACES_MIGRATION,
   DURABLE_NATIVE_CHAT_SCOPES_MIGRATION,
   DURABLE_ASSISTANT_ACCESS_MIGRATION,
+  DURABLE_NATIVE_CHAT_RUNS_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
@@ -330,7 +332,7 @@ export class RuntimeDaemon {
           .prepare("SELECT 1 FROM assistant_roots WHERE assistant_id=?")
           .get(sessionId);
         return root
-          ? "You are the user's personal assistant. Help plan and coordinate work using only the currently offered assistant chat tools and explicit graph connections. Existing chats are private unless connected by the user. Read permitted chats for current context, create child chats with an explicit subset of your current read/control grants, and delegate bounded coding tasks only to those created children. Connected ordinary chats support read/status and interruption of bound turns; they cannot be delegated into. Children receive scoped chat and native coding tools within inherited user-granted tool restrictions. Mutation opt-in is inherited from the originating user turn, but each write/process/Git/worktree action still requires its own exact human approval. Private runtime database files and sidecars are excluded from filesystem and sandbox execution. Plugin/MCP, browser and desktop tools remain unavailable in assistant-bound turns; use a separately authorized normal coding chat for those operations. You cannot connect or reconnect chats or expand grants. Revocation cancels pending work and excludes past source-bearing context from future turns; never claim retroactive forgetting of already observed outputs."
+          ? "You are the user's personal assistant. Help plan and coordinate work using only the currently offered assistant chat tools and explicit graph connections. Existing chats are private unless connected by the user. Read permitted chats for current context, create child chats with an explicit subset of your current read/control grants, and delegate bounded coding tasks only to those created children. Connected ordinary chats support read/status and interruption of their own native turns with current read/control grants; they cannot be delegated into. Children receive scoped chat and native coding tools within inherited user-granted tool restrictions. Mutation opt-in is inherited from the originating user turn, but each write/process/Git/worktree action still requires its own exact human approval. Private runtime database files and sidecars are excluded from filesystem and sandbox execution. Plugin/MCP, browser and desktop tools remain unavailable in assistant-bound turns; use a separately authorized normal coding chat for those operations. You cannot connect or reconnect chats or expand grants. Revocation cancels pending work and excludes past source-bearing context from future turns; never claim retroactive forgetting of already observed outputs."
           : undefined;
       },
       restrictToolScopes: (sessionId, scope) => {
@@ -1200,13 +1202,15 @@ export class RuntimeDaemon {
           signal.throwIfAborted();
           assertAssistantAccess(db, binding, chatId, "read");
           await this.agent.action("session/graph", { sessionId: chatId });
+          signal.throwIfAborted();
+          assertAssistantAccess(db, binding, chatId, "read");
           return {
             chatId,
             turns: db
               .prepare(
-                "SELECT r.run_id AS id,r.status FROM assistant_runs a JOIN runs r ON r.run_id=a.run_id WHERE a.assistant_id=? AND a.target_chat_id=? ORDER BY r.created_at_ms DESC LIMIT 20",
+                "SELECT r.run_id AS id,r.status FROM native_chat_runs n JOIN runs r ON r.run_id=n.run_id LEFT JOIN assistant_runs a ON a.run_id=r.run_id WHERE n.conversation_id=? AND (a.run_id IS NULL OR (a.assistant_id=? AND a.target_chat_id=?)) ORDER BY r.created_at_ms DESC,r.run_id DESC LIMIT 20",
               )
-              .all(binding.assistantId, chatId),
+              .all(chatId, binding.assistantId, chatId),
           };
         },
         create: async (parent, signal) => {
@@ -1303,11 +1307,21 @@ export class RuntimeDaemon {
             typeof input["turnId"] !== "string"
           )
             throw new Error("Assistant control supports exact turn interruption only.");
+          await this.agent.action("session/graph", { sessionId: chatId });
+          signal.throwIfAborted();
+          assertAssistantAccess(db, binding, chatId, "read");
+          assertAssistantAccess(db, binding, chatId, "control");
           const run = db
-            .prepare("SELECT assistant_id,target_chat_id FROM assistant_runs WHERE run_id=?")
-            .get(input["turnId"]);
-          if (!run || run.assistant_id !== binding.assistantId || run.target_chat_id !== chatId)
-            throw new Error("Turn is outside this assistant graph.");
+            .prepare(
+              "SELECT r.run_id,a.assistant_id,a.target_chat_id FROM native_chat_runs n JOIN runs r ON r.run_id=n.run_id LEFT JOIN assistant_runs a ON a.run_id=r.run_id WHERE r.run_id=? AND n.conversation_id=?",
+            )
+            .get(input["turnId"], chatId);
+          if (
+            !run ||
+            (run.assistant_id !== null &&
+              (run.assistant_id !== binding.assistantId || run.target_chat_id !== chatId))
+          )
+            throw new Error("Turn is outside the authorized native chat.");
           this.assistantSignals
             .get(input["turnId"])
             ?.abort(new Error("Assistant interrupted turn."));

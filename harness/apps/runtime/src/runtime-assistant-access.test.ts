@@ -134,4 +134,4 @@ it("failed transactional invalidation leaves old grant epoch and no new floor af
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 30_000);

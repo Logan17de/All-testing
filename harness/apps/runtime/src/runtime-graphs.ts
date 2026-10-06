@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import type { PluginHost } from "@zet-harness/core";
 import type { SqliteDatabase } from "@zet-harness/db";
 import { createSortableId } from "@zet-harness/db/sortable-id";
@@ -446,6 +447,7 @@ export async function createRunFromStoredPlan(
   plan: StoredPlan,
   now: number = Date.now(),
   assertAuthority?: () => void,
+  onCreated?: (connection: DatabaseSync, runId: string) => void,
 ): Promise<string> {
   const runId = `run-${createSortableId()}`;
   await database.commit((connection) => {
@@ -457,6 +459,8 @@ export async function createRunFromStoredPlan(
          VALUES (?, ?, ?, 'pending', NULL, NULL, ?, NULL, NULL)`,
       )
       .run(runId, plan.documentHash, plan.compiledPlanId, now);
+    const completion: unknown = onCreated?.(connection, runId);
+    if (completion !== undefined) throw new TypeError("Run creation callback must be synchronous.");
   });
   return runId;
 }
@@ -466,9 +470,10 @@ export async function createRunFromCompiledGraph(
   compiled: CompiledGraph,
   now: number = Date.now(),
   assertAuthority?: () => void,
+  onCreated?: (connection: DatabaseSync, runId: string) => void,
 ): Promise<CreatedRun> {
   const plan = await storeCompiledGraph(database, compiled, now);
-  const runId = await createRunFromStoredPlan(database, plan, now, assertAuthority);
+  const runId = await createRunFromStoredPlan(database, plan, now, assertAuthority, onCreated);
   return Object.freeze({ runId, ...plan });
 }
 

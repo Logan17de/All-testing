@@ -1,3 +1,4 @@
+import { attestNativeChatRun } from "./runtime-native-chat-runs.js";
 import { resolve } from "node:path";
 import type { AdapterInvocationContext, JsonObject } from "@zet-harness/plugin-api";
 import { createSortableId, SORTABLE_ID_PATTERN } from "@zet-harness/db/sortable-id";
@@ -330,11 +331,11 @@ export class RuntimeCodingService {
       .prepare(
         `SELECT g.graph_id AS graphId,g.revision_id AS revisionId,
         g.normalized_document_json AS graphJson,r.run_id AS runId
-       FROM runs r JOIN graph_sources g ON g.document_hash=r.document_hash
-       WHERE g.graph_id=? OR (g.graph_id='chat' AND g.revision_id=?)
+       FROM native_chat_runs n JOIN runs r ON r.run_id=n.run_id JOIN graph_sources g ON g.document_hash=r.document_hash
+       WHERE n.conversation_id=?
        ORDER BY r.created_at_ms DESC,r.run_id DESC LIMIT 1`,
       )
-      .get(`native-chat:${sessionId}`, `1:${sessionId}`) as
+      .get(sessionId) as
       { graphId: string; revisionId: string; graphJson: string; runId: string } | undefined;
   }
   #runs(root?: string) {
@@ -348,16 +349,17 @@ export class RuntimeCodingService {
     );
     const rows = connection
       .prepare(
-        `SELECT r.run_id AS id,r.status AS status,g.graph_id AS graphId,g.revision_id AS revisionId FROM runs r JOIN graph_sources g ON g.document_hash=r.document_hash WHERE g.graph_id='chat' OR g.graph_id LIKE 'native-chat:%' ORDER BY r.created_at_ms DESC,r.run_id DESC LIMIT 1000`,
+        `SELECT r.run_id AS id,r.status AS status,n.conversation_id AS sessionId,g.graph_id AS graphId,g.revision_id AS revisionId FROM native_chat_runs n JOIN runs r ON r.run_id=n.run_id JOIN graph_sources g ON g.document_hash=r.document_hash ORDER BY r.created_at_ms DESC,r.run_id DESC LIMIT 1000`,
       )
-      .all() as { id: string; status: string; graphId: string; revisionId: string }[];
+      .all() as {
+      id: string;
+      status: string;
+      sessionId: string;
+      graphId: string;
+      revisionId: string;
+    }[];
     return rows.flatMap((row) => {
-      const sessionId = row.graphId.startsWith("native-chat:")
-        ? row.graphId.slice("native-chat:".length)
-        : row.revisionId.startsWith("1:")
-          ? row.revisionId.slice(2)
-          : "";
-      return sessionIds.has(sessionId) ? [{ ...row, sessionId }] : [];
+      return sessionIds.has(row.sessionId) ? [row] : [];
     });
   }
   snapshot(since = 0) {
@@ -652,7 +654,7 @@ export class RuntimeCodingService {
       return { session: this.#view(updated) };
     }
     if (action === "turn/read" || action === "turn/interrupt") {
-      const turnId = text("turnId", 36)!;
+      const turnId = text("turnId", 40)!;
       if (!this.#runs().some((r) => r.id === turnId && r.sessionId === session.conversationId))
         throw new Error("Turn is outside this session.");
       if (action === "turn/interrupt") {
@@ -772,6 +774,7 @@ export class RuntimeCodingService {
         authority?.check();
         if (this.#root() !== root) throw new Error("Workspace changed before run commit.");
       },
+      (db, runId) => attestNativeChatRun(db, runId, session.conversationId),
     );
     if (this.#root() !== root) {
       await this.services.cancel(created.runId);

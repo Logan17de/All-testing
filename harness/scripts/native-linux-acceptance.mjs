@@ -11,6 +11,14 @@ import {
   runSandboxedManagedWorktree,
 } from "../apps/runtime/dist/runtime-process-sandbox.js";
 import { createRuntimeWorktreeTools } from "../apps/runtime/dist/runtime-coding-worktrees.js";
+// This fixed, output-bounded probe distinguishes kernel namespace refusal from harness setup.
+// It runs only /usr/bin/true and does not read application data or accept source/arguments.
+execFileSync(
+  "/usr/bin/bwrap",
+  ["--unshare-all", "--die-with-parent", "--ro-bind", "/", "/", "--", "/usr/bin/true"],
+  { env: {}, timeout: 10000, maxBuffer: 4096, stdio: ["ignore", "pipe", "pipe"] },
+);
+console.log("LINUX_NAMESPACE_PREFLIGHT_OK");
 const temporary = await mkdtemp(join(tmpdir(), "zet-linux-native-"));
 const server = createServer((socket) => socket.destroy());
 try {

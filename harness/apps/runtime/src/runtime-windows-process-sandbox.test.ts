@@ -53,13 +53,14 @@ describe("Windows native process sandbox", () => {
           outside: join(root, "outside.txt"),
           port: address.port,
         });
-        expect(result.exitCode).toBe(0);
+        // Only fixed synthetic probes run here; bound child diagnostics for CI failures.
+        expect(result.exitCode, result.stderr.slice(0, 4096)).toBe(0);
         expect(result.stdout.trim()).toBe("outside-file-and-network-denied");
         const version = await executeWindowsSandboxedProjectCommand({
           cwd: root,
           command: "node-version",
         });
-        expect(version.exitCode).toBe(0);
+        expect(version.exitCode, version.stderr.slice(0, 4096)).toBe(0);
         expect(version.stdout.trim()).toBe(process.version);
       } finally {
         server.close();
@@ -77,7 +78,10 @@ describe("Windows native process sandbox", () => {
         port: 1,
         hold: true,
       });
-      expect(result.outcome).toBe("timed-out");
+      expect(
+        result.outcome,
+        `exit=${result.exitCode}; stderr=${result.stderr.slice(0, 4096)}`,
+      ).toBe("timed-out");
       const pid = Number(result.stdout.trim());
       expect(pid).toBeGreaterThan(0);
       expect(() => process.kill(pid, 0)).toThrow();
