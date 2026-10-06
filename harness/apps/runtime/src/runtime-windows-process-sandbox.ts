@@ -245,6 +245,8 @@ public static class ZetProcessSandbox {
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool ImpersonateLoggedOnUser(IntPtr token);
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool RevertToSelf();
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(IntPtr token,int information,IntPtr value,uint size,out uint returned);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetAce(IntPtr acl,uint index,out IntPtr ace);
+ [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertSecurityDescriptorToStringSecurityDescriptor(IntPtr descriptor,uint revision,uint information,out IntPtr text,out uint length);
  static string phase="init"; static int nativeError;
  public static string Failure() { return phase+":"+nativeError; }
  static void Check(bool ok) { if(!ok) {nativeError=Marshal.GetLastWin32Error();throw new InvalidOperationException("Sandbox refused.");} }
@@ -276,6 +278,84 @@ public static class ZetProcessSandbox {
  static long bytes,byteLimit; static int entries; static DateTime scanStarted;
  static HashSet<string> privateFiles=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
  static List<SafeFileHandle> privateHandles=new List<SafeFileHandle>();
+ sealed class SourceObject { public string path;public bool directory;public SourceObject(string path,bool directory){this.path=path;this.directory=directory;} }
+ static List<SafeFileHandle> sourceHandles=new List<SafeFileHandle>();
+ static List<SourceObject> sourceObjects=new List<SourceObject>();
+ static List<Locks> sourceAncestors=new List<Locks>();
+ static string sourceParent;
+ static DateTime sourceScanStarted;
+ static void HoldOriginalSource(string root) {
+  phase="project-source-root";string canonical=Path.GetFullPath(root);Check(String.Equals(root,canonical,StringComparison.OrdinalIgnoreCase));
+  sourceParent=Path.GetDirectoryName(canonical);Check(!String.IsNullOrEmpty(sourceParent));sourceAncestors.Add(new Locks(sourceParent));
+  sourceScanStarted=DateTime.UtcNow;HoldSourceObject(canonical,true,0);
+ }
+ static void HoldSourceObject(string path,bool expectedDirectory,int depth) {
+  phase="project-source-scan-limit";Check(depth<=128 && sourceObjects.Count<10000 && (DateTime.UtcNow-sourceScanStarted).TotalSeconds<=15);
+  phase="project-source-object-open";SafeFileHandle handle=CreateFile(path,0,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero);sourceHandles.Add(handle);Check(!handle.IsInvalid);
+  INFO info;phase="project-source-object-information";Check(GetFileInformationByHandle(handle,out info));
+  phase="project-source-object-identity";bool directory=(info.attrs&0x10)!=0;Check((info.attrs&0x440)==0 && directory==expectedDirectory && (directory || info.links==1));
+  StringBuilder final=new StringBuilder(32768);phase="project-source-object-path";uint length=GetFinalPathNameByHandle(handle,final,32768,0);Check(length>0 && length<32768);
+  string canonical=final.ToString();if(canonical.StartsWith(@"\\?\"))canonical=canonical.Substring(4);
+  phase="project-source-object-canonical";Check(String.Equals(path,canonical,StringComparison.OrdinalIgnoreCase));sourceObjects.Add(new SourceObject(canonical,directory));
+  if(directory)foreach(string entry in Directory.EnumerateFileSystemEntries(canonical)) {
+   phase="project-source-entry";Check(Path.GetFileName(entry).IndexOf(':')<0);FileAttributes attrs=File.GetAttributes(entry);HoldSourceObject(entry,(attrs&FileAttributes.Directory)!=0,depth+1);
+  }
+ }
+ static void ProveSourceHostDenied(IntPtr process) {
+  IntPtr primary=IntPtr.Zero,token=IntPtr.Zero,creator=IntPtr.Zero;
+  try {phase="project-source-token";Check(OpenProcessToken(process,0xa,out primary));Check(DuplicateToken(primary,2,out token));
+   Check(OpenProcessToken(GetCurrentProcess(),0xa,out creator));RequireSourceTokenPolicy(primary,creator);
+   DateTime started=DateTime.UtcNow;
+   // Every right is checked independently. Combined masks could hide an allowed operation.
+   uint[] fileRights=new uint[]{1,2,4,16,256,65536,262144,524288};
+   uint[] directoryRights=new uint[]{1,2,4,16,64,256,65536,262144,524288};
+   foreach(SourceObject item in sourceObjects)foreach(uint right in item.directory?directoryRights:fileRights) {
+    phase="project-source-proof-limit";Check((DateTime.UtcNow-started).TotalSeconds<=15);
+    phase="project-source-host-access";RequireKernelDenied(item.path,token,right,item.directory);
+   }
+   foreach(SourceObject item in sourceObjects)if(item.directory)ProveSourceFuture(item.path,token,creator,started);
+   phase="project-source-parent-access";RequireKernelDenied(sourceParent,token,64,true);
+  }finally{foreach(IntPtr handle in new IntPtr[]{creator,token,primary})if(handle!=IntPtr.Zero)CloseHandle(handle);}
+ }
+ static uint TokenIntegrity(IntPtr token) {
+  IntPtr data=Marshal.AllocHGlobal(1024);uint returned;
+  try {Check(GetTokenInformation(token,25,data,1024,out returned));return IntegrityRid(Marshal.ReadIntPtr(data));}finally{Marshal.FreeHGlobal(data);}
+ }
+ static uint IntegrityRid(IntPtr sid) {
+  string value=new SecurityIdentifier(sid).Value;string prefix="S-1-16-";uint rid;
+  Check(value.StartsWith(prefix,StringComparison.Ordinal) && UInt32.TryParse(value.Substring(prefix.Length),out rid));return UInt32.Parse(value.Substring(prefix.Length));
+ }
+ static void RequireSourceTokenPolicy(IntPtr child,IntPtr creator) {
+  phase="project-source-token-policy";Check(TokenIntegrity(child)==4096 && TokenIntegrity(creator)>=8192);
+  IntPtr data=Marshal.AllocHGlobal(4);uint returned;try{Check(GetTokenInformation(child,27,data,4,out returned));Check((uint)Marshal.ReadInt32(data)==3);}finally{Marshal.FreeHGlobal(data);}
+ }
+ static void RequireFutureIntegrity(IntPtr descriptor) {
+  bool present,defaulted;IntPtr sacl;Check(GetSecurityDescriptorSacl(descriptor,out present,out sacl,out defaulted));
+  if(!present || sacl==IntPtr.Zero)return; // Windows treats an unlabeled object as Medium integrity.
+  uint count=(ushort)Marshal.ReadInt16(sacl,4);bool effective=false;
+  for(uint index=0;index<count;index++) {IntPtr ace;Check(GetAce(sacl,index,out ace));byte type=Marshal.ReadByte(ace),flags=Marshal.ReadByte(ace,1);int size=(ushort)Marshal.ReadInt16(ace,2);
+   Check(type==17 && size>=20 && (flags&~31)==0);uint mask=(uint)Marshal.ReadInt32(ace,4);uint rid=IntegrityRid(IntPtr.Add(ace,8));Check((mask&~7u)==0);
+   if((flags&8)==0){Check(!effective && rid>=8192 && (mask&1)!=0);effective=true;}
+  }
+ }
+ static string SecurityText(IntPtr descriptor) {
+  IntPtr value=IntPtr.Zero;uint length;try{Check(ConvertSecurityDescriptorToStringSecurityDescriptor(descriptor,1,0x17,out value,out length));return Marshal.PtrToStringUni(value);}finally{if(value!=IntPtr.Zero)LocalFree(value);}
+ }
+ static void ProveSourceFuture(string path,IntPtr token,IntPtr creator,DateTime started) {
+  phase="project-source-future-descriptor";IntPtr owner,group,dacl,sacl,parent;uint error=GetNamedSecurityInfo(path,1,0x17,out owner,out group,out dacl,out sacl,out parent);
+  if(error!=0){nativeError=(int)error;throw new InvalidOperationException();}bool derived=false;
+  try {for(int generation=0;generation<8;generation++) {
+   phase="project-source-future-limit";Check((DateTime.UtcNow-started).TotalSeconds<=15);
+   IntPtr file=IntPtr.Zero,directory=IntPtr.Zero;bool keep=false;
+   try {MAPPING mapping=new MAPPING();mapping.read=0x120089;mapping.write=0x120116;mapping.execute=0x1200a0;mapping.all=0x1f01ff;
+    phase="project-source-future-inheritance";Check(CreatePrivateObjectSecurityEx(parent,IntPtr.Zero,out file,IntPtr.Zero,false,3,creator,ref mapping));Check(CreatePrivateObjectSecurityEx(parent,IntPtr.Zero,out directory,IntPtr.Zero,true,3,creator,ref mapping));
+    phase="project-source-future-access";RequireReadDenied(file,token);RequireReadDenied(directory,token);RequireFutureIntegrity(file);RequireFutureIntegrity(directory);
+    if(String.Equals(SecurityText(parent),SecurityText(directory),StringComparison.Ordinal))return;
+    if(derived)Check(DestroyPrivateObjectSecurity(ref parent));else{LocalFree(parent);parent=IntPtr.Zero;}parent=directory;derived=true;keep=true;
+   }finally{if(file!=IntPtr.Zero)Check(DestroyPrivateObjectSecurity(ref file));if(!keep && directory!=IntPtr.Zero)Check(DestroyPrivateObjectSecurity(ref directory));}
+  }phase="project-source-future-closure";Check(false);
+  }finally{if(derived)Check(DestroyPrivateObjectSecurity(ref parent));else LocalFree(parent);}
+ }
  static void CopyTree(string root,string destination,bool git,bool dependencies=false) {
   using(Locks locked=new Locks(root)) { foreach(string entry in Directory.GetFileSystemEntries(root)) {
    if(++entries>10000 || (DateTime.UtcNow-scanStarted).TotalSeconds>15) throw new InvalidOperationException();
@@ -361,7 +441,10 @@ public static class ZetProcessSandbox {
   }finally{foreach(IntPtr handle in new IntPtr[]{creator,token,primary})if(handle!=IntPtr.Zero)CloseHandle(handle);}
  }
  static void RequireKernelReadDenied(string path,IntPtr token,bool directory) {
-  Check(ImpersonateLoggedOnUser(token));try{using(SafeFileHandle handle=CreateFile(path,1,3,IntPtr.Zero,3,directory?0x02200000u:0x00200000u,IntPtr.Zero)){int error=Marshal.GetLastWin32Error();if(!handle.IsInvalid || error!=5){nativeError=error;throw new InvalidOperationException();}}}finally{Check(RevertToSelf());}
+  RequireKernelDenied(path,token,1,directory);
+ }
+ static void RequireKernelDenied(string path,IntPtr token,uint right,bool directory) {
+  Check(ImpersonateLoggedOnUser(token));try{using(SafeFileHandle handle=CreateFile(path,right,3,IntPtr.Zero,3,directory?0x02200000u:0x00200000u,IntPtr.Zero)){int error=Marshal.GetLastWin32Error();if(!handle.IsInvalid || error!=5){nativeError=handle.IsInvalid?error:5;throw new InvalidOperationException();}}}finally{Check(RevertToSelf());}
  }
  static string ReadPipe(IntPtr pipe) {
   using(SafeFileHandle h=new SafeFileHandle(pipe,true)) using(FileStream stream=new FileStream(h,FileAccess.Read)) {
@@ -393,6 +476,7 @@ public static class ZetProcessSandbox {
     args="-c core.fsmonitor=false -c core.untrackedCache=false status --porcelain=v1 --ignore-submodules=all";
    } else if(command=="project-test" || command=="project-build" || command=="project-typecheck" || command=="project-lint") {
     phase="project-npm-rooted";Check(Path.IsPathRooted(npmRoot));phase="project-npm-normalized";string trustedNpmRoot=Path.GetFullPath(npmRoot);privateLocks=PrivatePaths(exclusions,node,trustedNpmRoot);
+    HoldOriginalSource(cwd);
     phase="project-runtime-copy";executable=Path.Combine(runner,"node.exe");CopyFile(node,executable);string npm=Path.Combine(runner,"npm");Directory.CreateDirectory(npm);CopyTree(Path.GetFullPath(npmRoot),npm,false,true);Check(File.Exists(Path.Combine(npm,"bin","npm-cli.js")));
     phase="project-source-copy";bytes=0;entries=0;byteLimit=536870912;scanStarted=DateTime.UtcNow;CopyTree(Path.GetFullPath(cwd),workspace,false,true);
     phase="project-permissions";ProjectPermissions(workspace,new SecurityIdentifier(sid),true);
@@ -431,7 +515,7 @@ public static class ZetProcessSandbox {
    env=Marshal.StringToHGlobalUni(environment);
    SIX startup=new SIX();startup.si.cb=Marshal.SizeOf(typeof(SIX));startup.si.flags=0x100;startup.si.input=inR;startup.si.output=outW;startup.si.error=errW;startup.list=list;
    phase="launch";Check(CreateProcess(executable,new StringBuilder(Quote(executable)+" "+args),IntPtr.Zero,IntPtr.Zero,true,0x80000|0x400|4|0x08000000,env,workspace,ref startup,out pi));
-   if(command.StartsWith("project-")){phase="project-private-host-access";ProvePrivateHostDenied(pi.process);}
+   if(command.StartsWith("project-")){phase="project-private-host-access";ProvePrivateHostDenied(pi.process);ProveSourceHostDenied(pi.process);}
    phase="resume";bool assigned;Check(IsProcessInJob(pi.process,job,out assigned) && assigned); Check(ResumeThread(pi.thread)!=0xffffffff);
    CloseHandle(outW);outW=IntPtr.Zero;CloseHandle(errW);errW=IntPtr.Zero;CloseHandle(inR);inR=IntPtr.Zero;
    IntPtr stdoutPipe=outR,stderrPipe=errR;outR=errR=IntPtr.Zero;
@@ -444,6 +528,7 @@ public static class ZetProcessSandbox {
    if(pi.process!=IntPtr.Zero) TerminateProcess(pi.process,1);
    foreach(IntPtr handle in new IntPtr[]{job,pi.thread,pi.process,outR,outW,errR,errW,inR,inW}) if(handle!=IntPtr.Zero) CloseHandle(handle);
    foreach(Locks item in privateLocks)item.Dispose();foreach(SafeFileHandle item in privateHandles)item.Dispose();privateHandles.Clear();privateFiles.Clear();
+   foreach(SafeFileHandle item in sourceHandles)item.Dispose();sourceHandles.Clear();sourceObjects.Clear();foreach(Locks item in sourceAncestors)item.Dispose();sourceAncestors.Clear();sourceParent=null;
    if(list!=IntPtr.Zero) {DeleteProcThreadAttributeList(list);Marshal.FreeHGlobal(list);} foreach(IntPtr memory in new IntPtr[]{scmem,handles,jobmem,env}) if(memory!=IntPtr.Zero) Marshal.FreeHGlobal(memory);
    if(sid!=IntPtr.Zero) FreeSid(sid);if(created) DeleteAppContainerProfile(profile);
   }

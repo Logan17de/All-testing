@@ -205,6 +205,14 @@ export function createRuntimeMutationTools(
             !(process.platform === "win32" && operation === "exec")
           )
             throw refused();
+          // Ordinary tools stay closed until original-source inheritance has
+          // complete native acceptance, including files created during a run.
+          if (
+            process.platform === "win32" &&
+            operation === "exec" &&
+            PROJECT_COMMANDS.includes(snapshot.command as ProjectCommand)
+          )
+            throw new Error("Windows project commands await source-boundary acceptance.");
           let approved = false;
           try {
             approved = await options.approve(Object.freeze({ tool: id, args: snapshot }), context);

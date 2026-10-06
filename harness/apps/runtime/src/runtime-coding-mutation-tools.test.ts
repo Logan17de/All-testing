@@ -48,6 +48,22 @@ function context(signal = new AbortController().signal): AdapterInvocationContex
     },
   };
 }
+it("withholds Windows project tools before consent while source acceptance is pending", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+  try {
+    const approve = vi.fn(async () => true);
+    const [, tool] = createRuntimeMutationTools({ root, approve });
+    await expect(tool!.invoke({ command: "project-test" }, context())).rejects.toThrow(
+      "source-boundary acceptance",
+    );
+    expect(approve).not.toHaveBeenCalled();
+    expect(runSandboxedProjectCommand).not.toHaveBeenCalled();
+    expect(runSandboxedProcess).not.toHaveBeenCalled();
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+  }
+});
 it("denial or approval failure never creates a file", async () => {
   for (const approve of [
     async () => false,

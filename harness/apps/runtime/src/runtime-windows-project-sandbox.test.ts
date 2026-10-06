@@ -69,6 +69,12 @@ describe("experimental Windows project copy sandbox", () => {
     );
     expect(WINDOWS_PROCESS_BRIDGE).toContain("CreatePrivateObjectSecurityEx(parent,IntPtr.Zero");
     expect(WINDOWS_PROCESS_BRIDGE).toContain("RequireKernelReadDenied(path,token,false)");
+    expect(WINDOWS_PROCESS_BRIDGE.indexOf("ProveSourceHostDenied(pi.process)")).toBeLessThan(
+      WINDOWS_PROCESS_BRIDGE.indexOf("Check(ResumeThread(pi.thread)"),
+    );
+    expect(WINDOWS_PROCESS_BRIDGE).toContain("uint[]{1,2,4,16,256,65536,262144,524288}");
+    expect(WINDOWS_PROCESS_BRIDGE).toContain("uint[]{1,2,4,16,64,256,65536,262144,524288}");
+    expect(WINDOWS_PROCESS_BRIDGE).toContain("Directory.EnumerateFileSystemEntries(canonical)");
   });
   it.skipIf(process.platform !== "win32")(
     "requires trusted npm and rejects malformed private paths before launch",
@@ -256,6 +262,50 @@ socket.once('connect',()=>process.exit(21));socket.once('error',()=>{console.log
       }
     },
     360_000,
+  );
+  it.skipIf(process.platform !== "win32")(
+    "refuses ambient access to the original source root or an independently writable excluded child before payload",
+    async () => {
+      const npmCliPath = process.env["ZET_NPM_CLI"] ?? process.env["npm_execpath"];
+      if (!npmCliPath) throw new Error("Native fixture requires trusted npm.");
+      const icacls = join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "icacls.exe");
+      const aclOptions = { stdio: "pipe" as const, timeout: 60_000, maxBuffer: 64 * 1024 };
+      for (const target of ["root", "child"] as const) {
+        const root = await realpath(await mkdtemp(join(tmpdir(), "zet-win-original-source-")));
+        try {
+          const marker = join(root, "payload-ran.txt");
+          const excluded = join(root, ".env");
+          await writeFile(excluded, "original source fixture");
+          await writeFile(
+            join(root, "check.cjs"),
+            `require('node:fs').writeFileSync(${JSON.stringify(marker)},'payload executed');`,
+          );
+          await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({ scripts: { test: "node check.cjs" } }),
+          );
+          if (target === "root") {
+            execFileSync(icacls, [root, "/setintegritylevel", "(OI)(CI)L", "/T"], aclOptions);
+            execFileSync(icacls, [root, "/grant", "*S-1-15-2-1:(OI)(CI)(M)"], aclOptions);
+          } else {
+            // Only WRITE_DATA is allowed: a composite access request would falsely deny it.
+            execFileSync(icacls, [excluded, "/setintegritylevel", "L"], aclOptions);
+            execFileSync(icacls, [excluded, "/grant", "*S-1-15-2-1:(WD)"], aclOptions);
+          }
+          await expect(
+            executeWindowsSandboxedProjectScript(
+              { cwd: root, command: "project-test" },
+              { npmCliPath },
+            ),
+          ).rejects.toThrow("project-source-host-access");
+          expect(await readFile(excluded, "utf8")).toBe("original source fixture");
+          await expect(readFile(marker)).rejects.toThrow();
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    },
+    600_000,
   );
   it.skipIf(process.platform !== "win32")(
     "refuses a DOS short-name private path rather than silently canonicalizing it",

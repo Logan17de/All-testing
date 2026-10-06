@@ -15,6 +15,8 @@ let connection: DatabaseSync;
 const first = "00000000-0000-7000-8000-000000000002";
 const second = "00000000-0000-7000-8000-000000000003";
 const base = RUNTIME_DATABASE_MIGRATIONS.filter((migration) => migration.version < 24);
+// This persistent fixture applies 23 prior migrations before testing migration 24.
+// Bound setup separately to allow durable disk I/O variance on Windows runners.
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "zet-chat-scopes-"));
   connection = new DatabaseSync(join(directory, "state.sqlite"));
@@ -31,7 +33,7 @@ beforeEach(async () => {
         "INSERT INTO conversations(conversation_id,project_id,title,status,created_at_ms,updated_at_ms) VALUES (?, ?, 'Chat', 'active', 1, 1)",
       )
       .run(id, "00000000-0000-7000-8000-000000000001");
-});
+}, 30_000);
 afterEach(async () => {
   connection.close();
   await rm(directory, { recursive: true, force: true });
