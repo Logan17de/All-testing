@@ -248,6 +248,7 @@ public static class ZetProcessSandbox {
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool ImpersonateLoggedOnUser(IntPtr token);
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool RevertToSelf();
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(IntPtr token,int information,IntPtr value,uint size,out uint returned);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool SetTokenInformation(IntPtr token,int information,ref uint value,uint size);
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetAce(IntPtr acl,uint index,out IntPtr ace);
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetSecurityDescriptorControl(IntPtr descriptor,out ushort control,out uint revision);
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetSecurityDescriptorDacl(IntPtr descriptor,out bool present,out IntPtr dacl,out bool defaulted);
@@ -309,8 +310,9 @@ public static class ZetProcessSandbox {
  }
  static void ProveSourceHostDenied(IntPtr process) {
   IntPtr primary=IntPtr.Zero,token=IntPtr.Zero,creator=IntPtr.Zero;
-  try {phase="project-source-token";Check(OpenProcessToken(process,0xa,out primary));Check(DuplicateToken(primary,2,out token));
+  try {phase="project-source-token";Check(OpenProcessToken(process,0x8a,out primary));
    Check(OpenProcessToken(GetCurrentProcess(),0xa,out creator));RequireSourceTokenPolicy(primary,creator);
+   phase="project-source-token-duplicate";Check(DuplicateToken(primary,2,out token));
    DateTime started=DateTime.UtcNow;
    // Every right is checked independently. Combined masks could hide an allowed operation.
    uint[] fileRights=new uint[]{1,2,4,16,256,65536,262144,524288};
@@ -347,7 +349,10 @@ public static class ZetProcessSandbox {
  static void RequireSourceTokenPolicy(IntPtr child,IntPtr creator) {
   phase="project-source-child-token-integrity";uint childIntegrity=TokenIntegrity(child);phase="project-source-child-token-integrity-"+childIntegrity.ToString(System.Globalization.CultureInfo.InvariantCulture);Check(childIntegrity==4096);
   phase="project-source-host-token-integrity";uint hostIntegrity=TokenIntegrity(creator);phase="project-source-host-token-integrity-"+hostIntegrity.ToString(System.Globalization.CultureInfo.InvariantCulture);Check(hostIntegrity>=8192);
-  IntPtr data=Marshal.AllocHGlobal(4);uint returned;try{phase="project-source-token-mandatory-policy";Check(GetTokenInformation(child,27,data,4,out returned));uint policy=(uint)Marshal.ReadInt32(data);phase="project-source-token-mandatory-policy-"+policy.ToString(System.Globalization.CultureInfo.InvariantCulture);Check(policy==3);}finally{Marshal.FreeHGlobal(data);}
+  IntPtr data=Marshal.AllocHGlobal(4);uint returned;try{phase="project-source-token-mandatory-policy";Check(GetTokenInformation(child,27,data,4,out returned));uint policy=(uint)Marshal.ReadInt32(data);phase="project-source-token-mandatory-policy-"+policy.ToString(System.Globalization.CultureInfo.InvariantCulture);Check(policy==1 || policy==3);
+   if(policy==1){phase="project-source-token-policy-strengthen";uint strengthened=3;Check(SetTokenInformation(child,27,ref strengthened,4));}
+   phase="project-source-token-policy-readback";Check(GetTokenInformation(child,27,data,4,out returned));uint actual=(uint)Marshal.ReadInt32(data);phase="project-source-token-policy-readback-"+actual.ToString(System.Globalization.CultureInfo.InvariantCulture);Check(actual==3);
+  }finally{Marshal.FreeHGlobal(data);}
  }
  static void RequireFutureIntegrity(IntPtr descriptor) {
   bool present,defaulted;IntPtr sacl;Check(GetSecurityDescriptorSacl(descriptor,out present,out sacl,out defaulted));

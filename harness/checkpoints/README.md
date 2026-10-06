@@ -27,6 +27,15 @@ setup did not match its strict readback, and the delayed payload did not start.
 Seven focused checks passed. This is a failed experiment, not source isolation
 acceptance. A diagnostic follow-up preserves every requirement and the tool gate.
 
+Native diagnostic run `37408190154` at `4047721f4a7da8c61e296f7f4f6dafe10738760a`
+also passed Ubuntu and failed four Windows checks. It confirmed child mandatory
+policy `1` and label readback with only the `S:AI` inheritance-control marker added.
+The reviewed follow-up attempts to add the process-integrity minimum restriction
+only to the owned suspended child token and requires exact policy `3` readback.
+Unsupported setters still refuse before execution; host privileges and ACLs are
+unchanged. Fixture readback permits only the identical requested ACE with the
+observed inheritance marker. Native acceptance remains required.
+
 Two test-only durability fixtures have explicit bounded setup budgets after
 observed Windows I/O timeouts. Assertions, SQLite settings, production deadlines
 and numeric performance guards are unchanged.
