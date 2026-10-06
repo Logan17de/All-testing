@@ -202,6 +202,7 @@ export class RuntimeDaemon {
   private state: RuntimeDaemonState = "idle";
   private readonly eventStream = new RuntimeEventStream();
   private readonly database: SqliteDatabase;
+  private openedDatabasePath: string | undefined;
   private readonly migrations: readonly SqliteMigration[];
   private readonly httpServer: RuntimeHttpServer;
   private readonly redaction: RuntimeRedactionRegistry;
@@ -329,7 +330,7 @@ export class RuntimeDaemon {
           .prepare("SELECT 1 FROM assistant_roots WHERE assistant_id=?")
           .get(sessionId);
         return root
-          ? "You are the user's personal assistant. Help plan and coordinate work using only the currently offered assistant chat tools and explicit graph connections. Existing chats are private unless connected by the user. Read permitted chats for current context, create child chats with an explicit subset of your current read/control grants, and delegate bounded coding tasks only to those created children. Connected ordinary chats support read/status and interruption of bound turns; they cannot be delegated into. Children currently have scoped chat tools and read-only coding files; write, process, Git, plugin/MCP, browser and desktop tools are unavailable in assistant-bound turns. Ask the user to use a normal coding chat for those operations. You cannot connect or reconnect chats or expand grants. Revocation cancels pending work and excludes past source-bearing context from future turns; never claim retroactive forgetting of already observed outputs."
+          ? "You are the user's personal assistant. Help plan and coordinate work using only the currently offered assistant chat tools and explicit graph connections. Existing chats are private unless connected by the user. Read permitted chats for current context, create child chats with an explicit subset of your current read/control grants, and delegate bounded coding tasks only to those created children. Connected ordinary chats support read/status and interruption of bound turns; they cannot be delegated into. Children receive scoped chat and native coding tools within inherited user-granted tool restrictions. Mutation opt-in is inherited from the originating user turn, but each write/process/Git/worktree action still requires its own exact human approval. Private runtime database files and sidecars are excluded from filesystem and sandbox execution. Plugin/MCP, browser and desktop tools remain unavailable in assistant-bound turns; use a separately authorized normal coding chat for those operations. You cannot connect or reconnect chats or expand grants. Revocation cancels pending work and excludes past source-bearing context from future turns; never claim retroactive forgetting of already observed outputs."
           : undefined;
       },
       restrictToolScopes: (sessionId, scope) => {
@@ -650,6 +651,9 @@ export class RuntimeDaemon {
     }
     if (this.state === "running") return false;
     this.database.open();
+    this.openedDatabasePath = this.database.snapshot().inMemory
+      ? undefined
+      : resolve(this.database.snapshot().path);
     try {
       runSqliteMigrations(this.database.connection(), this.migrations);
       // Measure host path limits before anything can write a project file, so a
@@ -812,9 +816,14 @@ export class RuntimeDaemon {
     const planner =
       assistantRun?.targetChatId === assistantRun?.binding.assistantId &&
       assistantRun !== undefined;
+    const databasePath = this.openedDatabasePath;
+    const privatePaths =
+      databasePath !== undefined
+        ? Object.freeze([databasePath, `${databasePath}-wal`, `${databasePath}-shm`])
+        : Object.freeze([] as string[]);
     const codingTools =
       !planner && project?.workspacePath
-        ? createRuntimeCodingTools({ root: project.workspacePath }).map((tool) => ({
+        ? createRuntimeCodingTools({ root: project.workspacePath, privatePaths }).map((tool) => ({
             ...tool,
             invoke: async (input: JsonObject, context: AdapterInvocationContext) => {
               if (typeof input["path"] === "string") {
@@ -838,7 +847,7 @@ export class RuntimeDaemon {
       ? await import("./runtime-coding-git-tools.js")
       : { createRuntimeGitTools: undefined };
     const mutationFactories =
-      !assistantRun && !planner && project?.workspacePath && toolPolicy?.mutationConsent
+      !planner && project?.workspacePath && toolPolicy?.mutationConsent
         ? await Promise.all([
             import("./runtime-coding-mutation-tools.js"),
             import("./runtime-coding-file-tools.js"),
@@ -849,6 +858,7 @@ export class RuntimeDaemon {
         ? mutationFactories[0]
             .createRuntimeMutationTools({
               root: project.workspacePath,
+              privatePaths,
               approve: (tool, context) => this.agent.approveTool(tool, context),
             })
             .filter(
@@ -859,13 +869,19 @@ export class RuntimeDaemon {
       project?.workspacePath && mutationFactories
         ? mutationFactories[1].createRuntimeCodingFileTools({
             root: project.workspacePath,
+            privatePaths,
             approve: (tool, context) => this.agent.approveTool(tool, context),
           })
         : [];
     const gitTools =
-      !assistantRun && project?.workspacePath && createRuntimeGitTools
+      !planner && project?.workspacePath && createRuntimeGitTools
         ? createRuntimeGitTools({
             root: project.workspacePath,
+            privatePaths,
+            sandbox: async (request) => {
+              const { runSandboxedProcess } = await import("./runtime-process-sandbox.js");
+              return runSandboxedProcess(request, undefined, undefined, undefined, privatePaths);
+            },
             managedJournalPath: isAbsolute(this.database.snapshot().path)
               ? join(
                   resolve(dirname(this.database.snapshot().path), "managed-worktrees"),
@@ -930,7 +946,7 @@ export class RuntimeDaemon {
     let worktreeJournalPath: string | undefined;
     const worktreeTools: ToolAdapter[] = [];
     if (
-      !assistantRun &&
+      !planner &&
       project?.workspacePath &&
       toolPolicy?.mutationConsent &&
       process.platform === "linux"
@@ -954,7 +970,7 @@ export class RuntimeDaemon {
             root: project.workspacePath,
             journalPath: worktreeJournalPath,
             approve: (tool, context) => this.agent.approveTool(tool, context),
-            sandbox: runSandboxedManagedWorktree,
+            sandbox: (request, scope) => runSandboxedManagedWorktree(request, scope, privatePaths),
           }),
         );
       }
@@ -1252,7 +1268,7 @@ export class RuntimeDaemon {
               sessionId: chatId,
               modelId: policy.modelId,
               text: input["text"],
-              mutationConsent: false,
+              mutationConsent: policy.mutationConsent,
               subagentsEnabled: false,
               searchEnabled: false,
               browserEnabled: false,

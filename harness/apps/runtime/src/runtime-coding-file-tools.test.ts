@@ -290,3 +290,53 @@ it("Windows mutations reject missing expected state and never execute denied con
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it.skipIf(process.platform !== "linux")(
+  "private path policy rejects patch and missing sidecar mkdir before consent",
+  async () => {
+    const root = await fixture();
+    const approve = vi.fn(() => Promise.resolve(true));
+    try {
+      const tools = createRuntimeCodingFileTools({
+        root,
+        approve,
+        privatePaths: [join(root, "script.sh"), join(root, "chat.sqlite-shm")],
+      });
+      await expect(tools[0]!.invoke(request, context())).rejects.toThrow("rejected");
+      await expect(tools[1]!.invoke({ path: "chat.sqlite-shm" }, context())).rejects.toThrow(
+        "rejected",
+      );
+      expect(approve).not.toHaveBeenCalled();
+      expect(await readFile(join(root, "script.sh"), "utf8")).toBe(request.expectedContent);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+it.skipIf(process.platform !== "linux")(
+  "cancellation during final private guard never creates a directory",
+  async () => {
+    const root = await fixture();
+    const guards = await import("./runtime-workspace-read-tools.js");
+    const controller = new AbortController();
+    let calls = 0;
+    const spy = vi.spyOn(guards, "createWorkspacePrivateGuard").mockReturnValue({
+      paths: [],
+      assertAllowed: () => {
+        if (++calls === 2) controller.abort();
+        return Promise.resolve();
+      },
+    });
+    try {
+      const tools = createRuntimeCodingFileTools({ root, approve: () => Promise.resolve(true) });
+      await expect(
+        tools[1]!.invoke({ path: "new-directory" }, context(controller.signal)),
+      ).rejects.toThrow();
+      expect(await readdir(root)).not.toContain("new-directory");
+    } finally {
+      spy.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);

@@ -10,10 +10,14 @@ import {
   PROJECT_COMMANDS,
   type ProjectCommand,
 } from "./runtime-process-sandbox.js";
-import { isBlockedWorkspacePathSegment } from "./runtime-workspace-read-tools.js";
+import {
+  createWorkspacePrivateGuard,
+  isBlockedWorkspacePathSegment,
+} from "./runtime-workspace-read-tools.js";
 
 export interface RuntimeMutationToolOptions {
   readonly root: string;
+  readonly privatePaths?: readonly string[];
   /** Host consent for this exact call. Must fail closed on restart or expiry. */
   readonly approve: (
     request: { tool: string; args: JsonObject },
@@ -49,7 +53,12 @@ function writeParts(input: JsonObject): string[] {
 // Existing directories only; descriptor-relative traversal never follows links.
 // This application boundary is not an OS sandbox: a hostile process moving an
 // already-open parent directory concurrently requires kernel isolation.
-async function writeWorkspace(root: string, input: JsonObject, signal: AbortSignal): Promise<void> {
+async function writeWorkspace(
+  root: string,
+  input: JsonObject,
+  signal: AbortSignal,
+  privateGuard: ReturnType<typeof createWorkspacePrivateGuard>,
+): Promise<void> {
   if (process.platform !== "linux") throw refused();
   const parts = writeParts(input);
   const filename = parts.pop()!;
@@ -80,9 +89,11 @@ async function writeWorkspace(root: string, input: JsonObject, signal: AbortSign
     )
       throw refused();
     const destination = `${anchor}/${filename}`;
+    await privateGuard.assertAllowed(destination);
     let mode = 0o600;
     try {
       const previous = await lstat(destination);
+      await privateGuard.assertAllowed(destination, previous);
       if (!previous.isFile() || previous.nlink !== 1) throw refused();
       mode = previous.mode & 0o777;
     } catch (error) {
@@ -105,6 +116,8 @@ async function writeWorkspace(root: string, input: JsonObject, signal: AbortSign
     signal.throwIfAborted();
     // Whole-file replacement avoids modifying a linked inode; a raced symlink
     // is replaced as a directory entry rather than followed.
+    await privateGuard.assertAllowed(destination);
+    signal.throwIfAborted();
     await rename(temporary, destination);
     temporary = undefined;
   } finally {
@@ -117,6 +130,7 @@ export function createRuntimeMutationTools(
   options: RuntimeMutationToolOptions,
 ): readonly ToolAdapter[] {
   const resolver = createWorkspacePathResolver({ root: options.root });
+  const privateGuard = createWorkspacePrivateGuard(options.privatePaths);
   const behavior = {
     primitiveFamily: "effect",
     determinism: "nondeterministic",
@@ -173,6 +187,7 @@ export function createRuntimeMutationTools(
           if (operation === "write") {
             writeParts(input);
             resolver.resolveLexical(input.path as string);
+            await privateGuard.assertAllowed(resolver.resolveLexical(input.path as string));
             snapshot = Object.freeze({
               path: input.path as string,
               content: input.content as string,
@@ -201,7 +216,7 @@ export function createRuntimeMutationTools(
           context.signal.throwIfAborted();
           try {
             if (operation === "write") {
-              await writeWorkspace(resolver.root, snapshot, context.signal);
+              await writeWorkspace(resolver.root, snapshot, context.signal, privateGuard);
               return {
                 value: {
                   path: snapshot.path!,
@@ -210,11 +225,14 @@ export function createRuntimeMutationTools(
               };
             }
             if (PROJECT_COMMANDS.includes(snapshot.command as ProjectCommand)) {
-              const outcome = await runSandboxedProjectCommand({
-                cwd: resolver.root,
-                command: snapshot.command as ProjectCommand,
-                signal: context.signal,
-              });
+              const outcome = await runSandboxedProjectCommand(
+                {
+                  cwd: resolver.root,
+                  command: snapshot.command as ProjectCommand,
+                  signal: context.signal,
+                },
+                { privatePaths: privateGuard.paths },
+              );
               return {
                 value: {
                   ...outcome,
@@ -224,29 +242,35 @@ export function createRuntimeMutationTools(
               };
             }
             const node = snapshot.command === "node-version";
-            const outcome = await runSandboxedProcess({
-              command: node ? process.execPath : "git",
-              args: node
-                ? ["--version"]
-                : [
-                    "-c",
-                    "core.fsmonitor=false",
-                    "-c",
-                    "core.untrackedCache=false",
-                    "status",
-                    "--porcelain=v1",
-                    "--ignore-submodules=all",
-                  ],
-              cwd: resolver.root,
-              env: createMinimalEnvironment({
-                GIT_CONFIG_NOSYSTEM: "1",
-                GIT_CONFIG_GLOBAL: "/dev/null",
-                GIT_OPTIONAL_LOCKS: "0",
-                GIT_TERMINAL_PROMPT: "0",
-              }),
-              signal: context.signal,
-              limits: { timeoutMs: 10000, maxOutputBytes: 65536, killGraceMs: 250 },
-            });
+            const outcome = await runSandboxedProcess(
+              {
+                command: node ? process.execPath : "git",
+                args: node
+                  ? ["--version"]
+                  : [
+                      "-c",
+                      "core.fsmonitor=false",
+                      "-c",
+                      "core.untrackedCache=false",
+                      "status",
+                      "--porcelain=v1",
+                      "--ignore-submodules=all",
+                    ],
+                cwd: resolver.root,
+                env: createMinimalEnvironment({
+                  GIT_CONFIG_NOSYSTEM: "1",
+                  GIT_CONFIG_GLOBAL: "/dev/null",
+                  GIT_OPTIONAL_LOCKS: "0",
+                  GIT_TERMINAL_PROMPT: "0",
+                }),
+                signal: context.signal,
+                limits: { timeoutMs: 10000, maxOutputBytes: 65536, killGraceMs: 250 },
+              },
+              undefined,
+              undefined,
+              undefined,
+              privateGuard.paths,
+            );
             context.signal.throwIfAborted();
             return { value: { ...outcome } };
           } catch {

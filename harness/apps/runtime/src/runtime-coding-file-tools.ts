@@ -3,7 +3,10 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, realpath, rename, rm, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import type { AdapterInvocationContext, JsonObject, ToolAdapter } from "@zet-harness/plugin-api";
-import { isBlockedWorkspacePathSegment } from "./runtime-workspace-read-tools.js";
+import {
+  createWorkspacePrivateGuard,
+  isBlockedWorkspacePathSegment,
+} from "./runtime-workspace-read-tools.js";
 import { createWorkspacePathResolver } from "@zet-harness/tools";
 import { executeWindowsCodingOperation } from "./runtime-windows-coding.js";
 import type { RuntimeMutationToolOptions } from "./runtime-coding-mutation-tools.js";
@@ -106,6 +109,7 @@ async function replace(
   before: string,
   after: string,
   signal: AbortSignal,
+  privateGuard: ReturnType<typeof createWorkspacePrivateGuard>,
 ): Promise<void> {
   const components = parts(filePath);
   const filename = components.pop()!;
@@ -119,6 +123,7 @@ async function replace(
     let device: number;
     try {
       const stat = await source.stat();
+      await privateGuard.assertAllowed(await realpath(`/proc/self/fd/${source.fd}`), stat);
       if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_BYTES) throw refused();
       const buffer = Buffer.alloc(MAX_BYTES + 1);
       let count = 0;
@@ -150,6 +155,7 @@ async function replace(
       await file.close();
     }
     const current = await lstat(destination);
+    await privateGuard.assertAllowed(destination, current);
     if (!current.isFile() || current.nlink !== 1 || current.ino !== inode || current.dev !== device)
       throw refused();
     signal.throwIfAborted();
@@ -160,11 +166,18 @@ async function replace(
     await parent.close();
   }
 }
-async function makeDirectory(root: string, filePath: string, signal: AbortSignal): Promise<void> {
+async function makeDirectory(
+  root: string,
+  filePath: string,
+  signal: AbortSignal,
+  privateGuard: ReturnType<typeof createWorkspacePrivateGuard>,
+): Promise<void> {
   const components = parts(filePath);
   const name = components.pop()!;
   const parent = await anchoredParent(root, components);
   try {
+    signal.throwIfAborted();
+    await privateGuard.assertAllowed(`/proc/self/fd/${parent.fd}/${name}`);
     signal.throwIfAborted();
     await mkdir(`/proc/self/fd/${parent.fd}/${name}`, { mode: 0o700 });
   } finally {
@@ -213,6 +226,7 @@ export function createRuntimeCodingFileTools(
   options: RuntimeMutationToolOptions,
 ): readonly ToolAdapter[] {
   const resolver = createWorkspacePathResolver({ root: options.root });
+  const privateGuard = createWorkspacePrivateGuard(options.privatePaths);
   const operations: readonly FileOperation[] =
     process.platform === "win32"
       ? ["apply_patch", "mkdir", "write", "rename", "delete"]
@@ -303,6 +317,9 @@ export function createRuntimeCodingFileTools(
       } catch {
         throw refused();
       }
+      await privateGuard.assertAllowed(resolver.resolveLexical(snapshot.path as string));
+      if (operation === "rename")
+        await privateGuard.assertAllowed(resolver.resolveLexical(snapshot.to as string));
       let approved = false;
       try {
         approved = await options.approve(
@@ -321,6 +338,7 @@ export function createRuntimeCodingFileTools(
             {
               operation: operation === "apply_patch" ? "write" : operation,
               root: resolver.root,
+              ...(privateGuard.paths.length ? { privatePaths: privateGuard.paths } : {}),
               path: snapshot.path as string,
               ...(operation === "apply_patch"
                 ? { expectedContent: planned.before!, content: planned.after! }
@@ -350,9 +368,10 @@ export function createRuntimeCodingFileTools(
             planned.before!,
             planned.after!,
             context.signal,
+            privateGuard,
           );
         else if (operation === "mkdir")
-          await makeDirectory(resolver.root, snapshot.path as string, context.signal);
+          await makeDirectory(resolver.root, snapshot.path as string, context.signal, privateGuard);
         else throw refused();
         return {
           value: {

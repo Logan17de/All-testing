@@ -130,7 +130,7 @@ it("keeps file contents outside failures and discards cancelled results", async 
 });
 it("keeps fixed source below Windows command-line bounds and compile validation before all filesystem calls", () => {
   expect(Buffer.from(WINDOWS_CODING_SCRIPT, "utf16le").toString("base64").length).toBeLessThan(
-    30000,
+    31000,
   );
   expect(WINDOWS_CODING_SCRIPT.indexOf("if ($data.operation -eq 'validate')")).toBeLessThan(
     WINDOWS_CODING_SCRIPT.indexOf("foreach ($request in $data.requests)"),
@@ -270,4 +270,64 @@ it.skipIf(process.platform !== "win32")(
     }
   },
   75_000,
+);
+
+it.skipIf(process.platform !== "win32")(
+  "guards exact custom database and missing sidecars in native Windows bridge",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "zet-win-private-"));
+    const database = join(root, "chat.sqlite");
+    const privatePaths = [database, `${database}-wal`, `${database}-shm`];
+    try {
+      await writeFile(database, "private fixture");
+      await writeFile(`${database}-wal`, "private wal fixture");
+      await writeFile(join(root, "public.ts"), "public");
+      const results = await executeWindowsCodingBatch(
+        [
+          { operation: "read", root, path: "CHAT.SQLITE", privatePaths },
+          {
+            operation: "write",
+            root,
+            path: "chat.sqlite-shm",
+            privatePaths,
+            expectedContent: null,
+            content: "bad",
+          },
+          { operation: "mkdir", root, path: "chat.sqlite-shm", privatePaths },
+          {
+            operation: "rename",
+            root,
+            path: "public.ts",
+            to: "chat.sqlite-shm",
+            privatePaths,
+            expectedContent: "public",
+          },
+          {
+            operation: "delete",
+            root,
+            path: "chat.sqlite",
+            privatePaths,
+            expectedContent: "private fixture",
+          },
+          { operation: "list", root, path: ".", privatePaths },
+          { operation: "read", root, path: "public.ts", privatePaths },
+        ],
+        AbortSignal.timeout(70000),
+      );
+      expect(results.map((entry) => entry.success)).toEqual([
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+      ]);
+      expect(JSON.stringify(results[5]?.value)).not.toContain("chat.sqlite");
+      expect(await readFile(database, "utf8")).toBe("private fixture");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  75000,
 );

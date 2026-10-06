@@ -1,4 +1,6 @@
-import { lstat, opendir, realpath } from "node:fs/promises";
+import { lstat, opendir, realpath, open } from "node:fs/promises";
+import { constants } from "node:fs";
+import { createWorkspacePrivateGuard } from "./runtime-workspace-read-tools.js";
 import { join, relative, isAbsolute, sep } from "node:path";
 import type { AdapterInvocationContext, JsonObject, ToolAdapter } from "@zet-harness/plugin-api";
 import { runSandboxedProcess } from "./runtime-process-sandbox.js";
@@ -6,6 +8,7 @@ import { buildGitCommand, gitPaths } from "./runtime-git-command.js";
 
 export interface RuntimeGitToolOptions {
   readonly root: string;
+  readonly privatePaths?: readonly string[];
   readonly managedJournalPath?: string | undefined;
   readonly approve?: (
     request: { tool: string; args: JsonObject },
@@ -44,22 +47,46 @@ async function validateRepository(root: string, journalPath?: string): Promise<s
   await scan(metadata);
   return canonical;
 }
-async function validateFiles(root: string, paths: readonly string[]): Promise<void> {
+async function validateFiles(
+  root: string,
+  paths: readonly string[],
+  privateGuard: ReturnType<typeof createWorkspacePrivateGuard>,
+): Promise<void> {
   for (const file of paths) {
+    await privateGuard.assertAllowed(join(root, file));
     let current = root;
     for (const part of file.split("/")) {
       current = join(current, part);
       const stat = await lstat(current);
       if (stat.isSymbolicLink() || (stat.nlink > 1 && stat.isFile())) throw refuse();
     }
-    const stat = await lstat(current);
-    const rel = relative(root, await realpath(current));
-    if (!stat.isFile() || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
-      throw refuse();
+    const handle = await open(
+      current,
+      constants.O_RDONLY | (process.platform === "linux" ? constants.O_NOFOLLOW : 0),
+    );
+    try {
+      const stat = await handle.stat();
+      const canonical = await realpath(
+        process.platform === "linux" ? `/proc/self/fd/${handle.fd}` : current,
+      );
+      await privateGuard.assertAllowed(canonical, stat);
+      const rel = relative(root, canonical);
+      if (
+        !stat.isFile() ||
+        stat.nlink !== 1 ||
+        rel === ".." ||
+        rel.startsWith(`..${sep}`) ||
+        isAbsolute(rel)
+      )
+        throw refuse();
+    } finally {
+      await handle.close();
+    }
   }
 }
 export function createRuntimeGitTools(options: RuntimeGitToolOptions): readonly ToolAdapter[] {
   const root = options.root;
+  const privateGuard = createWorkspacePrivateGuard(options.privatePaths);
   const sandbox = options.sandbox ?? runSandboxedProcess;
   const approve = options.approve;
   return Object.freeze(
@@ -124,7 +151,7 @@ export function createRuntimeGitTools(options: RuntimeGitToolOptions): readonly 
               : [];
           try {
             const canonical = await validateRepository(root, options.managedJournalPath);
-            await validateFiles(canonical, paths);
+            await validateFiles(canonical, paths, privateGuard);
             if (
               write &&
               (!approve || !(await approve({ tool: id, args: structuredClone(snapshot) }, context)))
@@ -133,9 +160,11 @@ export function createRuntimeGitTools(options: RuntimeGitToolOptions): readonly 
             context.signal.throwIfAborted();
             if ((await validateRepository(root, options.managedJournalPath)) !== canonical)
               throw refuse();
-            await validateFiles(canonical, paths);
-            const run = (argv: readonly string[]) =>
-              sandbox({
+            await validateFiles(canonical, paths, privateGuard);
+            const run = async (argv: readonly string[]) => {
+              await validateFiles(canonical, paths, privateGuard);
+              context.signal.throwIfAborted();
+              return sandbox({
                 command: "git",
                 args: argv,
                 cwd: canonical,
@@ -143,6 +172,7 @@ export function createRuntimeGitTools(options: RuntimeGitToolOptions): readonly 
                 signal: context.signal,
                 limits: { timeoutMs: 10000, maxOutputBytes: 65536, killGraceMs: 250 },
               });
+            };
             if (operation === "commit") {
               const staged = await run(buildGitCommand("staged-paths", {}));
               if (

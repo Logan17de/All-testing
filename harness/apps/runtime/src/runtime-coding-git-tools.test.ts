@@ -1,7 +1,7 @@
-import { mkdtemp, mkdir, rm, writeFile, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, symlink, rename, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AdapterInvocationContext, JsonObject } from "@zet-harness/plugin-api";
 import { runBoundedProcess } from "@zet-harness/tools";
 import { createRuntimeGitTools } from "./runtime-coding-git-tools.js";
@@ -279,3 +279,77 @@ it.runIf(process.platform !== "win32")(
     }
   },
 );
+
+it("private database selections reject cached diffs/add/commit before approval or sandbox", async () => {
+  const database = join(root, "chat.sqlite");
+  await writeFile(database, "private fixture");
+  await fixture({
+    command: "git",
+    args: buildGitCommand("add", { paths: ["chat.sqlite"] }),
+    cwd: root,
+    env: {},
+  });
+  await writeFile(database, "replacement fixture");
+  const approve = vi.fn(() => Promise.resolve(true));
+  const sandbox = vi.fn(fixture);
+  const all = createRuntimeGitTools({
+    root,
+    approve,
+    sandbox,
+    privatePaths: [database, `${database}-wal`, `${database}-shm`],
+  });
+  for (const operation of ["diff", "add", "commit"]) {
+    const input: JsonObject = {
+      paths: ["chat.sqlite"],
+      ...(operation === "diff"
+        ? { staged: true }
+        : operation === "commit"
+          ? { message: "fixture", authorName: "Fixture", authorEmail: "fixture@example.invalid" }
+          : {}),
+    };
+    await expect(find(operation, all).invoke(input, context())).rejects.toThrow("rejected");
+  }
+  for (const path of ["chat.sqlite-wal", "chat.sqlite-shm"]) {
+    await expect(
+      find("diff", all).invoke({ paths: [path], staged: true }, context()),
+    ).rejects.toThrow("rejected");
+  }
+  expect(approve).not.toHaveBeenCalled();
+  expect(sandbox).not.toHaveBeenCalled();
+  expect(await readFile(database, "utf8")).toBe("replacement fixture");
+});
+it("private original inode aliases cannot be selected after rename", async () => {
+  const database = join(root, "chat.sqlite");
+  await writeFile(database, "private fixture");
+  const approve = vi.fn(() => Promise.resolve(true));
+  const sandbox = vi.fn(fixture);
+  const all = createRuntimeGitTools({ root, approve, sandbox, privatePaths: [database] });
+  await expect(find("diff", all).invoke({ paths: ["chat.sqlite"] }, context())).rejects.toThrow(
+    "rejected",
+  );
+  await rename(database, join(root, "renamed.sqlite"));
+  await expect(find("add", all).invoke({ paths: ["renamed.sqlite"] }, context())).rejects.toThrow(
+    "rejected",
+  );
+  expect(approve).not.toHaveBeenCalled();
+  expect(sandbox).not.toHaveBeenCalled();
+});
+it("private DB introduced at an approved source path is denied before dispatch", async () => {
+  const database = join(root, "chat.sqlite");
+  await writeFile(database, "private fixture");
+  const sandbox = vi.fn(fixture);
+  const all = createRuntimeGitTools({
+    root,
+    sandbox,
+    privatePaths: [database],
+    approve: async () => {
+      await rm(join(root, "source.txt"));
+      await rename(database, join(root, "source.txt"));
+      return true;
+    },
+  });
+  await expect(find("add", all).invoke({ paths: ["source.txt"] }, context())).rejects.toThrow(
+    "rejected",
+  );
+  expect(sandbox).not.toHaveBeenCalled();
+});

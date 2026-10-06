@@ -80,16 +80,20 @@ it.skipIf(process.platform !== "linux")(
             const args = invocation.args;
             expect(args).toContain("--unshare-all");
             expect(args).toContain("--clearenv");
-            if (!writing) expect(args).not.toContain("--bind");
+            expect(args).not.toContain("--bind");
+            expect(args.some((arg) => /^\/proc\/\d+\/fd\//u.test(arg))).toBe(false);
+            if (!writing) expect(args).not.toContain("--bind-fd");
             const rootIndex = args.indexOf(root);
-            expect(args[rootIndex - 2]).toBe("--ro-bind");
-            expect(args[rootIndex - 1]).toMatch(/^\/proc\/\d+\/fd\/\d+$/);
+            expect(args[rootIndex - 2]).toBe("--ro-bind-fd");
+            expect(args[rootIndex - 1]).toBe("3");
             const containerIndex = args.indexOf(join(root, ".zet-worktrees"));
-            expect(args[containerIndex - 2]).toBe(writing ? "--bind" : "--ro-bind");
+            expect(args[containerIndex - 2]).toBe(writing ? "--bind-fd" : "--ro-bind-fd");
+            expect(Number(args[containerIndex - 1])).toBeGreaterThanOrEqual(4);
             if (writing) {
               const gitIndex = args.indexOf(join(root, ".git"));
-              expect(args[gitIndex - 2]).toBe("--bind");
-              expect(args[gitIndex - 1]).toMatch(/^\/proc\/\d+\/fd\/\d+$/);
+              expect(args[gitIndex - 2]).toBe("--bind-fd");
+              expect(Number(args[gitIndex - 1])).toBeGreaterThanOrEqual(4);
+              expect(args[gitIndex - 1]).not.toBe(args[containerIndex - 1]);
             }
             expect(args).not.toContain(privateState);
             return Promise.resolve({

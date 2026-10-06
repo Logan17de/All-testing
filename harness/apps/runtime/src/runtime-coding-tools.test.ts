@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile, symlink, link } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, symlink, link, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -77,3 +77,49 @@ it("does not return results after cancellation", async () => {
   const [read] = createRuntimeCodingTools({ root });
   await expect(read!.invoke({ path: "hello" }, context(controller.signal))).rejects.toThrow();
 });
+
+it.skipIf(process.platform !== "linux")(
+  "excludes exact private DB sidecars and original inode aliases from read/list",
+  async () => {
+    const database = join(root, "chat.sqlite");
+    await writeFile(database, "private chat content");
+    await writeFile(`${database}-wal`, "private WAL");
+    await writeFile(join(root, "public.ts"), "public");
+    const [read, list] = createRuntimeCodingTools({
+      root,
+      privatePaths: [database, `${database}-wal`, `${database}-shm`],
+    });
+    await expect(read!.invoke({ path: "chat.sqlite" }, context())).rejects.toThrow("rejected");
+    await expect(read!.invoke({ path: "chat.sqlite-wal" }, context())).rejects.toThrow("rejected");
+    expect(JSON.stringify((await list!.invoke({}, context())).value)).not.toContain("chat.sqlite");
+    await rename(database, join(root, "renamed.sqlite"));
+    await expect(read!.invoke({ path: "renamed.sqlite" }, context())).rejects.toThrow("rejected");
+    expect((await read!.invoke({ path: "public.ts" }, context())).value).toEqual({
+      content: "public",
+    });
+  },
+);
+
+it.skipIf(process.platform !== "linux")(
+  "private canonical paths survive configured workspace aliases and replacements",
+  async () => {
+    const database = join(root, "chat.sqlite");
+    await writeFile(database, "original");
+    const alias = `${root}-alias`;
+    await symlink(root, alias, "dir");
+    try {
+      const paths = [database, `${database}-wal`, `${database}-shm`];
+      const [read] = createRuntimeCodingTools({ root: alias, privatePaths: paths });
+      paths.length = 0;
+      await expect(read!.invoke({ path: "chat.sqlite" }, context())).rejects.toThrow("rejected");
+      await rename(database, join(root, "renamed.sqlite"));
+      await writeFile(database, "replacement");
+      await expect(read!.invoke({ path: "renamed.sqlite" }, context())).rejects.toThrow("rejected");
+      await expect(read!.invoke({ path: "chat.sqlite" }, context())).rejects.toThrow("rejected");
+      await link(database, join(root, "hard.sqlite"));
+      await expect(read!.invoke({ path: "hard.sqlite" }, context())).rejects.toThrow("rejected");
+    } finally {
+      await rm(alias, { force: true });
+    }
+  },
+);

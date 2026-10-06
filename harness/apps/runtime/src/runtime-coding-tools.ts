@@ -8,11 +8,15 @@ import type {
 import { createWorkspacePathResolver } from "@zet-harness/tools";
 
 import { executeWindowsCodingOperation } from "./runtime-windows-coding.js";
-import { executeWorkspaceReadTool } from "./runtime-workspace-read-tools.js";
+import {
+  createWorkspacePrivateGuard,
+  executeWorkspaceReadTool,
+} from "./runtime-workspace-read-tools.js";
 
 export interface RuntimeCodingToolOptions {
   /** Fixed absolute workspace root. Create fresh adapters when switching projects. */
   readonly root: string;
+  readonly privatePaths?: readonly string[];
 }
 
 /**
@@ -27,6 +31,7 @@ export function createRuntimeCodingTools(
   options: RuntimeCodingToolOptions,
 ): readonly ToolAdapter[] {
   const resolver = createWorkspacePathResolver({ root: options.root });
+  const privateGuard = createWorkspacePrivateGuard(options.privatePaths);
   return Object.freeze(
     (["read", "list"] as const).map((operation): ToolAdapter =>
       Object.freeze({
@@ -74,7 +79,12 @@ export function createRuntimeCodingTools(
               throw new Error("Workspace tool rejected the request.");
             try {
               const value = await executeWindowsCodingOperation(
-                { operation, root: resolver.root, path: (input.path as string) ?? "." },
+                {
+                  operation,
+                  root: resolver.root,
+                  path: (input.path as string) ?? ".",
+                  ...(privateGuard.paths.length ? { privatePaths: privateGuard.paths } : {}),
+                },
                 context.signal,
               );
               context.signal.throwIfAborted();
@@ -88,6 +98,7 @@ export function createRuntimeCodingTools(
             resolver.root,
             operation === "read" ? "harness.fs.read" : "harness.fs.list",
             input,
+            privateGuard,
           );
           context.signal.throwIfAborted();
           if (!result.success) throw new Error("Workspace tool rejected the request.");

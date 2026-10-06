@@ -26,6 +26,12 @@ export function ChildChatScope({
         choices cannot exceed the parent’s granted permissions. Existing disconnected chats remain
         inaccessible.
       </p>
+      <p className="muted">
+        Child coding runs inherit the user’s tool restrictions. Workspace file changes, process
+        execution and Git mutations require explicit turn consent and approval of each exact action.
+        Private runtime databases remain excluded. Plugin, MCP, browser, desktop and analysis tools
+        remain disabled for these child runs.
+      </p>
       <label>
         Child title (optional){" "}
         <input

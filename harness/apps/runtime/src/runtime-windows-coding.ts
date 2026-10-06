@@ -9,6 +9,7 @@ export type WindowsCodingOperation = "read" | "list" | "write" | "mkdir" | "rena
 export interface WindowsCodingRequest {
   readonly operation: WindowsCodingOperation;
   readonly root: string;
+  readonly privatePaths?: readonly string[];
   readonly path: string;
   readonly to?: string;
   readonly expectedContent?: string | null;
@@ -57,6 +58,7 @@ public class ZetFiles {
  static string Canonical(SafeFileHandle handle) {var value=new StringBuilder(32768);uint size=GetFinalPathNameByHandleW(handle,value,32768,0);if(size==0||size>=32768)throw new Exception();string result=value.ToString();if(result.StartsWith(@"\\?\"))result=result.Substring(4);if(!Regex.IsMatch(result,@"^[A-Za-z]:\\"))throw new Exception();return result.TrimEnd('\\');}
  static INFO Check(SafeFileHandle handle,string expected,bool directory) {INFO info;if(handle.IsInvalid||GetFileType(handle)!=1||!GetFileInformationByHandle(handle,out info)||(info.attrs&REPARSE)!=0||((info.attrs&DIR)!=0)!=directory||(!directory&&(info.links!=1||info.high!=0||info.low>LIMIT))||!String.Equals(Canonical(handle),expected.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase))throw new Exception();return info;}
  class Guard:IDisposable {
+   List<string> hidden=new List<string>(); public void Deny(string value){if(hidden.Exists(p=>String.Equals(p,value,StringComparison.OrdinalIgnoreCase)))throw new Exception();} public void Private(string[] paths){foreach(string p in paths){if(String.IsNullOrEmpty(p))continue;string parent=Path.GetDirectoryName(p);var h=CreateFileW(parent,ATTR,3,IntPtr.Zero,3,0x02000000,IntPtr.Zero);if(h.IsInvalid)throw new Exception();held.Add(h);hidden.Add(Path.Combine(Canonical(h),Path.GetFileName(p)));var f=CreateFileW(p,ATTR,3,IntPtr.Zero,3,0x02000000,IntPtr.Zero);if(!f.IsInvalid){held.Add(f);hidden.Add(Canonical(f));}else f.Dispose();}}
    public string root; List<SafeFileHandle> held=new List<SafeFileHandle>();
    public Guard(string requested) {try{if(!Regex.IsMatch(requested??"",@"^[A-Za-z]:\\")||requested.Length>4096||requested.IndexOf('\0')>=0)throw new Exception();string full=Path.GetFullPath(requested);var expanded=new StringBuilder(32768);uint length=GetLongPathNameW(full,expanded,32768);if(length==0||length>=32768)throw new Exception();root=expanded.ToString().TrimEnd('\\');string current=Path.GetPathRoot(root);Hold(current);foreach(string part in root.Substring(current.Length).Split(new char[]{'\\'},StringSplitOptions.RemoveEmptyEntries)){Segment(part);current=Path.Combine(current,part);Hold(current);}}catch{Dispose();throw;}}
    void Hold(string value){var handle=CreateFileW(value,ATTR,3,IntPtr.Zero,3,FLAGS,IntPtr.Zero);try{Check(handle,value,true);held.Add(handle);}catch{handle.Dispose();throw;}}
@@ -70,15 +72,16 @@ public class ZetFiles {
  static void Write(SafeFileHandle handle,byte[] bytes){long position;if(!SetFilePointerEx(handle,0,out position,0))throw new Exception();uint written;if(bytes.Length>0&&(!WriteFile(handle,bytes,(uint)bytes.Length,out written,IntPtr.Zero)||written!=bytes.Length))throw new Exception();if(!SetEndOfFile(handle)||!FlushFileBuffers(handle))throw new Exception();}
  static void Discard(SafeFileHandle handle){IntPtr data=Marshal.AllocHGlobal(4);try{Marshal.WriteInt32(data,1);if(!SetFileInformationByHandle(handle,4,data,4))throw new Exception();}finally{Marshal.FreeHGlobal(data);}}
  static void Rename(SafeFileHandle handle,string target){byte[] name=Encoding.Unicode.GetBytes(target);int offset=IntPtr.Size==8?20:12;int size=offset+name.Length+2;IntPtr data=Marshal.AllocHGlobal(size);try{Marshal.Copy(new byte[size],0,data,size);Marshal.WriteInt32(data,IntPtr.Size==8?16:8,name.Length);Marshal.Copy(name,0,IntPtr.Add(data,offset),name.Length);if(!SetFileInformationByHandle(handle,3,data,(uint)size))throw new Exception();}finally{Marshal.FreeHGlobal(data);}}
- public static object Run(string operation,string root,string relative,string target,string expected,string content,bool missing){
+ public static object Run(string operation,string root,string relative,string target,string expected,string content,bool missing,string[] privatePaths){
   using(var guard=new Guard(root)) {
-   if(operation=="list"){string directory=guard.Directory(relative);var entries=new List<object>();int scanned=0;bool truncated=false;foreach(string entry in System.IO.Directory.EnumerateFileSystemEntries(directory)){if(++scanned>2000||entries.Count==200){truncated=true;break;}string name=Path.GetFileName(entry);if(Blocked(name))continue;try{Segment(name);var attrs=File.GetAttributes(entry);if((attrs&FileAttributes.ReparsePoint)!=0)continue;entries.Add(new {name=name,type=(attrs&FileAttributes.Directory)!=0?"directory":"file"});}catch{}}return new {entries=entries.ToArray(),truncated=truncated};}
-   string file=guard.Parent(relative);
+   guard.Private(privatePaths);
+   if(operation=="list"){string directory=guard.Directory(relative);guard.Deny(directory);var entries=new List<object>();int scanned=0;bool truncated=false;foreach(string entry in System.IO.Directory.EnumerateFileSystemEntries(directory)){if(++scanned>2000||entries.Count==200){truncated=true;break;}string name=Path.GetFileName(entry);if(Blocked(name))continue;try{guard.Deny(entry);Segment(name);var attrs=File.GetAttributes(entry);if((attrs&FileAttributes.ReparsePoint)!=0)continue;entries.Add(new {name=name,type=(attrs&FileAttributes.Directory)!=0?"directory":"file"});}catch{}}return new {entries=entries.ToArray(),truncated=truncated};}
+   string file=guard.Parent(relative);guard.Deny(file);
    if(operation=="mkdir"){if(!CreateDirectoryW(file,IntPtr.Zero))throw new Exception();return new {path=relative,operation=operation};}
    byte[] outgoing=operation=="write"?Bytes(content):null;
    uint access=READ;if(operation=="write")access|=WRITE;if(operation=="delete"||operation=="rename"||(operation=="write"&&missing))access|=DELETE;
    using(var handle=CreateFileW(file,access,0,IntPtr.Zero,operation=="write"&&missing?1u:3u,FLAGS,IntPtr.Zero)) {
-    Check(handle,file,false);
+    Check(handle,file,false);guard.Deny(Canonical(handle));
     byte[] before=Read(handle);
     if(operation=="read")return new {content=Utf8.GetString(before)};
     if(operation=="write") {
@@ -88,7 +91,7 @@ public class ZetFiles {
     }
     if(!Same(before,Bytes(expected)))throw new Exception();
     if(operation=="delete"){Discard(handle);return new {path=relative,operation=operation};}
-    if(operation=="rename"){string destination=guard.Parent(target);if(String.Equals(file,destination,StringComparison.OrdinalIgnoreCase))throw new Exception();Rename(handle,destination);return new {path=relative,to=target,operation=operation};}
+    if(operation=="rename"){string destination=guard.Parent(target);guard.Deny(destination);if(String.Equals(file,destination,StringComparison.OrdinalIgnoreCase))throw new Exception();Rename(handle,destination);return new {path=relative,to=target,operation=operation};}
     throw new Exception();
    }
   }
@@ -99,7 +102,7 @@ $data = [Console]::In.ReadToEnd() | ConvertFrom-Json
 if ($data.operation -eq 'validate') { '{"ok":true}'; exit 0 }
 $results = @()
 foreach ($request in $data.requests) {
- try { $value=[ZetFiles]::Run([string]$request.operation,[string]$request.root,[string]$request.path,[string]$request.to,[string]$request.expectedContent,[string]$request.content,($null -eq $request.expectedContent)); $results += @{success=$true;value=$value} }
+ try { $value=[ZetFiles]::Run([string]$request.operation,[string]$request.root,[string]$request.path,[string]$request.to,[string]$request.expectedContent,[string]$request.content,($null -eq $request.expectedContent),[string[]]@($request.privatePaths)); $results += @{success=$true;value=$value} }
  catch { $results += @{success=$false} }
 }
 @{results=$results} | ConvertTo-Json -Depth 8 -Compress
@@ -153,7 +156,8 @@ function requestSnapshot(request: WindowsCodingRequest): WindowsCodingRequest {
   if (
     !Object.hasOwn(allowed, request.operation) ||
     Object.keys(request).some(
-      (key) => !(allowed[request.operation] as readonly string[]).includes(key),
+      (key) =>
+        key !== "privatePaths" && !(allowed[request.operation] as readonly string[]).includes(key),
     ) ||
     typeof request.root !== "string" ||
     !/^([A-Za-z]):\\/u.test(request.root) ||
@@ -161,7 +165,22 @@ function requestSnapshot(request: WindowsCodingRequest): WindowsCodingRequest {
     request.root.includes("\0")
   )
     throw denied();
+  if (
+    request.privatePaths &&
+    (request.privatePaths.length > 16 ||
+      request.privatePaths.some(
+        (value) =>
+          typeof value !== "string" ||
+          !/^[A-Za-z]:\\/u.test(value) ||
+          value.includes("\0") ||
+          value.length > 4096,
+      ))
+  )
+    throw denied();
   const snapshot = {
+    ...(request.privatePaths === undefined
+      ? {}
+      : { privatePaths: Object.freeze([...request.privatePaths]) }),
     operation: request.operation,
     root: request.root,
     path: relative(request.path, request.operation === "list"),
@@ -193,7 +212,7 @@ async function nativeRun(input: string, signal: AbortSignal): Promise<string> {
   if (!windows || !/^[A-Za-z]:\\[^\0\r\n]+$/u.test(windows) || windows.split("\\").includes(".."))
     throw denied();
   const encoded = Buffer.from(WINDOWS_CODING_SCRIPT, "utf16le").toString("base64");
-  if (encoded.length > 30000) throw denied();
+  if (encoded.length > 31000) throw denied();
   return new Promise((resolve, reject) => {
     const child = spawn(
       path.win32.join(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),

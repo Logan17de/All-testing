@@ -14,14 +14,57 @@ import {
   rm,
 } from "node:fs/promises";
 import { existsSync, constants } from "node:fs";
-import { join, dirname, isAbsolute } from "node:path";
+import { join, dirname, isAbsolute, relative, sep, basename, resolve } from "node:path";
 import {
   runBoundedProcess,
+  runBoundedProcessWithDescriptors,
   type ProcessRunRequest,
   type ProcessRunResult,
 } from "@zet-harness/tools";
 import { isBlockedWorkspacePathSegment } from "./runtime-workspace-read-tools.js";
 
+/** Trusted exact file exclusions, never globs or caller-controlled script flags. */
+async function privateStatePaths(
+  root: string,
+  paths: readonly string[] = [],
+  additionalMounts: readonly string[] = [],
+): Promise<ReadonlySet<string>> {
+  if (paths.length > 16) throw new Error("Private state exclusion limit exceeded.");
+  const trustedPaths = [...paths];
+  const result = new Set<string>();
+  const exposed = [...additionalMounts];
+  for (const mount of ["/usr", "/lib", "/lib64", "/bin"])
+    if (existsSync(mount)) exposed.push(await realpath(mount));
+  const executable = await realpath(process.execPath);
+  for (const path of trustedPaths) {
+    if (
+      typeof path !== "string" ||
+      !isAbsolute(path) ||
+      path.length > 4096 ||
+      path !== resolve(path) ||
+      /[\x00-\x1f\x7f]/u.test(path)
+    )
+      throw new Error("Invalid private state path.");
+    const canonical = join(await realpath(dirname(path)), basename(path));
+    try {
+      const stat = await lstat(canonical);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1)
+        throw new Error("Linked private state refused.");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (
+      canonical === executable ||
+      exposed.some((mount) => canonical === mount || canonical.startsWith(`${mount}/`))
+    )
+      throw new Error("Private state intersects trusted runtime mount.");
+    const rel = relative(root, canonical);
+    if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) continue;
+    if (!rel) throw new Error("Private state path cannot be the workspace.");
+    result.add(rel.split(sep).join("/"));
+  }
+  return result;
+}
 const GIT_ARGS = [
   "-c",
   "core.fsmonitor=false",
@@ -38,9 +81,12 @@ export async function runSandboxedProcess(
   runner: typeof runBoundedProcess = runBoundedProcess,
   platform: string = process.platform,
   managedScope?: ManagedWorktreeSandboxScope,
+  privatePaths?: readonly string[],
 ): Promise<ProcessRunResult> {
   request.signal?.throwIfAborted();
   if (platform === "win32" && runner === runBoundedProcess) {
+    if (privatePaths?.length)
+      throw new Error("Windows private state masking unsupported by native sandbox.");
     const nodeVersion =
       request.command === process.execPath && JSON.stringify(request.args) === '["--version"]';
     const gitStatus =
@@ -104,6 +150,14 @@ export async function runSandboxedProcess(
   )
     throw new Error("Independent process sandbox unavailable or request refused.");
   const root = await realpath(request.cwd);
+  const privateFiles = await privateStatePaths(root, privatePaths);
+  if (
+    gitMode === "write" &&
+    [...privateFiles].some(
+      (path) => path.startsWith(".git/") || (managedScope && path.startsWith(".zet-worktrees/")),
+    )
+  )
+    throw new Error("Private state intersects writable Git metadata or managed container.");
   const rootHandle = await open(
     root,
     constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
@@ -111,6 +165,8 @@ export async function runSandboxedProcess(
   const held: Awaited<ReturnType<typeof open>>[] = [rootHandle];
   const rootSource = `/proc/${process.pid}/fd/${rootHandle.fd}`;
   const workspaceTarget = managedScope ? root : "/workspace";
+  let emptyConfigDirectory: string | undefined;
+  let emptyConfigHandle: Awaited<ReturnType<typeof open>> | undefined;
   if (managedScope) {
     const stat = await rootHandle.stat({ bigint: true });
     if (
@@ -141,8 +197,8 @@ export async function runSandboxedProcess(
       "/dev",
       "--tmpfs",
       "/tmp",
-      "--ro-bind",
-      rootSource,
+      "--ro-bind-fd",
+      "3",
       workspaceTarget,
       "--chdir",
       workspaceTarget,
@@ -158,7 +214,7 @@ export async function runSandboxedProcess(
         if (String(stat.dev) !== managedScope.git.dev || String(stat.ino) !== managedScope.git.ino)
           throw new Error("Managed Git identity changed.");
       }
-      args.push("--bind", `/proc/${process.pid}/fd/${gitHandle.fd}`, `${workspaceTarget}/.git`);
+      args.push("--bind-fd", String(3 + held.indexOf(gitHandle)), `${workspaceTarget}/.git`);
     }
     if (managedScope) {
       const container = await open(
@@ -173,8 +229,8 @@ export async function runSandboxedProcess(
       )
         throw new Error("Managed container identity changed.");
       args.push(
-        managedMode === "write" ? "--bind" : "--ro-bind",
-        `/proc/${process.pid}/fd/${container.fd}`,
+        managedMode === "write" ? "--bind-fd" : "--ro-bind-fd",
+        String(3 + held.indexOf(container)),
         `${workspaceTarget}/.zet-worktrees`,
       );
     }
@@ -185,7 +241,28 @@ export async function runSandboxedProcess(
         if (++entriesSeen > 2000) throw new Error("Workspace exceeds process sandbox scan limit.");
         const local = join(directory, entry.name);
         const target = `${workspaceTarget}/${relative}${entry.name}`;
-        if (managedScope && relative === "" && entry.name === ".zet-worktrees") continue;
+        const metadata = await lstat(local);
+        if (
+          metadata.isSymbolicLink() ||
+          (metadata.isFile() && metadata.nlink !== 1) ||
+          (!metadata.isFile() && !metadata.isDirectory())
+        )
+          throw new Error("Linked or special workspace entry refused.");
+        if (privateFiles.has(`${relative}${entry.name}`)) {
+          if (!metadata.isFile()) throw new Error("Private state changed before masking.");
+          args.push("--ro-bind", "/dev/null", target);
+          continue;
+        }
+        if (
+          managedScope?.records.some(
+            (record) => record.gitFile?.path === join(root, `${relative}${entry.name}`),
+          )
+        )
+          continue;
+        if (managedScope && relative === "" && entry.name === ".zet-worktrees") {
+          await mask(local, `${relative}${entry.name}/`);
+          continue;
+        }
         if (entry.name === "node_modules") {
           if (entry.isSymbolicLink() || !entry.isDirectory())
             throw new Error("Linked dependency path cannot be sandboxed.");
@@ -195,9 +272,27 @@ export async function runSandboxedProcess(
         if (entry.name === ".git" && relative === "" && entry.isDirectory()) {
           for (const name of ["config", "hooks", "logs"]) {
             const path = join(local, name);
-            if (existsSync(path))
+            if (!existsSync(path)) continue;
+            const metadata = await lstat(path);
+            if (metadata.isSymbolicLink() || (!metadata.isFile() && !metadata.isDirectory()))
+              throw new Error("Linked Git metadata mask refused.");
+            if (name === "config") {
+              if (!metadata.isFile()) throw new Error("Invalid Git config entry.");
+              if (!emptyConfigHandle) {
+                emptyConfigDirectory = await mkdtemp(join(tmpdir(), "zet-git-config-mask-"));
+                const file = join(emptyConfigDirectory, "config");
+                await writeFile(file, "", { flag: "wx", mode: 0o644 });
+                emptyConfigHandle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+                held.push(emptyConfigHandle);
+              }
               args.push(
-                ...((await lstat(path)).isDirectory()
+                "--ro-bind-fd",
+                String(3 + held.indexOf(emptyConfigHandle)),
+                `${target}/config`,
+              );
+            } else
+              args.push(
+                ...(metadata.isDirectory()
                   ? ["--tmpfs", `${target}/${name}`]
                   : ["--ro-bind", "/dev/null", `${target}/${name}`]),
               );
@@ -214,6 +309,10 @@ export async function runSandboxedProcess(
       }
     }
     await mask(rootSource, "");
+    // Mask absent sidecar names as well. If bwrap cannot create an exact mountpoint
+    // beneath a read-only bind, startup fails closed rather than expose later files.
+    for (const path of privateFiles)
+      args.push("--ro-bind", "/dev/null", `${workspaceTarget}/${path}`);
     if (node) args.push("--ro-bind", await realpath(process.execPath), "/zet-node");
     for (const [key, value] of Object.entries({
       PATH: "/usr/bin:/bin",
@@ -236,20 +335,31 @@ export async function runSandboxedProcess(
       if (JSON.stringify(current) !== JSON.stringify(managedScope))
         throw new Error("Managed worktree ownership changed before execution.");
     }
-    const result = await runner({
+    const boundedRequest: ProcessRunRequest = {
       command: "/usr/bin/bwrap",
       args,
       cwd: root,
       env: {},
       limits: { timeoutMs: managedScope ? 30000 : 10000, maxOutputBytes: 65536, killGraceMs: 250 },
       ...(request.signal ? { signal: request.signal } : {}),
-    });
+    };
+    const result =
+      runner === runBoundedProcess
+        ? await runBoundedProcessWithDescriptors(
+            boundedRequest,
+            held.map((handle) => handle.fd),
+          )
+        : await runner(boundedRequest);
     request.signal?.throwIfAborted();
     if (result.outcome !== "exited" || result.exitCode !== 0)
       throw new Error("Independent process sandbox execution failed; no host fallback.");
     return result;
   } finally {
-    await Promise.all(held.map((handle) => handle.close()));
+    try {
+      await Promise.all(held.map((handle) => handle.close()));
+    } finally {
+      if (emptyConfigDirectory) await rm(emptyConfigDirectory, { recursive: true, force: true });
+    }
   }
 }
 
@@ -263,7 +373,12 @@ export type ProjectCommand = (typeof PROJECT_COMMANDS)[number];
 /** The npm CLI path is trusted host configuration, never a model-supplied executable. */
 export async function runSandboxedProjectCommand(
   request: { cwd: string; command: ProjectCommand; signal?: AbortSignal },
-  options: { npmCliPath?: string; runner?: typeof runBoundedProcess; platform?: string } = {},
+  options: {
+    npmCliPath?: string;
+    runner?: typeof runBoundedProcess;
+    platform?: string;
+    privatePaths?: readonly string[];
+  } = {},
 ): Promise<ProcessRunResult> {
   const runner = options.runner ?? runBoundedProcess;
   if (
@@ -279,6 +394,7 @@ export async function runSandboxedProjectCommand(
   const npmCli = await realpath(npmPath);
   const npmRoot = dirname(dirname(npmCli));
   const root = await realpath(request.cwd);
+  const privateFiles = await privateStatePaths(root, options.privatePaths, [npmRoot]);
   let temporary: string | undefined;
   const rootHandle = await open(
     root,
@@ -286,7 +402,7 @@ export async function runSandboxedProjectCommand(
   );
   let entries = 0;
   let bytes = 0;
-  const dependencies: { source: string; target: string }[] = [];
+  const dependencies: { fd: number; target: string }[] = [];
   const dependencyHandles: Awaited<ReturnType<typeof open>>[] = [];
   const masks: string[][] = [];
   try {
@@ -303,6 +419,13 @@ export async function runSandboxedProjectCommand(
         const local = join(directory, entry.name);
         const destination = `${target}/${entry.name}`;
         const stat = await lstat(local);
+        const workspaceRelative = destination.slice("/workspace/".length);
+        if (privateFiles.has(workspaceRelative)) {
+          if (!stat.isFile() || stat.nlink !== 1 || stat.isSymbolicLink())
+            throw new Error("Linked private dependency refused.");
+          masks.push(["--ro-bind", "/dev/null", destination]);
+          continue;
+        }
         if (isBlockedWorkspacePathSegment(entry.name)) {
           if (stat.isSymbolicLink()) throw new Error("Linked credential dependency refused.");
           masks.push(
@@ -314,6 +437,8 @@ export async function runSandboxedProjectCommand(
           const canonical = await realpath(local);
           if (!canonical.startsWith(`${root}/`))
             throw new Error("External dependency link refused.");
+          if (privateFiles.has(canonical.slice(root.length + 1)))
+            throw new Error("Private dependency alias refused.");
         } else if (stat.isDirectory()) {
           const child = await open(
             local,
@@ -342,6 +467,11 @@ export async function runSandboxedProjectCommand(
         const local = `${descriptor}/${entry.name}`;
         const targetRelative = `${relative}${entry.name}`;
         const stat = await lstat(local);
+        if (privateFiles.has(targetRelative)) {
+          if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1)
+            throw new Error("Linked private snapshot entry refused.");
+          continue;
+        }
         if (stat.isSymbolicLink()) throw new Error("Source links refused in project snapshot.");
         if (entry.name === "node_modules" && stat.isDirectory()) {
           const dependency = await open(
@@ -373,10 +503,17 @@ export async function runSandboxedProjectCommand(
               const entryTarget = `${target}/${installed.name}`;
               const entryPrivate = join(privatePath, installed.name);
               const metadata = await lstat(entrySource);
+              if (privateFiles.has(entryTarget.slice("/workspace/".length))) {
+                if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1)
+                  throw new Error("Linked private dependency refused.");
+                continue;
+              }
               if (metadata.isSymbolicLink()) {
                 const canonical = await realpath(entrySource);
                 if (!canonical.startsWith(`${root}/`))
                   throw new Error("External dependency link refused.");
+                if (privateFiles.has(canonical.slice(root.length + 1)))
+                  throw new Error("Private dependency alias refused.");
                 await symlink(`/workspace/${canonical.slice(root.length + 1)}`, entryPrivate);
               } else if (metadata.isDirectory()) {
                 const directory = await open(
@@ -386,9 +523,16 @@ export async function runSandboxedProjectCommand(
                 dependencyHandles.push(directory);
                 await mkdir(entryPrivate);
                 const directorySource = `/proc/${process.pid}/fd/${directory.fd}`;
-                if (installed.name === ".bin" || (container && installed.name.startsWith("@")))
+                const containsPrivateState = [...privateFiles].some((path) =>
+                  path.startsWith(`${entryTarget.slice("/workspace/".length)}/`),
+                );
+                if (
+                  containsPrivateState ||
+                  installed.name === ".bin" ||
+                  (container && installed.name.startsWith("@"))
+                )
                   await mountEntries(directorySource, entryTarget, entryPrivate, false);
-                else dependencies.push({ source: directorySource, target: entryTarget });
+                else dependencies.push({ fd: directory.fd, target: entryTarget });
               } else {
                 if (!metadata.isFile() || metadata.nlink !== 1)
                   throw new Error("Unsupported dependency entry.");
@@ -487,16 +631,21 @@ export async function runSandboxedProjectCommand(
       "--chdir",
       "/workspace",
     );
+    const inheritedDependencyFDs = dependencies.map((dependency) => dependency.fd);
     for (const dependency of dependencies)
-      args.push("--ro-bind", dependency.source, dependency.target);
+      args.push(
+        "--ro-bind-fd",
+        String(3 + inheritedDependencyFDs.indexOf(dependency.fd)),
+        dependency.target,
+      );
     for (const mask of masks) args.push(...mask);
     for (const [key, value] of Object.entries({
       PATH: "/zet-bin:/usr/bin:/bin",
       HOME: "/tmp",
       TMPDIR: "/tmp",
       npm_config_cache: "/tmp/npm-cache",
-      npm_config_userconfig: "/dev/null",
-      npm_config_globalconfig: "/dev/null",
+      npm_config_userconfig: "/tmp/zet-user.npmrc",
+      npm_config_globalconfig: "/tmp/zet-global.npmrc",
       npm_config_update_notifier: "false",
       npm_config_audit: "false",
       npm_config_fund: "false",
@@ -517,14 +666,18 @@ export async function runSandboxedProjectCommand(
       "--ignore-scripts",
       script,
     );
-    const result = await runner({
+    const boundedRequest: ProcessRunRequest = {
       command: "/usr/bin/bwrap",
       args,
       cwd: root,
       env: {},
       limits: { timeoutMs: 120_000, maxOutputBytes: 131_072, killGraceMs: 250 },
       ...(request.signal ? { signal: request.signal } : {}),
-    });
+    };
+    const result =
+      runner === runBoundedProcess
+        ? await runBoundedProcessWithDescriptors(boundedRequest, inheritedDependencyFDs)
+        : await runner(boundedRequest);
     request.signal?.throwIfAborted();
     if (result.outcome !== "exited" || !result.stderr.startsWith(`${marker}\n`))
       throw new Error("Project sandbox execution interrupted; no host fallback.");
@@ -587,6 +740,7 @@ export async function readProjectSnapshotBytes(
 export async function runSandboxedManagedWorktree(
   request: ProcessRunRequest,
   scope: ManagedWorktreeSandboxScope,
+  privatePaths?: readonly string[],
 ): Promise<ProcessRunResult> {
-  return runSandboxedProcess(request, runBoundedProcess, process.platform, scope);
+  return runSandboxedProcess(request, runBoundedProcess, process.platform, scope, privatePaths);
 }

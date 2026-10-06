@@ -145,6 +145,12 @@ async function invoke(
         stdio: ["pipe", "pipe", "pipe"],
         env: {
           SystemRoot: process.env["SystemRoot"] ?? "C:\\Windows",
+          // AppContainer setup expands profile variables in the trusted launcher too.
+          // These point to this private invocation, never the host user profile.
+          LOCALAPPDATA: payload["temporary"]!,
+          APPDATA: payload["temporary"]!,
+          USERPROFILE: payload["temporary"]!,
+          windir: process.env["SystemRoot"] ?? "C:\\Windows",
           TEMP: tmpdir(),
           TMP: tmpdir(),
         },
@@ -204,6 +210,7 @@ public static class ZetProcessSandbox {
  [StructLayout(LayoutKind.Sequential)] struct INFO { public uint attrs; public System.Runtime.InteropServices.ComTypes.FILETIME creation,access,write; public uint volume,sizeHigh,sizeLow,links,indexHigh,indexLow; }
  [DllImport("userenv.dll",CharSet=CharSet.Unicode)] static extern int CreateAppContainerProfile(string name,string display,string description,IntPtr caps,uint count,out IntPtr sid);
  [DllImport("userenv.dll",CharSet=CharSet.Unicode)] static extern int DeleteAppContainerProfile(string name);
+ [DllImport("userenv.dll",CharSet=CharSet.Unicode)] static extern int GetAppContainerFolderPath(string sid,out IntPtr path);
  [DllImport("advapi32.dll")] static extern IntPtr FreeSid(IntPtr sid);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool InitializeProcThreadAttributeList(IntPtr list,int count,int flags,ref IntPtr size);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool UpdateProcThreadAttribute(IntPtr list,uint flags,IntPtr attribute,IntPtr value,IntPtr size,IntPtr prev,IntPtr ret);
@@ -323,8 +330,19 @@ public static class ZetProcessSandbox {
    jobmem=Marshal.AllocHGlobal(IntPtr.Size);Marshal.WriteIntPtr(jobmem,job);
    Check(UpdateProcThreadAttribute(list,0,new IntPtr(0x2000D),jobmem,new IntPtr(IntPtr.Size),IntPtr.Zero,IntPtr.Zero));
    string system=Environment.GetEnvironmentVariable("SystemRoot");
-   string environment="CI=1\0GIT_ALLOW_PROTOCOL=none\0GIT_CONFIG_GLOBAL=NUL\0GIT_CONFIG_NOSYSTEM=1\0GIT_LITERAL_PATHSPECS=1\0GIT_OPTIONAL_LOCKS=0\0GIT_TERMINAL_PROMPT=0\0HOME="+workspace+"\0PATH="+runner+"\0SystemRoot="+system+"\0TEMP="+workspace+"\0TMP="+workspace+"\0\0";
+   phase="profile-path";IntPtr profilePathPointer;int pathResult=GetAppContainerFolderPath(new SecurityIdentifier(sid).Value,out profilePathPointer);
+   if(pathResult!=0){nativeError=pathResult;throw new InvalidOperationException();}
+   string profilePath;try {profilePath=Marshal.PtrToStringUni(profilePathPointer);}finally{Marshal.FreeCoTaskMem(profilePathPointer);}
+   Check(!String.IsNullOrEmpty(profilePath));string profileTemp=Path.Combine(profilePath,"Temp");Directory.CreateDirectory(profileTemp);
+   // Win32 AppContainer creation reads these from its trusted caller environment.
+   Environment.SetEnvironmentVariable("LOCALAPPDATA",profilePath);
+   Environment.SetEnvironmentVariable("APPDATA",profilePath);
+   Environment.SetEnvironmentVariable("USERPROFILE",workspace);
+   string environment="APPDATA="+profilePath+"\0CI=1\0GIT_ALLOW_PROTOCOL=none\0GIT_CONFIG_GLOBAL=NUL\0GIT_CONFIG_NOSYSTEM=1\0GIT_LITERAL_PATHSPECS=1\0GIT_OPTIONAL_LOCKS=0\0GIT_TERMINAL_PROMPT=0\0HOME="+workspace+"\0LOCALAPPDATA="+profilePath+"\0PATH="+runner+"\0SystemRoot="+system+"\0TEMP="+profileTemp+"\0TMP="+profileTemp+"\0USERPROFILE="+workspace+"\0windir="+system+"\0\0";
    if(command.StartsWith("probe")) environment=environment.TrimEnd('\0')+"\0ZET_PROBE_OUTSIDE="+outside+"\0ZET_PROBE_PORT="+port+"\0\0";
+   // Windows expects environment keys sorted, including any fixed probe entries.
+   string[] environmentEntries=environment.TrimEnd('\0').Split('\0');Array.Sort(environmentEntries,StringComparer.OrdinalIgnoreCase);
+   environment=String.Join("\0",environmentEntries)+"\0\0";
    env=Marshal.StringToHGlobalUni(environment);
    SIX startup=new SIX();startup.si.cb=Marshal.SizeOf(typeof(SIX));startup.si.flags=0x100;startup.si.input=inR;startup.si.output=outW;startup.si.error=errW;startup.list=list;
    phase="launch";Check(CreateProcess(executable,new StringBuilder(Quote(executable)+" "+args),IntPtr.Zero,IntPtr.Zero,true,0x80000|0x400|4|0x08000000,env,workspace,ref startup,out pi));

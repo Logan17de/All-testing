@@ -1,6 +1,74 @@
 import { constants } from "node:fs";
-import { open, realpath, opendir, type FileHandle } from "node:fs/promises";
+import { open, realpath, opendir, stat, type FileHandle } from "node:fs/promises";
 import path from "node:path";
+
+/** Exact host-owned private files, including missing WAL/SHM paths. */
+export function createWorkspacePrivateGuard(privatePaths: readonly string[] = []) {
+  if (
+    privatePaths.length > 16 ||
+    privatePaths.some(
+      (value) =>
+        typeof value !== "string" ||
+        !path.isAbsolute(value) ||
+        value.includes("\0") ||
+        value.length > 4096,
+    )
+  )
+    throw new Error("Workspace tool rejected the request.");
+  const paths = Object.freeze([...privatePaths]);
+  async function canonical(value: string): Promise<string> {
+    try {
+      return await realpath(value);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = path.dirname(value);
+      if (parent === value) throw error;
+      return path.join(await canonical(parent), path.basename(value));
+    }
+  }
+  async function identities() {
+    return Promise.all(
+      paths.map(async (value) => {
+        const resolved = await canonical(value);
+        try {
+          const info = await stat(value);
+          return { resolved, dev: info.dev, ino: info.ino };
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          return { resolved };
+        }
+      }),
+    );
+  }
+  // Retain original identity as well as checking replacements at each effect.
+  const initial = paths.length ? identities() : Promise.resolve([]);
+  initial.catch(() => undefined);
+  return {
+    paths,
+    async assertAllowed(value: string, info?: { dev: number; ino: number }) {
+      if (!paths.length) return;
+      const candidate = await canonical(value);
+      if (!info) {
+        try {
+          const current = await stat(value);
+          info = { dev: current.dev, ino: current.ino };
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      const blocked = [...(await initial), ...(await identities())];
+      const fold = (entry: string) => (process.platform === "win32" ? entry.toLowerCase() : entry);
+      if (
+        blocked.some(
+          (entry) =>
+            fold(candidate) === fold(entry.resolved) ||
+            (info && entry.ino !== undefined && info.dev === entry.dev && info.ino === entry.ino),
+        )
+      )
+        throw new Error("Workspace tool rejected the request.");
+    },
+  };
+}
 
 const LIMIT = 64 * 1024;
 export const isBlockedWorkspacePathSegment = (name: string): boolean =>
@@ -81,15 +149,21 @@ export async function executeWorkspaceReadTool(
   root: string,
   tool: string,
   args: unknown,
+  privateGuard = createWorkspacePrivateGuard(),
 ): Promise<WorkspaceReadToolResult> {
   let handle: FileHandle | undefined;
   try {
     if (tool !== "harness.fs.read" && tool !== "harness.fs.list") throw new Error();
     const reading = tool === "harness.fs.read";
     handle = await confinedOpen(root, partsFor(args, reading), !reading);
+    await privateGuard.assertAllowed(
+      await realpath(`/proc/self/fd/${handle.fd}`),
+      await handle.stat(),
+    );
     let text: string;
     if (reading) {
       const stat = await handle.stat();
+      await privateGuard.assertAllowed(await realpath(`/proc/self/fd/${handle.fd}`), stat);
       if (!stat.isFile() || stat.nlink !== 1 || stat.size > LIMIT) throw new Error();
       const buffer = Buffer.alloc(LIMIT + 1);
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
@@ -113,6 +187,13 @@ export async function executeWorkspaceReadTool(
           (!entry.isFile() && !entry.isDirectory())
         )
           continue;
+        try {
+          await privateGuard.assertAllowed(
+            `${await realpath(`/proc/self/fd/${handle.fd}`)}/${entry.name}`,
+          );
+        } catch {
+          continue;
+        }
         entries.push({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" });
       }
       entries.sort((a, b) => a.name.localeCompare(b.name));

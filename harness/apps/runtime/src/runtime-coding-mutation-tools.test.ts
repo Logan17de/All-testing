@@ -69,7 +69,7 @@ it("writes only the approved immutable snapshot", async () => {
     return true;
   });
   const [write] = createRuntimeMutationTools({ root, approve });
-  if (process.platform !== "linux" && process.platform !== "win32") {
+  if (process.platform !== "linux") {
     await expect(write!.invoke(input, context())).rejects.toThrow();
     expect(approve).not.toHaveBeenCalled();
     return;
@@ -205,5 +205,64 @@ it.runIf(process.platform === "linux")(
       tool.invoke({ command: "project-test", argv: ["--danger"] }, context()),
     ).rejects.toThrow();
     expect(runSandboxedProcess).not.toHaveBeenCalled();
+  },
+);
+
+it.skipIf(process.platform !== "linux")(
+  "rejects private custom DB and missing sidecar writes before consent",
+  async () => {
+    const database = join(root, "chat.sqlite");
+    await writeFile(database, "private fixture");
+    const approve = vi.fn(async () => true);
+    const [write] = createRuntimeMutationTools({
+      root,
+      approve,
+      privatePaths: [database, `${database}-wal`, `${database}-shm`],
+    });
+    for (const name of ["chat.sqlite", "chat.sqlite-wal", "chat.sqlite-shm"]) {
+      await expect(write!.invoke({ path: name, content: "bad" }, context())).rejects.toThrow(
+        "rejected",
+      );
+    }
+    expect(approve).not.toHaveBeenCalled();
+    expect(await readFile(database, "utf8")).toBe("private fixture");
+  },
+);
+
+it.skipIf(process.platform !== "linux")(
+  "cancellation during final private guard never publishes a write",
+  async () => {
+    const guards = await import("./runtime-workspace-read-tools.js");
+    const controller = new AbortController();
+    let calls = 0;
+    const spy = vi.spyOn(guards, "createWorkspacePrivateGuard").mockReturnValue({
+      paths: [],
+      assertAllowed: () => {
+        if (++calls === 3) controller.abort();
+        return Promise.resolve();
+      },
+    });
+    try {
+      const [write] = createRuntimeMutationTools({ root, approve: () => Promise.resolve(true) });
+      await expect(
+        write!.invoke({ path: "new-file", content: "text" }, context(controller.signal)),
+      ).rejects.toThrow();
+      expect(await readdir(root)).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  },
+);
+
+it.runIf(process.platform === "win32")(
+  "legacy Linux write adapter fails closed on Windows before approval",
+  async () => {
+    const approve = vi.fn(async () => true);
+    const [write] = createRuntimeMutationTools({ root, approve });
+    await expect(write!.invoke({ path: "file.ts", content: "text" }, context())).rejects.toThrow(
+      "rejected",
+    );
+    expect(approve).not.toHaveBeenCalled();
+    expect(await readdir(root)).toEqual([]);
   },
 );
