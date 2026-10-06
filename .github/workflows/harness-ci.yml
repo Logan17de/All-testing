@@ -69,6 +69,12 @@ jobs:
           npm exec -- prettier --write .
           git diff --no-ext-diff --no-color -- .
 
+      - name: Windows project sandbox acceptance
+        if: runner.os == 'Windows'
+        run: |
+          npm run build --workspace @zet-harness/runtime
+          npm exec -- vitest run apps/runtime/src/runtime-windows-project-sandbox.test.ts
+
       - name: Tests
         run: npm test
 

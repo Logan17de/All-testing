@@ -322,12 +322,17 @@ public static class ZetProcessSandbox {
  }
  static List<Locks> PrivatePaths(string exclusions,string node,string npmRoot) {
   List<Locks> held=new List<Locks>();privateFiles.Clear();
-  try {string[] paths=String.IsNullOrEmpty(exclusions)?new string[0]:exclusions.Split('\n');Check(paths.Length<=16);
+  try {string[] paths=String.IsNullOrEmpty(exclusions)?new string[0]:exclusions.Split('\n');phase="project-private-limit";Check(paths.Length<=16);
    foreach(string path in paths) {
-    Check(path.Length>0 && path.Length<=4096 && Path.IsPathRooted(path) && !path.StartsWith(@"\\") && path.IndexOf(':',2)<0 && !System.Text.RegularExpressions.Regex.IsMatch(path,@"[\x00-\x1f\x7f]") && String.Equals(path,Path.GetFullPath(path),StringComparison.OrdinalIgnoreCase));
-    string canonical=Path.GetFullPath(path);Check(!String.Equals(canonical,node,StringComparison.OrdinalIgnoreCase) && !canonical.StartsWith(npmRoot.TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase));
+    phase="project-private-length";Check(path.Length>0 && path.Length<=4096);
+    phase="project-private-rooted";Check(Path.IsPathRooted(path));
+    phase="project-private-local";Check(!path.StartsWith(@"\\"));
+    phase="project-private-stream";Check(path.IndexOf(':',2)<0);
+    phase="project-private-control";Check(!System.Text.RegularExpressions.Regex.IsMatch(path,@"[\x00-\x1f\x7f]"));
+    phase="project-private-normalized";string canonical=Path.GetFullPath(path);Check(String.Equals(path,canonical,StringComparison.OrdinalIgnoreCase));
+    phase="project-private-runtime-intersection";Check(!String.Equals(canonical,node,StringComparison.OrdinalIgnoreCase) && !canonical.StartsWith(npmRoot.TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase));
     held.Add(new Locks(Path.GetDirectoryName(canonical)));
-    if(File.Exists(canonical) || Directory.Exists(canonical)){SafeFileHandle handle=CreateFile(canonical,0,3,IntPtr.Zero,3,0x00200000,IntPtr.Zero);privateHandles.Add(handle);INFO info;Check(!handle.IsInvalid);Check(GetFileInformationByHandle(handle,out info));Check((info.attrs&0x410)==0 && info.links==1);StringBuilder actual=new StringBuilder(32768);Check(GetFinalPathNameByHandle(handle,actual,32768,0)>0);string final=actual.ToString();if(final.StartsWith(@"\\?\"))final=final.Substring(4);Check(String.Equals(canonical,final,StringComparison.OrdinalIgnoreCase));}
+    if(File.Exists(canonical) || Directory.Exists(canonical)){phase="project-private-file-open";SafeFileHandle handle=CreateFile(canonical,0,3,IntPtr.Zero,3,0x00200000,IntPtr.Zero);privateHandles.Add(handle);INFO info;Check(!handle.IsInvalid);phase="project-private-file-information";Check(GetFileInformationByHandle(handle,out info));phase="project-private-file-identity";Check((info.attrs&0x410)==0 && info.links==1);StringBuilder actual=new StringBuilder(32768);phase="project-private-file-path";Check(GetFinalPathNameByHandle(handle,actual,32768,0)>0);string final=actual.ToString();if(final.StartsWith(@"\\?\"))final=final.Substring(4);phase="project-private-file-canonical";Check(String.Equals(canonical,final,StringComparison.OrdinalIgnoreCase));}
     privateFiles.Add(canonical);
    }return held;
   }catch{foreach(Locks item in held)item.Dispose();foreach(SafeFileHandle item in privateHandles)item.Dispose();privateHandles.Clear();throw;}
@@ -387,7 +392,7 @@ public static class ZetProcessSandbox {
     executable=Path.Combine(runner,"cmd","git.exe"); Check(File.Exists(executable));
     args="-c core.fsmonitor=false -c core.untrackedCache=false status --porcelain=v1 --ignore-submodules=all";
    } else if(command=="project-test" || command=="project-build" || command=="project-typecheck" || command=="project-lint") {
-    phase="project-private-paths";Check(Path.IsPathRooted(npmRoot));privateLocks=PrivatePaths(exclusions,node,Path.GetFullPath(npmRoot));
+    phase="project-npm-rooted";Check(Path.IsPathRooted(npmRoot));phase="project-npm-normalized";string trustedNpmRoot=Path.GetFullPath(npmRoot);privateLocks=PrivatePaths(exclusions,node,trustedNpmRoot);
     phase="project-runtime-copy";executable=Path.Combine(runner,"node.exe");CopyFile(node,executable);string npm=Path.Combine(runner,"npm");Directory.CreateDirectory(npm);CopyTree(Path.GetFullPath(npmRoot),npm,false,true);Check(File.Exists(Path.Combine(npm,"bin","npm-cli.js")));
     phase="project-source-copy";bytes=0;entries=0;byteLimit=536870912;scanStarted=DateTime.UtcNow;CopyTree(Path.GetFullPath(cwd),workspace,false,true);
     phase="project-permissions";ProjectPermissions(workspace,new SecurityIdentifier(sid),true);

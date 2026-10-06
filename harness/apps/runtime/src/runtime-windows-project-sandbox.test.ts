@@ -1,16 +1,50 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, readFile, rm, link, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import { execFileSync } from "node:child_process";
 import { WINDOWS_PROCESS_BRIDGE } from "./runtime-windows-process-sandbox.js";
+import * as nativeBridge from "./runtime-windows-process-sandbox.js";
 import {
   executeWindowsSandboxedProjectScript,
   WINDOWS_PROJECT_COMMANDS,
 } from "./runtime-windows-project-sandbox.js";
 
 describe("experimental Windows project copy sandbox", () => {
+  it("serializes exact private paths with real newline delimiters at the mocked native boundary", async () => {
+    const root = await mkdtemp(join(tmpdir(), "zet-win-private-protocol-"));
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const invoke = vi.spyOn(nativeBridge, "bridge").mockResolvedValue({
+      outcome: "exited",
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      durationMs: 1,
+    });
+    try {
+      await mkdir(join(root, "bin"));
+      const npmCliPath = join(root, "bin", "npm-cli.js");
+      await writeFile(npmCliPath, "synthetic trusted npm fixture");
+      const paths = [join(root, "state.sqlite"), join(root, "state.sqlite-wal")];
+      Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+      await executeWindowsSandboxedProjectScript(
+        { cwd: root, command: "project-test" },
+        { npmCliPath, privatePaths: paths },
+      );
+      const payload = invoke.mock.calls[0]?.[0];
+      expect(payload?.["exclusions"]?.split("\n")).toEqual(paths);
+      expect(payload?.["exclusions"]).not.toContain("\\n");
+      expect(invoke).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+      invoke.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("withholds unsupported commands and operating systems", async () => {
     await expect(
       executeWindowsSandboxedProjectScript({ cwd: tmpdir(), command: "project-install" as never }),
@@ -150,7 +184,7 @@ socket.once('connect',()=>process.exit(21));socket.once('error',()=>{console.log
             { cwd: root, command: "project-test" },
             { npmCliPath, privatePaths: [database] },
           ),
-        ).rejects.toThrow("no host fallback");
+        ).rejects.toThrow("project-private-file-identity");
         await rm(join(root, "alias.sqlite"));
         await symlink(root, join(root, "source-link"), "junction");
         await expect(
