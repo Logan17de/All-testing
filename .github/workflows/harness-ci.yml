@@ -86,6 +86,12 @@ jobs:
           sudo install -m 0755 "$RUNNER_TEMP/zet-bwrap-build/bwrap" /usr/bin/bwrap
           bwrap --version
           bwrap --help | grep -- '--ro-bind-fd'
+          # Ubuntu's generic userns profile strips capabilities needed to initialize
+          # an isolated loopback device. Permit userns only for this root-owned binary.
+          if test -f /sys/module/apparmor/parameters/enabled && grep -q '^Y' /sys/module/apparmor/parameters/enabled; then
+            printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' 'profile zet-harness-bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '}' | sudo tee /etc/apparmor.d/zet-harness-bwrap > /dev/null
+            sudo apparmor_parser --replace /etc/apparmor.d/zet-harness-bwrap
+          fi
 
       - name: Native Linux kernel acceptance
         if: runner.os == 'Linux'
@@ -93,6 +99,9 @@ jobs:
           export ZET_NPM_CLI="$(dirname "$(dirname "$(command -v npm)")")/lib/node_modules/npm/bin/npm-cli.js"
           test -f "$ZET_NPM_CLI" || export ZET_NPM_CLI="$(npm root -g)/npm/bin/npm-cli.js"
           npm run test:native-linux
+          # The fixed synthetic fixture also proves payload capabilities are dropped
+          # when the host daemon starts as UID 0. No user project is executed.
+          sudo env ZET_NPM_CLI="$ZET_NPM_CLI" "$(command -v node)" scripts/native-linux-acceptance.mjs
 
       - name: Plugin smoke
         run: npm run test:plugin-smoke --workspace @zet-harness/core

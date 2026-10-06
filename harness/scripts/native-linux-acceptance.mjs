@@ -15,7 +15,17 @@ import { createRuntimeWorktreeTools } from "../apps/runtime/dist/runtime-coding-
 // It runs only /usr/bin/true and does not read application data or accept source/arguments.
 execFileSync(
   "/usr/bin/bwrap",
-  ["--unshare-all", "--die-with-parent", "--ro-bind", "/", "/", "--", "/usr/bin/true"],
+  [
+    "--unshare-all",
+    "--cap-drop",
+    "ALL",
+    "--die-with-parent",
+    "--ro-bind",
+    "/",
+    "/",
+    "--",
+    "/usr/bin/true",
+  ],
   { env: {}, timeout: 10000, maxBuffer: 4096, stdio: ["ignore", "pipe", "pipe"] },
 );
 console.log("LINUX_NAMESPACE_PREFLIGHT_OK");
@@ -60,7 +70,7 @@ try {
   );
   await writeFile(
     join(root, "check.cjs"),
-    `const fs=require('node:fs');const assert=require('node:assert/strict');assert.throws(()=>fs.readFileSync(${JSON.stringify(outside)}));assert.throws(()=>fs.readFileSync('/workspace/.env'));for(const name of ['private-state.db','private-state.db-wal','private-state.db-shm'])assert.throws(()=>fs.readFileSync('/workspace/'+name));const selected=${JSON.stringify(selectedIdentities)};for(const name of fs.readdirSync('/proc/self/fd')){const fd=Number(name);if(fd<3)continue;try{const st=fs.fstatSync(fd);if(st.isDirectory()){assert.ok(!selected.some(([dev,ino])=>st.dev===dev&&st.ino===ino),'source descriptor leaked');let wrote=false;try{fs.writeFileSync('/proc/self/fd/'+fd+'/fd-escape-marker','fixture');wrote=true}catch{}assert.ok(!wrote,'directory descriptor write escaped');}}catch(error){if(error.code!=='EBADF')throw error;}}fs.writeFileSync('/workspace/snapshot-only.txt','fixture');const net=require('node:net');const socket=net.connect({host:'127.0.0.1',port:${port}});socket.on('connect',()=>process.exit(21));socket.on('error',()=>{console.log('NATIVE_NAMESPACE_BOUNDARIES_OK');process.exit(0)});setTimeout(()=>process.exit(22),3000);`,
+    `const fs=require('node:fs');const assert=require('node:assert/strict');assert.throws(()=>fs.readFileSync(${JSON.stringify(outside)}));assert.throws(()=>fs.readFileSync('/workspace/.env'));for(const name of ['private-state.db','private-state.db-wal','private-state.db-shm'])assert.throws(()=>fs.readFileSync('/workspace/'+name));const capStatus=fs.readFileSync('/proc/self/status','utf8').split(String.fromCharCode(10));for(const name of ['CapInh','CapPrm','CapEff','CapBnd','CapAmb']){const line=capStatus.find(line=>line.startsWith(name+':'));assert.ok(line,name+' absent');assert.equal(BigInt('0x'+line.slice(line.indexOf(':')+1).trim()),0n,name+' retained');}assert.equal(capStatus.find(line=>line.startsWith('NoNewPrivs:')).split(':')[1].trim(),'1','privilege elevation allowed');assert.throws(()=>fs.writeFileSync('/workspace/node_modules/public-fixture/public.txt','forbidden'));const remount=require('node:child_process').spawnSync('/usr/bin/mount',['-o','remount,rw','/workspace/node_modules/public-fixture'],{encoding:'utf8',timeout:3000});assert.notEqual(remount.status,0,'read-only dependency remounted');const selected=${JSON.stringify(selectedIdentities)};for(const name of fs.readdirSync('/proc/self/fd')){const fd=Number(name);if(fd<3)continue;try{const st=fs.fstatSync(fd);if(st.isDirectory()){assert.ok(!selected.some(([dev,ino])=>st.dev===dev&&st.ino===ino),'source descriptor leaked');let wrote=false;try{fs.writeFileSync('/proc/self/fd/'+fd+'/fd-escape-marker','fixture');wrote=true}catch{}assert.ok(!wrote,'directory descriptor write escaped');}}catch(error){if(error.code!=='EBADF')throw error;}}fs.writeFileSync('/workspace/snapshot-only.txt','fixture');const net=require('node:net');const socket=net.connect({host:'127.0.0.1',port:${port}});socket.on('connect',()=>process.exit(21));socket.on('error',()=>{console.log('NATIVE_NAMESPACE_BOUNDARIES_OK');process.exit(0)});setTimeout(()=>process.exit(22),3000);`,
   );
   const result = await runSandboxedProjectCommand(
     { cwd: root, command: "project-test" },
@@ -70,8 +80,9 @@ try {
   assert.match(result.stdout, /NATIVE_NAMESPACE_BOUNDARIES_OK/);
   await assert.rejects(access(join(root, "snapshot-only.txt")));
   assert.equal(await readFile(outside, "utf8"), "SYNTHETIC-OUTSIDE-FIXTURE");
+  assert.equal(await readFile(join(publicDependency, "public.txt"), "utf8"), "fixture dependency");
   console.log(
-    "LINUX_PROJECT_BOUNDARIES_OK diagnostic=live network=denied outside-read=denied private-state=excluded inherited-source-FDs=closed snapshot=isolated",
+    `LINUX_PROJECT_BOUNDARIES_OK capabilities=zero host-uid=${process.getuid()} diagnostic=live network=denied outside-read=denied private-state=excluded inherited-source-FDs=closed snapshot=isolated`,
   );
   const repo = join(temporary, "repo");
   await mkdir(repo);

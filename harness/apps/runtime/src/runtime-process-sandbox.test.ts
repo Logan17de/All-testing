@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdtemp, writeFile, rm, mkdir, readFile, readlink, symlink, link } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -117,6 +118,12 @@ it.runIf(process.platform === "linux")(
       ).rejects.toThrow("no host fallback");
       expect(captured?.command).toBe("/usr/bin/bwrap");
       expect(captured?.args).toContain("--unshare-all");
+      expect(
+        captured?.args.slice(
+          captured.args.indexOf("--cap-drop"),
+          captured.args.indexOf("--cap-drop") + 2,
+        ),
+      ).toEqual(["--cap-drop", "ALL"]);
       expect(captured?.args).toContain("/workspace/.env");
       expect(captured?.env).toEqual({});
       expect(JSON.stringify(captured)).not.toContain("must not forward");
@@ -186,10 +193,25 @@ it.runIf(process.platform === "linux")(
         "--ignore-scripts",
         "test",
       ]);
+      const payload = captured!.args.indexOf("--");
+      expect(captured!.args.slice(payload, payload + 4)).toEqual([
+        "--",
+        "/zet-node",
+        "--input-type=commonjs",
+        "-e",
+      ]);
+      expect(captured!.args[payload + 4]).toContain('readFileSync("/proc/self/status", "utf8")');
+      expect(captured!.args.slice(payload + 5, payload + 7)).toEqual(["--", "/zet-node"]);
       expect(captured?.env).toEqual({});
       expect(captured?.args).toContain("/tmp/zet-user.npmrc");
       expect(captured?.args).toContain("/tmp/zet-global.npmrc");
       expect(captured?.args).toContain("--unshare-all");
+      expect(
+        captured?.args.slice(
+          captured.args.indexOf("--cap-drop"),
+          captured.args.indexOf("--cap-drop") + 2,
+        ),
+      ).toEqual(["--cap-drop", "ALL"]);
       expect(captured?.limits?.timeoutMs).toBe(120000);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -537,6 +559,125 @@ it.runIf(process.platform === "linux")(
       expect(await readFile(join(root, ".git/config"), "utf8")).toBe(
         "credential-fixture-must-not-forward",
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+it.runIf(process.platform === "linux")(
+  "fixed trusted Node gate rejects kernel authority before any selected payload",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "zet-capability-gate-"));
+    try {
+      const captured: ProcessRunRequest[] = [];
+      for (const command of [process.execPath, "git"]) {
+        await runSandboxedProcess(
+          {
+            command,
+            args:
+              command === "git"
+                ? [
+                    "-c",
+                    "core.fsmonitor=false",
+                    "-c",
+                    "core.untrackedCache=false",
+                    "status",
+                    "--porcelain=v1",
+                    "--ignore-submodules=all",
+                  ]
+                : ["--version"],
+            cwd: root,
+            env: {},
+          },
+          (request) => {
+            captured.push(request);
+            return Promise.resolve(successfulFixture);
+          },
+          "linux",
+        );
+      }
+      const guards = captured.map((request) => {
+        const start = request.args.indexOf("--");
+        expect(request.args.slice(start, start + 4)).toEqual([
+          "--",
+          "/zet-node",
+          "--input-type=commonjs",
+          "-e",
+        ]);
+        expect(request.args[start + 5]).toBe("--");
+        expect(request.args[start + 6]).toBe(
+          request === captured[0] ? "/zet-node" : "/usr/bin/git",
+        );
+        const mount = request.args.indexOf("/zet-node");
+        expect(request.args[mount - 2]).toBe("--ro-bind");
+        return request.args[start + 4]!;
+      });
+      expect(guards[0]).toBe(guards[1]);
+      const safe =
+        ["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"]
+          .map((field) => field + ":\t0000000000000000")
+          .join("\n") + "\nNoNewPrivs:\t1\n";
+      // Only this test process substitutes builtins; production has no status override or injection seam.
+      function execute(status: string | null, outcome = "{ status: 7, signal: null }") {
+        const prelude = `
+          require("node:fs").readFileSync = (path, encoding) => {
+            if (path !== "/proc/self/status" || encoding !== "utf8") throw Error("unexpected read");
+            ${status === null ? 'throw Error("unreadable status");' : `return ${JSON.stringify(status)};`}
+          };
+          require("node:child_process").spawnSync = (command, args, options) => {
+            if (command !== "/selected" || JSON.stringify(args) !== '["literal;$(no-shell)"]' ||
+                options.shell !== false || options.stdio !== "inherit" ||
+                options.env.ZET_SANDBOX_READY !== undefined) throw Error("bad payload");
+            require("node:fs").writeSync(1, "payload reached");
+            return ${outcome};
+          };
+        `;
+        return spawnSync(
+          process.execPath,
+          [
+            "--input-type=commonjs",
+            "-e",
+            prelude + guards[0],
+            "--",
+            "/selected",
+            "literal;$(no-shell)",
+          ],
+          {
+            encoding: "utf8",
+            env: { ZET_SANDBOX_READY: "trusted-ready" },
+          },
+        );
+      }
+      const success = execute(safe);
+      expect(success.status).toBe(7);
+      expect(success.stdout).toBe("payload reached");
+      expect(success.stderr).toBe("trusted-ready\n");
+      const refused = [
+        null,
+        "",
+        safe.replace("NoNewPrivs:\t1", "NoNewPrivs:\t0"),
+        safe + "CapEff:\t0\n",
+        safe + "NoNewPrivs:\t1\n",
+        safe.replace("NoNewPrivs:\t1\n", ""),
+        safe.replace("CapAmb:\t0000000000000000\n", ""),
+        safe.replace("CapBnd:\t0000000000000000", "CapBnd:\tgarbage"),
+        ...["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"].flatMap((field) => [
+          safe.replace(field + ":\t0000000000000000", field + ":\t0000000000000001"),
+          safe.replace(field + ":\t0000000000000000\n", ""),
+          safe.replace(field + ":\t0000000000000000", field + ":\tgarbage"),
+        ]),
+      ];
+      for (const status of refused) {
+        const failure = execute(status);
+        expect(failure.status).toBe(125);
+        expect(failure.stdout).toBe("");
+        expect(failure.stderr).toBe("Linux sandbox capability verification failed.\n");
+      }
+      expect(execute(safe, '{ error: Error("spawn failed"), status: null }').status).toBe(125);
+      const signaled = execute(safe, '{ status: null, signal: "SIGTERM" }');
+      expect(signaled.status).toBeNull();
+      expect(signaled.signal).toBe("SIGTERM");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -303,11 +303,11 @@ public static class ZetProcessSandbox {
    phase="snapshot";bytes=0;entries=0;byteLimit=536870912;scanStarted=DateTime.UtcNow; string executable,args;
    if(command=="node-version" || command=="probe" || command=="probe-hold") { executable=Path.Combine(runner,"node.exe"); CopyFile(node,executable); args="--version";
     if(command.StartsWith("probe")) {
-     string script=Path.Combine(workspace,"probe.js");
      string source=command=="probe-hold" ?
       "const {spawn}=require('node:child_process');const p=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(p.pid);setInterval(()=>{},1000);" :
       "const fs=require('node:fs');let denied=false;try{fs.readFileSync(process.env.ZET_PROBE_OUTSIDE)}catch{denied=true}if(!denied)process.exit(20);const net=require('node:net');const s=net.connect({host:'127.0.0.1',port:Number(process.env.ZET_PROBE_PORT)});s.once('connect',()=>process.exit(21));s.once('error',()=>{console.log('outside-file-and-network-denied');process.exit(0)});setTimeout(()=>process.exit(22),3000);";
-     File.WriteAllText(script,source);args=Quote(script);
+     // Fixed internal source avoids Node's main-file realpath walk outside the granted tree.
+     args="--input-type=commonjs -e "+Quote(source);
     }
    }
    else if(command=="git-status") {

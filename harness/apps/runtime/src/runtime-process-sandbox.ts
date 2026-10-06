@@ -23,6 +23,37 @@ import {
 } from "@zet-harness/tools";
 import { isBlockedWorkspacePathSegment } from "./runtime-workspace-read-tools.js";
 
+/** Host-authored bootstrap: no workspace code runs until the kernel reports no authority. */
+const LINUX_CAPABILITY_GUARD = String.raw`
+const fs = require("node:fs");
+const childProcess = require("node:child_process");
+function refuse() {
+  fs.writeSync(2, "Linux sandbox capability verification failed.\n");
+  process.exit(125);
+}
+try {
+  const status = fs.readFileSync("/proc/self/status", "utf8");
+  for (const field of ["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"]) {
+    const values = status.split("\n").filter((line) => line.startsWith(field + ":"));
+    if (values.length !== 1 || !new RegExp("^" + field + ":\\s+0+\\s*$").test(values[0])) refuse();
+  }
+  const privilege = status.split("\n").filter((line) => line.startsWith("NoNewPrivs:"));
+  if (privilege.length !== 1 || !/^NoNewPrivs:\s+1\s*$/.test(privilege[0])) refuse();
+} catch { refuse(); }
+const marker = process.env.ZET_SANDBOX_READY;
+delete process.env.ZET_SANDBOX_READY;
+if (marker) fs.writeSync(2, marker + "\n");
+const result = childProcess.spawnSync(process.argv[1], process.argv.slice(2), {
+  stdio: "inherit", env: process.env, shell: false,
+});
+if (result.error) process.exit(125);
+if (result.signal) {
+  try { process.kill(process.pid, result.signal); } catch { process.exit(125); }
+  process.exit(125);
+}
+process.exit(Number.isInteger(result.status) ? result.status : 125);
+`;
+
 /** Trusted exact file exclusions, never globs or caller-controlled script flags. */
 async function privateStatePaths(
   root: string,
@@ -183,6 +214,8 @@ export async function runSandboxedProcess(
   try {
     const args = [
       "--unshare-all",
+      "--cap-drop",
+      "ALL",
       "--die-with-parent",
       "--new-session",
       "--clearenv",
@@ -315,7 +348,7 @@ export async function runSandboxedProcess(
     // beneath a read-only bind, startup fails closed rather than expose later files.
     for (const path of privateFiles)
       args.push("--ro-bind", "/dev/null", `${workspaceTarget}/${path}`);
-    if (node) args.push("--ro-bind", await realpath(process.execPath), "/zet-node");
+    args.push("--ro-bind", await realpath(process.execPath), "/zet-node");
     for (const [key, value] of Object.entries({
       PATH: "/usr/bin:/bin",
       HOME: "/tmp",
@@ -327,7 +360,16 @@ export async function runSandboxedProcess(
       GIT_ALLOW_PROTOCOL: "none",
     }))
       args.push("--setenv", key, value);
-    args.push("--", node ? "/zet-node" : "/usr/bin/git", ...request.args);
+    args.push(
+      "--",
+      "/zet-node",
+      "--input-type=commonjs",
+      "-e",
+      LINUX_CAPABILITY_GUARD,
+      "--",
+      node ? "/zet-node" : "/usr/bin/git",
+      ...request.args,
+    );
     if (managedScope && managed) {
       const current = await managed.verifyManagedWorktreeOwnership(
         root,
@@ -596,6 +638,8 @@ export async function runSandboxedProjectCommand(
     const script = request.command.slice("project-".length);
     const args = [
       "--unshare-all",
+      "--cap-drop",
+      "ALL",
       "--die-with-parent",
       "--new-session",
       "--clearenv",
@@ -658,12 +702,15 @@ export async function runSandboxedProjectCommand(
       args.push("--setenv", key, value);
     const marker = `ZET_SANDBOX_READY_${randomUUID()}`;
     args.push(
-      "--",
-      "/bin/sh",
-      "-c",
-      'printf "%s\\n" "$1" >&2; shift; exec "$@"',
-      "zet-project",
+      "--setenv",
+      "ZET_SANDBOX_READY",
       marker,
+      "--",
+      "/zet-node",
+      "--input-type=commonjs",
+      "-e",
+      LINUX_CAPABILITY_GUARD,
+      "--",
       "/zet-node",
       "/zet-npm/bin/npm-cli.js",
       "run",

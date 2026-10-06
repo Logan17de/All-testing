@@ -26,6 +26,12 @@ describe("Windows native process sandbox", () => {
       executeWindowsSandboxedProjectCommand({ cwd: process.cwd(), command: "project-test" }),
     ).rejects.toThrow();
   });
+  it("runs fixed internal probes without filesystem main-script bootstrap", () => {
+    expect(WINDOWS_PROCESS_BRIDGE).toContain('args="--input-type=commonjs -e "+Quote(source)');
+    expect(WINDOWS_PROCESS_BRIDGE).not.toContain("File.WriteAllText(script,source)");
+    expect(WINDOWS_PROCESS_BRIDGE).not.toContain('"probe.js"');
+    expect(WINDOWS_PROCESS_BRIDGE).toContain('string source=command=="probe-hold" ?');
+  });
   it.skipIf(process.platform === "win32")("fails closed on other platforms", async () => {
     await expect(
       executeWindowsSandboxedProjectCommand({ cwd: process.cwd(), command: "node-version" }),
