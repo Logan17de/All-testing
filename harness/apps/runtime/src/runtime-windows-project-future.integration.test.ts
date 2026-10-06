@@ -143,7 +143,7 @@ it.skipIf(process.platform !== "win32")(
           (error: unknown) => {
             const message = error instanceof Error ? error.message : "";
             earlyFailure =
-              /^Windows process sandbox refused \([a-z-]+:-?\d{1,12}\); no host fallback\.$/.test(
+              /^Windows process sandbox refused \([a-z-]{1,100}(?:-\d{1,10})?:-?\d{1,12}\); no host fallback\.$/.test(
                 message,
               )
                 ? message

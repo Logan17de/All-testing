@@ -15,6 +15,17 @@ file/directory inheritance closure. Native negatives and ordinary positives must
 pass for the complete guard before normal dispatch can be enabled. No host fallback
 or silent source ACL changes are permitted. External host security changes remain
 a separate boundary; no Linux-like Windows namespace invisibility is claimed.
+The proof covers existing canonical non-reparse objects and newly created ordinary
+host files/directories with inherited security. Concurrent host ACL/label changes,
+reparse points/junctions/symlinks, hardlinks and moves importing another object's
+security are outside this proof.
+
+Native proof run `37407076390` at `10096eca1734eb1d0fb8ae839beb2fc78c697f78`
+passed Ubuntu and failed four focused Windows checks: ordinary execution and the
+original-source negative stopped at token-policy validation, the future-label
+setup did not match its strict readback, and the delayed payload did not start.
+Seven focused checks passed. This is a failed experiment, not source isolation
+acceptance. A diagnostic follow-up preserves every requirement and the tool gate.
 
 Two test-only durability fixtures have explicit bounded setup budgets after
 observed Windows I/O timeouts. Assertions, SQLite settings, production deadlines

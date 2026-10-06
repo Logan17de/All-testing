@@ -77,7 +77,10 @@ export async function bridge(
     const parsed: unknown = JSON.parse(result);
     if (!parsed || typeof parsed !== "object") throw new Error("Invalid sandbox result.");
     const value = parsed as Record<string, unknown>;
-    if (typeof value["failure"] === "string" && /^[a-z-]+:-?\d{1,12}$/.test(value["failure"]))
+    if (
+      typeof value["failure"] === "string" &&
+      /^[a-z-]{1,100}(?:-\d{1,10})?:-?\d{1,12}$/.test(value["failure"])
+    )
       throw new Error(`Windows process sandbox refused (${value["failure"]}); no host fallback.`);
     if (
       typeof value["code"] !== "number" ||
@@ -100,7 +103,7 @@ export async function bridge(
     signal?.throwIfAborted();
     if (
       error instanceof Error &&
-      /^Windows process sandbox refused \([a-z-]+:-?\d{1,12}\); no host fallback\.$/.test(
+      /^Windows process sandbox refused \([a-z-]{1,100}(?:-\d{1,10})?:-?\d{1,12}\); no host fallback\.$/.test(
         error.message,
       )
     )
