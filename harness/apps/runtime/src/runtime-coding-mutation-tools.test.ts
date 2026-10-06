@@ -48,6 +48,22 @@ function context(signal = new AbortController().signal): AdapterInvocationContex
     },
   };
 }
+it("withholds Windows project tools before consent while source acceptance is pending", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+  try {
+    const approve = vi.fn(async () => true);
+    const [, tool] = createRuntimeMutationTools({ root, approve });
+    await expect(tool!.invoke({ command: "project-test" }, context())).rejects.toThrow(
+      "source-boundary acceptance",
+    );
+    expect(approve).not.toHaveBeenCalled();
+    expect(runSandboxedProjectCommand).not.toHaveBeenCalled();
+    expect(runSandboxedProcess).not.toHaveBeenCalled();
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+  }
+});
 it("denial or approval failure never creates a file", async () => {
   for (const approve of [
     async () => false,
@@ -168,14 +184,18 @@ it("sandbox failure fails closed without host process fallback", async () => {
   await expect(exec!.invoke({ command: "node-version" }, context())).rejects.toThrow("rejected");
   expect(runSandboxedProcess).toHaveBeenCalledTimes(1);
 });
-it.runIf(process.platform === "linux")(
+it.runIf(["linux", "win32"].includes(process.platform))(
   "executes only the approved fixed project command in a private copy",
   async () => {
     const approvals: JsonObject[] = [];
+    const privatePaths = [join(root, "runtime.sqlite"), join(root, "runtime.sqlite-wal")];
+    const input = { command: "project-test" };
     const tools = createRuntimeMutationTools({
       root,
+      privatePaths,
       approve: async (request) => {
         approvals.push(request.args);
+        input.command = "project-build";
         return true;
       },
     });
@@ -190,11 +210,16 @@ it.runIf(process.platform === "linux")(
       stderrTruncated: false,
       durationMs: 1,
     });
-    const result = await tool.invoke({ command: "project-test" }, context());
+    const invocation = context();
+    const result = await tool.invoke(input, invocation);
     expect(approvals).toEqual([{ command: "project-test" }]);
     expect(vi.mocked(runSandboxedProjectCommand).mock.calls[0]?.[0]).toMatchObject({
       cwd: root,
       command: "project-test",
+      signal: invocation.signal,
+    });
+    expect(vi.mocked(runSandboxedProjectCommand).mock.calls[0]?.[1]).toEqual({
+      privatePaths,
     });
     expect(result.value).toMatchObject({
       exitCode: 1,
@@ -204,7 +229,58 @@ it.runIf(process.platform === "linux")(
     await expect(
       tool.invoke({ command: "project-test", argv: ["--danger"] }, context()),
     ).rejects.toThrow();
+    expect(approvals).toEqual([{ command: "project-test" }]);
     expect(runSandboxedProcess).not.toHaveBeenCalled();
+  },
+);
+
+it.runIf(["linux", "win32"].includes(process.platform))(
+  "refused or canceled project approval never reaches execution",
+  async () => {
+    for (const decision of ["deny", "throw", "cancel"] as const) {
+      const controller = new AbortController();
+      const [, tool] = createRuntimeMutationTools({
+        root,
+        approve: async () => {
+          if (decision === "throw") throw new Error("approval fixture");
+          if (decision === "cancel") controller.abort(new Error("approval canceled"));
+          return decision !== "deny";
+        },
+      });
+      await expect(
+        tool!.invoke({ command: "project-test" }, context(controller.signal)),
+      ).rejects.toThrow();
+    }
+    expect(runSandboxedProjectCommand).not.toHaveBeenCalled();
+    expect(runSandboxedProcess).not.toHaveBeenCalled();
+  },
+);
+
+it.runIf(["linux", "win32"].includes(process.platform))(
+  "canceled project execution does not return a success result",
+  async () => {
+    const controller = new AbortController();
+    const [, tool] = createRuntimeMutationTools({
+      root,
+      approve: async () => true,
+    });
+    vi.mocked(runSandboxedProjectCommand).mockImplementation(async () => {
+      controller.abort(new Error("execution canceled"));
+      return {
+        outcome: "exited",
+        exitCode: 0,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        durationMs: 1,
+      };
+    });
+    await expect(
+      tool!.invoke({ command: "project-test" }, context(controller.signal)),
+    ).rejects.toThrow("execution canceled");
+    expect(runSandboxedProjectCommand).toHaveBeenCalledOnce();
   },
 );
 

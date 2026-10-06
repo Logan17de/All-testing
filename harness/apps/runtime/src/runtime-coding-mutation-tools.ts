@@ -153,7 +153,7 @@ export function createRuntimeMutationTools(
           description:
             operation === "write"
               ? "Replace/create one UTF-8 file up to 64 KiB after explicit approval. Existing parent directory required. Linux only; credentials and links refused."
-              : "Run approved fixed diagnostics or npm test/build/typecheck/lint scripts with required Linux isolation, no network or host fallback. Project scripts run in a bounded private source copy with read-only dependencies; generated outputs are discarded. Requires trusted ZET_NPM_CLI.",
+              : "Run approved fixed diagnostics or npm test/build/typecheck/lint scripts with required native OS containment, no network or host fallback. Project scripts run in a bounded private source copy with read-only dependencies; generated outputs are discarded. Requires trusted ZET_NPM_CLI.",
           inputSchema:
             operation === "write"
               ? {
@@ -205,6 +205,14 @@ export function createRuntimeMutationTools(
             !(process.platform === "win32" && operation === "exec")
           )
             throw refused();
+          // Ordinary tools stay closed until original-source inheritance has
+          // complete native acceptance, including files created during a run.
+          if (
+            process.platform === "win32" &&
+            operation === "exec" &&
+            PROJECT_COMMANDS.includes(snapshot.command as ProjectCommand)
+          )
+            throw new Error("Windows project commands await source-boundary acceptance.");
           let approved = false;
           try {
             approved = await options.approve(Object.freeze({ tool: id, args: snapshot }), context);
@@ -233,6 +241,7 @@ export function createRuntimeMutationTools(
                 },
                 { privatePaths: privateGuard.paths },
               );
+              context.signal.throwIfAborted();
               return {
                 value: {
                   ...outcome,

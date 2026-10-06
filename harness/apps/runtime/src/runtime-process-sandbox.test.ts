@@ -5,12 +5,113 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { runBoundedProcess } from "@zet-harness/tools";
 import * as windowsSandbox from "./runtime-windows-process-sandbox.js";
+import * as windowsProject from "./runtime-windows-project-sandbox.js";
 import type { ProcessRunRequest } from "@zet-harness/tools";
 import {
   runSandboxedProcess,
   runSandboxedProjectCommand,
   readProjectSnapshotBytes,
 } from "./runtime-process-sandbox.js";
+
+it("dispatches only fixed Windows projects with frozen trusted configuration and private paths", async () => {
+  const result = {
+    outcome: "exited" as const,
+    exitCode: 1,
+    signal: null,
+    stdout: "fixture",
+    stderr: "",
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    durationMs: 1,
+  };
+  const native = vi
+    .spyOn(windowsProject, "executeWindowsSandboxedProjectScript")
+    .mockResolvedValue(result);
+  const controller = new AbortController();
+  const paths = [join(tmpdir(), "runtime.sqlite"), join(tmpdir(), "runtime.sqlite-wal")];
+  const request = {
+    cwd: tmpdir(),
+    command: "project-test" as "project-test" | "project-build",
+    signal: controller.signal,
+  };
+  const options = {
+    platform: "win32",
+    npmCliPath: join(tmpdir(), "trusted", "bin", "npm-cli.js"),
+    privatePaths: paths,
+  };
+  const originalNpm = options.npmCliPath;
+  try {
+    const pending = runSandboxedProjectCommand(request, options);
+    request.cwd = join(tmpdir(), "unapproved-root");
+    request.command = "project-build";
+    request.signal = new AbortController().signal;
+    options.npmCliPath = "unapproved-npm";
+    paths.push(join(tmpdir(), "unapproved.sqlite"));
+    expect(await pending).toEqual(result);
+    expect(native).toHaveBeenCalledOnce();
+    expect(native.mock.calls[0]?.[0]).toEqual({
+      cwd: tmpdir(),
+      command: "project-test",
+      signal: controller.signal,
+    });
+    expect(native.mock.calls[0]?.[1]).toEqual({
+      npmCliPath: originalNpm,
+      privatePaths: paths.slice(0, 2),
+    });
+    expect(Object.isFrozen(native.mock.calls[0]?.[0])).toBe(true);
+    expect(Object.isFrozen(native.mock.calls[0]?.[1]?.privatePaths)).toBe(true);
+    native.mockClear();
+    const runner = vi.fn<typeof runBoundedProcess>().mockResolvedValue(result);
+    await expect(runSandboxedProjectCommand(request, { ...options, runner })).rejects.toThrow(
+      "refused",
+    );
+    await expect(
+      runSandboxedProjectCommand({ ...request, command: "project-install" as never }, options),
+    ).rejects.toThrow("refused");
+    expect(runner).not.toHaveBeenCalled();
+    expect(native).not.toHaveBeenCalled();
+  } finally {
+    native.mockRestore();
+  }
+});
+
+it("does not return a Windows project result after cancellation", async () => {
+  const controller = new AbortController();
+  const native = vi
+    .spyOn(windowsProject, "executeWindowsSandboxedProjectScript")
+    .mockImplementation(() => {
+      controller.abort(new Error("fixture cancellation"));
+      return Promise.resolve({
+        outcome: "exited",
+        exitCode: 0,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        durationMs: 1,
+      });
+    });
+  try {
+    await expect(
+      runSandboxedProjectCommand(
+        { cwd: tmpdir(), command: "project-test", signal: controller.signal },
+        { platform: "win32" },
+      ),
+    ).rejects.toThrow("fixture cancellation");
+    expect(native).toHaveBeenCalledOnce();
+    native.mockClear();
+    await expect(
+      runSandboxedProjectCommand(
+        { cwd: tmpdir(), command: "project-test", signal: controller.signal },
+        { platform: "win32" },
+      ),
+    ).rejects.toThrow("fixture cancellation");
+    expect(native).not.toHaveBeenCalled();
+  } finally {
+    native.mockRestore();
+  }
+});
 
 it("allows only the fixed Windows Node version diagnostic with private state configured", async () => {
   const native = vi.spyOn(windowsSandbox, "executeWindowsSandboxedProjectCommand");

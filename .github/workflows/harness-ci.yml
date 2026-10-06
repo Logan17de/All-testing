@@ -50,6 +50,13 @@ jobs:
       - name: Clean install
         run: npm ci --no-audit --no-fund
 
+      - name: Windows project sandbox acceptance
+        if: runner.os == 'Windows'
+        run: |
+          npm run build --workspace @zet-harness/runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm exec -- vitest run apps/runtime/src/runtime-windows-project-sandbox.test.ts apps/runtime/src/runtime-windows-project-future.integration.test.ts
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -70,7 +77,15 @@ jobs:
           git diff --no-ext-diff --no-color -- .
 
       - name: Tests
+        if: runner.os != 'Windows'
         run: npm test
+
+      - name: Remaining Windows tests
+        if: runner.os == 'Windows'
+        run: |
+          npm run build --workspace @zet-harness/runtime --workspace @zet-harness/client
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm exec -- vitest run --passWithNoTests --exclude apps/runtime/src/runtime-windows-project-sandbox.test.ts --exclude apps/runtime/src/runtime-windows-project-future.integration.test.ts
 
       - name: Install Linux namespace sandbox
         if: runner.os == 'Linux'

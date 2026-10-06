@@ -8,6 +8,7 @@ const files = [
   "apps/runtime/src/runtime-coding-worktrees.ts",
   "apps/runtime/src/runtime-windows-coding.ts",
   "apps/runtime/src/runtime-windows-process-sandbox.ts",
+  "apps/runtime/src/runtime-windows-project-sandbox.ts",
   "apps/runtime/src/runtime-public-model-state.ts",
   "apps/web/app/agent/desktop-image-consent.tsx",
   "apps/web/app/agent/desktop-image-consent-view.ts",
