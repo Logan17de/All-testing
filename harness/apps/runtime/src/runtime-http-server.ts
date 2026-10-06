@@ -1,5 +1,21 @@
-import { createCodexHttpHandler, isCodexHttpPath } from "./runtime-codex-http.js";
-import type { RuntimeCodexService } from "./runtime-codex-service.js";
+import { createPluginMakerHttpHandler } from "./runtime-plugin-maker-http.js";
+import type { RuntimePluginMakerController } from "./runtime-plugin-maker-controller.js";
+import { createAssistantHttpHandler } from "./runtime-assistant-http.js";
+import type { RuntimeAssistantController } from "./runtime-assistant-controller.js";
+import {
+  createDesktopHttpHandler,
+  isDesktopHttpPath,
+  type RuntimeDesktopController,
+} from "./runtime-desktop-http.js";
+import { createBrowserHttpHandler, isBrowserHttpPath } from "./runtime-browser-http.js";
+import type { RuntimeBrowserService } from "./runtime-browser-service.js";
+import {
+  createChatGPTAuthHttpHandler,
+  type ChatGPTLoginController,
+} from "./runtime-chatgpt-auth-http.js";
+import type { CodexSearchBridge } from "./runtime-codex-search.js";
+import { createCodingHttpHandler, isCodingHttpPath } from "./runtime-coding-http.js";
+import type { RuntimeCodingService } from "./runtime-coding-service.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import {
@@ -178,7 +194,12 @@ export class RuntimeHttpServer {
   private readonly memoryServices: RuntimeMemoryHttpServices | undefined;
   private readonly modelServices: RuntimeModelHttpServices | undefined;
   private readonly setupServices: RuntimeSetupHttpServices | undefined;
-  private readonly codexHandler: ReturnType<typeof createCodexHttpHandler> | undefined;
+  private readonly chatGPTAuthHandler: ReturnType<typeof createChatGPTAuthHttpHandler> | undefined;
+  private readonly desktopHandler: ReturnType<typeof createDesktopHttpHandler> | undefined;
+  private readonly browserHandler: ReturnType<typeof createBrowserHttpHandler> | undefined;
+  private readonly pluginMakerHandler: ReturnType<typeof createPluginMakerHttpHandler> | undefined;
+  private readonly assistantHandler: ReturnType<typeof createAssistantHttpHandler> | undefined;
+  private readonly codingHandler: ReturnType<typeof createCodingHttpHandler> | undefined;
   private readonly connectionHandler: ReturnType<typeof createConnectionHttpHandler> | undefined;
   private readonly triggerServices: RuntimeTriggerHttpServices | undefined;
   private readonly clientServices: RuntimeClientHttpServices | undefined;
@@ -225,7 +246,12 @@ export class RuntimeHttpServer {
       readonly models?: RuntimeModelHttpServices;
       readonly setup?: RuntimeSetupHttpServices;
       readonly connections?: RuntimeConnectionHttpServices;
-      readonly codex?: RuntimeCodexService;
+      readonly agent?: RuntimeCodingService;
+      readonly assistant?: RuntimeAssistantController;
+      readonly pluginMaker?: RuntimePluginMakerController;
+      readonly browser?: RuntimeBrowserService;
+      readonly desktop?: RuntimeDesktopController;
+      readonly chatGPTAuth?: { controller: ChatGPTLoginController; search?: CodexSearchBridge };
       /** Standing reasons to start a run: manual, cron, webhook and api triggers. */
       readonly triggers?: RuntimeTriggerHttpServices;
       /** External clients: tokens issued locally, then used instead of a browser session. */
@@ -247,8 +273,20 @@ export class RuntimeHttpServer {
     this.setupServices = services.setup;
     this.connectionHandler =
       services.connections === undefined ? undefined : createConnectionHttpHandler();
-    this.codexHandler =
-      services.codex === undefined ? undefined : createCodexHttpHandler(services.codex);
+    this.chatGPTAuthHandler =
+      services.chatGPTAuth === undefined
+        ? undefined
+        : createChatGPTAuthHttpHandler(services.chatGPTAuth);
+    this.desktopHandler = services.desktop ? createDesktopHttpHandler(services.desktop) : undefined;
+    this.browserHandler = services.browser ? createBrowserHttpHandler(services.browser) : undefined;
+    this.pluginMakerHandler = services.pluginMaker
+      ? createPluginMakerHttpHandler(services.pluginMaker)
+      : undefined;
+    this.assistantHandler = services.assistant
+      ? createAssistantHttpHandler(services.assistant)
+      : undefined;
+    this.codingHandler =
+      services.agent === undefined ? undefined : createCodingHttpHandler(services.agent);
     this.triggerServices = services.triggers;
     this.clientServices = services.clients;
     this.redaction = services.redaction ?? new RuntimeRedactionRegistry();
@@ -423,12 +461,63 @@ export class RuntimeHttpServer {
         );
         return;
       }
-      if (isCodexHttpPath(url.pathname)) {
-        if (this.codexHandler === undefined) {
-          writeJson(response, 503, { error: { code: "CODEX_SERVICE_UNAVAILABLE" } });
+      if (/^\/api\/auth\/chatgpt(?:\/(?:login|cancel|search))?$/u.test(url.pathname)) {
+        if (!this.chatGPTAuthHandler) {
+          writeJson(response, 503, { error: "CHATGPT_AUTH_UNAVAILABLE" });
           return;
         }
-        void this.codexHandler(request, response, url, this.security).catch((error: unknown) => {
+        if (request.method !== "GET") this.security.checkMutation(request);
+        void this.chatGPTAuthHandler(request, response, url).catch((error: unknown) =>
+          writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (isDesktopHttpPath(url.pathname)) {
+        if (!this.desktopHandler) {
+          writeJson(response, 503, { error: { code: "DESKTOP_UNAVAILABLE" } });
+          return;
+        }
+        void this.desktopHandler(request, response, url, this.security).catch((error: unknown) =>
+          writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (isBrowserHttpPath(url.pathname)) {
+        if (!this.browserHandler) {
+          writeJson(response, 503, { error: { code: "BROWSER_UNAVAILABLE" } });
+          return;
+        }
+        void this.browserHandler(request, response, url, this.security).catch((error: unknown) =>
+          writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (url.pathname === "/api/plugin-maker") {
+        if (!this.pluginMakerHandler) {
+          writeJson(response, 503, { error: "plugin_maker_unavailable" });
+          return;
+        }
+        void this.pluginMakerHandler(request, response, url, this.security).catch(
+          (error: unknown) => writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (url.pathname === "/api/assistant") {
+        if (!this.assistantHandler) {
+          writeJson(response, 503, { error: { code: "ASSISTANT_UNAVAILABLE" } });
+          return;
+        }
+        void this.assistantHandler(request, response, url, this.security).catch((error: unknown) =>
+          writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (isCodingHttpPath(url.pathname)) {
+        if (this.codingHandler === undefined) {
+          writeJson(response, 503, { error: { code: "AGENT_SERVICE_UNAVAILABLE" } });
+          return;
+        }
+        void this.codingHandler(request, response, url, this.security).catch((error: unknown) => {
           writeRuntimeApiError(response, error);
         });
         return;

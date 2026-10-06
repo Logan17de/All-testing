@@ -30,7 +30,7 @@ jobs:
           - ubuntu-latest
           - windows-latest
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 12
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: harness
@@ -60,6 +60,9 @@ jobs:
         id: format
         run: npm run format:check
 
+      - name: Model message inventory
+        run: npm run inventory:check
+
       - name: Format failure diff
         if: failure() && steps.format.outcome == 'failure' && runner.os == 'Linux'
         run: |
@@ -69,6 +72,38 @@ jobs:
       - name: Tests
         run: npm test
 
+      - name: Install Linux namespace sandbox
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap meson ninja-build libcap-dev pkg-config
+          # Pin the same upstream release used by local native-kernel acceptance.
+          curl --fail --location --silent --show-error https://github.com/containers/bubblewrap/releases/download/v0.12.0/bubblewrap-0.12.0.tar.xz -o "$RUNNER_TEMP/zet-bubblewrap.tar.xz"
+          printf '%s  %s\n' '9760d007363e3abba7c747489910f9f82d9fca53ba3bd3282e396fa3c97a3314' "$RUNNER_TEMP/zet-bubblewrap.tar.xz" | sha256sum --check
+          tar -xf "$RUNNER_TEMP/zet-bubblewrap.tar.xz" -C "$RUNNER_TEMP"
+          meson setup "$RUNNER_TEMP/zet-bwrap-build" "$RUNNER_TEMP/bubblewrap-0.12.0" -Dman=disabled -Dtests=false -Dbash_completion=disabled -Dzsh_completion=disabled
+          meson compile -C "$RUNNER_TEMP/zet-bwrap-build"
+          sudo install -m 0755 "$RUNNER_TEMP/zet-bwrap-build/bwrap" /usr/bin/bwrap
+          bwrap --version
+          bwrap --help | grep -- '--ro-bind-fd'
+          # Ubuntu's generic userns profile strips capabilities needed to initialize
+          # an isolated loopback device. Permit userns only for this root-owned binary.
+          if test -f /sys/module/apparmor/parameters/enabled && grep -q '^Y' /sys/module/apparmor/parameters/enabled; then
+            printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' 'profile zet-harness-bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '}' | sudo tee /etc/apparmor.d/zet-harness-bwrap > /dev/null
+            sudo apparmor_parser --replace /etc/apparmor.d/zet-harness-bwrap
+          fi
+
+      - name: Native Linux kernel acceptance
+        if: runner.os == 'Linux'
+        run: |
+          export ZET_NPM_CLI="$(dirname "$(dirname "$(command -v npm)")")/lib/node_modules/npm/bin/npm-cli.js"
+          test -f "$ZET_NPM_CLI" || export ZET_NPM_CLI="$(npm root -g)/npm/bin/npm-cli.js"
+          npm run test:native-linux
+          node scripts/native-plugin-maker-acceptance.mjs
+          # The fixed synthetic fixture also proves payload capabilities are dropped
+          # when the host daemon starts as UID 0. No user project is executed.
+          sudo env ZET_NPM_CLI="$ZET_NPM_CLI" "$(command -v node)" scripts/native-linux-acceptance.mjs
+
       - name: Plugin smoke
         run: npm run test:plugin-smoke --workspace @zet-harness/core
 
@@ -76,6 +111,8 @@ jobs:
         id: startup
         run: npm run test:startup
 
+      - name: Native CLI acceptance
+        run: node scripts/native-cli-acceptance.mjs
       - name: Build
         run: npm run build
 

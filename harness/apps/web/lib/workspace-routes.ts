@@ -25,8 +25,12 @@ const ALLOWED_PATHS: readonly RegExp[] = [
   /^setup\/workspaces\/forget$/u,
   /^workflows\/(chat|chat-github)$/u,
   /^connections$/u,
-  /^codex$/u,
-  /^connections\/openrouter\/(start|complete|sign-out|models)$/u,
+  /^agent$/u,
+  /^assistant$/u,
+  /^plugin-maker$/u,
+  /^desktop$/u,
+  /^browser$/u,
+  /^auth\/chatgpt(?:\/(login|cancel|search))?$/u,
 ];
 
 const ALLOWED_QUERY_KEYS: ReadonlySet<string> = new Set([

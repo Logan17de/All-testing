@@ -268,6 +268,7 @@ export class RuntimeRunDispatcher {
   readonly #dirty = new Set<string>();
   readonly #executors = new Set<Promise<void>>();
   readonly #verifiedPlans = new Set<number>();
+  readonly #runExecutors = new Map<string, Set<Promise<void>>>();
   #started = false;
   #stopping = false;
 
@@ -351,6 +352,75 @@ export class RuntimeRunDispatcher {
     if (task !== undefined) await task;
   }
 
+  /** Request cancellation durably, then abort only this run. Executors remain cooperative. */
+  async cancelRun(runId: string): Promise<void> {
+    await this.#database.commit((connection) => {
+      const frontier = reconstructExecutionFrontier(connection, runId);
+      if (["completed", "failed", "cancelled"].includes(frontier.runStatus)) return;
+      if (!this.cancellationRequested(runId))
+        event(connection, runId, "harness.run.cancel-requested", {});
+    });
+    this.#runs.get(runId)?.cancel();
+    this.wake(runId);
+  }
+
+  private cancellationRequested(runId: string): boolean {
+    return (
+      this.#database
+        .connection()
+        .prepare(
+          "SELECT 1 FROM durable_events WHERE run_id = ? AND event_type = 'harness.run.cancel-requested' LIMIT 1",
+        )
+        .get(runId) !== undefined
+    );
+  }
+
+  private async finishCancellation(runId: string): Promise<RuntimeDispatchReport> {
+    // Never classify live effect code as stopped. The request API itself does not wait here.
+    const executors = this.#runExecutors.get(runId);
+    if (executors !== undefined) await Promise.allSettled(executors);
+    await this.#database.commit((connection) => {
+      const frontier = reconstructExecutionFrontier(connection, runId);
+      if (["completed", "failed", "cancelled"].includes(frontier.runStatus)) return;
+      const attempts = connection
+        .prepare(
+          "SELECT op_index AS op, iteration, attempt FROM node_attempts WHERE run_id = ? AND status = 'running'",
+        )
+        .all(runId) as { op: number; iteration: number; attempt: number }[];
+      connection
+        .prepare(
+          "UPDATE node_attempts SET status = 'cancelled', finished_at_ms = ? WHERE run_id = ? AND status = 'running'",
+        )
+        .run(Date.now(), runId);
+      for (const attempt of attempts)
+        event(
+          connection,
+          runId,
+          "harness.attempt.cancelled",
+          {},
+          attempt.op,
+          attempt.attempt,
+          attempt.iteration,
+        );
+      for (const op of currentOps(frontier)) {
+        if (!["completed", "failed", "skipped", "cancelled"].includes(op.status))
+          publishOp(connection, runId, {
+            ...op,
+            status: "cancelled",
+            readyOrder: null,
+            retryNotBeforeMs: null,
+          });
+      }
+      connection
+        .prepare(
+          "UPDATE runs SET status = 'cancelled', finished_at_ms = ? WHERE run_id = ? AND status IN ('pending', 'running', 'waiting')",
+        )
+        .run(Date.now(), runId);
+      event(connection, runId, "harness.run.cancelled", {});
+    });
+    return { runId, status: "cancelled" };
+  }
+
   async stop(): Promise<void> {
     this.#stopping = true;
     this.#dirty.clear();
@@ -416,6 +486,7 @@ export class RuntimeRunDispatcher {
     ) {
       return { runId, status: "recovery-required", code: "RUNTIME_RECOVERY_REQUIRED" };
     }
+    if (this.cancellationRequested(runId)) return this.finishCancellation(runId);
     if (latest.some((op) => op.status === "waiting")) return { runId, status: "waiting" };
     if (latest.some((op) => op.status === "failed")) {
       await this.terminalize(runId, "failed");
@@ -470,10 +541,14 @@ export class RuntimeRunDispatcher {
           });
         })();
         this.#executors.add(work);
+        const runExecutors = this.#runExecutors.get(runId) ?? new Set<Promise<void>>();
+        this.#runExecutors.set(runId, runExecutors);
+        runExecutors.add(work);
         try {
           await work;
         } finally {
           this.#executors.delete(work);
+          runExecutors.delete(work);
         }
       },
       {
@@ -522,6 +597,7 @@ export class RuntimeRunDispatcher {
     );
     this.#runs.set(runId, run);
     if (this.#stopping) run.pause();
+    if (this.cancellationRequested(runId)) run.cancel();
     try {
       const snapshot = await run.execute();
       const recovered = reconstructExecutionFrontier(this.#database.connection(), runId);
@@ -541,6 +617,7 @@ export class RuntimeRunDispatcher {
     } catch (error) {
       if (durabilityFailed)
         return { runId, status: "recovery-required", code: "RUNTIME_DURABILITY_FAILED" };
+      if (run.signal.aborted) return await this.finishCancellation(runId);
       const recovered = reconstructExecutionFrontier(this.#database.connection(), runId);
       if (recovered.preCrashRunningAttempts.length > 0) {
         return { runId, status: "recovery-required", code: "RUNTIME_RECOVERY_REQUIRED" };
@@ -555,6 +632,7 @@ export class RuntimeRunDispatcher {
       return { runId, status: "failed", ...safeFailure(error) };
     } finally {
       this.#runs.delete(runId);
+      this.#runExecutors.delete(runId);
     }
   }
 

@@ -18,3 +18,12 @@ export {
   openAIEndpointProfile,
   type EndpointProfileInput,
 } from "./endpoint-profiles.js";
+// Shared bounded transport primitives used by the standalone Responses adapter.
+export {
+  abortable,
+  readModelJson,
+  readModelSse,
+  parseJson,
+  record,
+  immutable,
+} from "./model-http.js";

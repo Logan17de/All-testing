@@ -1,4 +1,56 @@
-# Writing and installing plugins
+# Plugins and foundational integrations
+
+Reviewed 2026-10-05. The useful default is the repository's installed native tools, exposed in ordinary chat and graph workflows only within the effective grants and graph tool scope. Catalog availability, plugin activation, credentials, platform capability and permission to execute are distinct states. An enabled catalog item does not authorize filesystem writes, network traffic, desktop input or a new account connection.
+
+## Ranked inventory
+
+| Priority / integration | Existing implementation and reason | Availability / evidence / remaining requirement |
+| --- | --- | --- |
+| 1. Workspace code/files | Native `runtime-coding-tools.ts`, mutation/file tools: bounded read/list/write, exact-text patch and single mkdir. Fundamental for coding and avoids another filesystem server with broader authority. | Installed native modules; file/approval/security fixtures. Writes need exact consent and workspace scope. Linux confinement limits apply; no general delete/rename. |
+| 2. Safe project verification | `runtime-process-sandbox.ts`: fixed diagnostics plus test/build/typecheck/lint scripts in isolated project snapshot. Produces useful evidence without generic shell authority. | Installed native modules; process-boundary fixtures. Required Linux sandbox fails closed; cloud UID-map restrictions block live isolation. No installation/network or host fallback. |
+| 3. Local Git | `runtime-coding-git-tools.ts`: status, explicit-source diff, bounded log, approval-gated exact-path add/commit. Essential review/checkpoint workflow. | Installed native modules; ten fixtures with actual temporary repo Git effects via injected TEST runner. No push, external network, hooks, GPG, PR or worktree support; linked metadata refused. |
+| 4. Browser verification | Native scoped Playwright browser session/driver/tools, guarded routes and manual `npm run browser` CLI. Useful for actual frontend interaction and inspection. | `playwright-core` 1.63.0 already installed/pinned, separate browser binary must exist. Explicit task/domain/action grants and input consent; no inherited cookies/profiles. Mocked driver tests do not prove live browser execution. |
+| 5. Web research | `runtime-codex-search.ts` and native search-tool wrapper use supported public Responses web search only. Keeps research separate from local tools. | Installed optional modules. Requires user's legitimate OpenAI sign-in, account-visible model and applicable policy; no live login/search performed. No subscription/client-identity borrowing. |
+| 6. MCP interoperability | `packages/mcp`: bounded stdio tools adapter, configured server trust/capabilities and cancellation notification. Supports user-selected tools without duplicating each integration. | Installed native client, 59 fixtures (32 schema-validation regressions) including actual local subprocess cancellation. Server is separately configured trusted code; no server/account auto-install or OAuth/HTTP/roots/sampling/elicitation parity claim. |
+| 7. Desktop inspection/input | Optional native Windows driver/controller, monitor/window inventory, bounded task and exact input consent. Useful where browser automation cannot inspect an OS workflow. | Installed native code/UI; mock OS bridge and synthetic screenshots. Windows required; platform probe separate. Screenshot preview/export does not automatically send an image to inference. |
+| 8. GitHub account workflow | Existing `packages/github` plugin (`harness.github-plugin`) for repository/issues/PR-related tools through the configured API service. Useful for review and collaboration beyond local Git. | Repository plugin already exists; adapter fixtures are not a real account connection. `network:https` and actual supported credentials must be configured; mutations require applicable user approval. No token generation or scope expansion here. |
+| 9. Core workflow primitives | `harness.agent-plugin`, `harness.boxes-plugin`, `harness.control-flow-plugin`, `harness.human-approval-plugin`: model/tool loop, bounded flow, persistence/approval integration. | Installed first-party graph primitives, not marketplace connectors. Existing catalog/compiler/behavior tests. Graph scope must constrain offered tools and runtime invocation, including resumed/checkpointed calls. |
+
+The first seven choices already have native implementations; installing alternate shell/filesystem/Git/browser MCP servers would add process trust and possibly duplicate broad authority without filling a demonstrated gap. No third-party plugin, account connection, credential or paid service was installed by this inventory.
+
+## Existing registry and loading boundaries
+
+- `packages/plugin-api` defines versioned manifests, tool/model adapters, declared capabilities and JSON-safe contracts. `packages/plugin-sdk` helps authors define graph nodes.
+- `packages/core` has node/tool/model catalogs, immutable manifests, plugin host/config and behavioral policies. `apps/runtime/src/runtime-plugins.ts` discovers configured packages and reports installed/activated/isolated/failure states.
+- `packages/plugin-loader` discovers `zet-plugin.json`, validates compatibility/integrity metadata, loads configured packages and supports isolated plugin processes. Package installation from npm/Git is a separate host capability; current installer reports newly installed packages disabled. First-party default catalog behavior does not silently change that third-party installation contract.
+- `packages/mcp` is a protocol client, not a server marketplace or blanket authorization. A declared tool capability or external server title is not an execution grant.
+- `runtime-daemon.ts` assembles the native tool catalog. Ordinary chat and graph execution must apply the same effective-grant filter; graph allowlists must be checked both when advertising tools and when dispatching a requested call. Graph scope cannot add host authority or route around a denied operation.
+
+Current installed-tool dispatch uses `runtime-agent-plugin-tools.ts`: active registered owner/version/adapter and host grants are checked before and after immutable exact-action consent. Read tools need granted capabilities; effects beyond reads require consent. Malformed/accessor/cyclic inputs are rejected and bounded to 128 KiB, and plugin failures become a private-safe generic refusal. This wrapper does not sandbox arbitrary trusted plugin implementation code or grant its network service access.
+
+`runtime-agent-tool-policy.ts` intersects canonical tool IDs with the current registry, recorded owner/version catalog and model/tool node restrictions. Ambiguous provider aliases or competing adapters are omitted. Tool dispatch rechecks the recorded identity; a captured call cannot gain a newly registered replacement's authority. Child reads inherit the effective parent's fixed read scope; missing scope denies all. `runtime-coding-plugin-scopes.ts` persists separate **tool allowlists for the model node and tool execution node** per conversation (migration 24); null keeps already authorized defaults and [] denies all. These lists do not choose inference models or grant capabilities. UI changes apply to the next task; the current task retains its captured restrictions while grants/ownership remain rechecked.
+
+Evidence: `runtime-agent-plugin-tools.test.ts`, `runtime-agent-tool-policy.test.ts`, `runtime-coding-plugin-scopes.test.ts`, and agent-node regression fixtures cover grant revocation, exact consent, registry replacement, malformed input, alias collisions, recorded catalogs, durable reload and rollback. Parent records final combined test results and exact commit. No live third-party plugin service/network call was used.
+
+## Primary sources, provenance and licenses
+
+| Component / option | Primary reference | Provenance / license and decision |
+| --- | --- | --- |
+| Playwright | [official browser documentation](https://playwright.dev/docs/browsers), [source license](https://github.com/microsoft/playwright/blob/main/LICENSE) | Microsoft project, Apache-2.0. Reuse installed `playwright-core`; do not add a browser marketplace wrapper. Browser binaries/dependencies have their own distribution requirements. |
+| Git | [official command/environment reference](https://git-scm.com/docs/git), [source license](https://github.com/git/git/blob/master/COPYING) | Git is an external host executable, GPL-2.0. Safe fixed argv and isolated execution are harness policy; Git installation does not grant push/account access. |
+| Bubblewrap | [official source and license](https://github.com/containers/bubblewrap/blob/main/COPYING) | External Linux sandbox utility; preserve upstream license notices if distributing it. Host kernel capability must be measured, never bypassed. |
+| Official MCP SDK | [official TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk), [license transition](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/LICENSE) | Current stable v2 uses `@modelcontextprotocol/client` / `@modelcontextprotocol/server`; v1 `@modelcontextprotocol/sdk` is maintenance. Apache-2.0 new contributions with MIT legacy code. **Not added**: consider a pinned migration only for a concrete remote transport/OAuth/resource gap, with compatibility and security tests. |
+| MCP discovery | [official registry documentation](https://modelcontextprotocol.io/registry/about) | Registry is metadata and publisher-namespace verification, not a guarantee of code security. It points to external package/remote distributions and delegates scanning. No automatic mass install. |
+| GitHub authentication | [official REST authentication](https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api) | Prefer user-selected fine-grained token or appropriately installed GitHub App with minimum repository permissions. Existing user credentials are not copied into plugin config or expanded. No new grant performed. |
+| OpenAI research/inference | [supported plan inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference), [registration](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) | First-party service contract/account policy applies; protocol availability is not an open-source license or entitlement. Native adapter owns local tool execution. |
+
+First-party harness packages do not currently declare a package-level `license` field; this inventory does not assign them a license or grant redistribution rights. Source availability alone is insufficient. Any new dependency proposal should identify the exact package/version, material missing capability, upstream license, required network/accounts/costs, execution grants and validation before installation.
+
+See [capability boundaries](CAPABILITY-MATRIX.md), [provider authorization](standalone-provider-auth.md) and [exact own-code wording](Harness%20msgs%20to%20the%20models.md). No proprietary service feature or third-party subscription flow is implied by plugin availability.
+
+## Plugin authoring and installation reference
+
+The existing authoring reference is preserved below. Its third-party installation defaults remain distinct from the first-party catalog defaults described above.
 
 Zet Harness is extensible by design. Everything it can do beyond its core — nodes, tools, model
 adapters — arrives as a plugin, and the authoring surface an outside developer gets is exactly the

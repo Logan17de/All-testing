@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { fstatSync } from "node:fs";
 
 /**
  * Reason a bounded process run ended.
@@ -153,6 +154,32 @@ export function terminateProcessTree(child: ChildProcess, force: boolean): void 
  * may hold provider credentials, is never inherited.
  */
 export async function runBoundedProcess(request: ProcessRunRequest): Promise<ProcessRunResult> {
+  return runBoundedProcessInternal(request, []);
+}
+/** Host-only Linux sandbox seam. FDs are not JSON request fields, and ordinary
+ * process/tool callers cannot opt into descriptor inheritance. The caller owns
+ * every handle and must hold it until completion. Child descriptor i maps to 3+i. */
+export async function runBoundedProcessWithDescriptors(
+  request: ProcessRunRequest,
+  hostFDs: readonly number[],
+): Promise<ProcessRunResult> {
+  if (process.platform !== "linux" || hostFDs.length > 128)
+    throw new Error("Descriptor inheritance unavailable or refused.");
+  const descriptors = Object.freeze([...hostFDs]);
+  if (new Set(descriptors).size !== descriptors.length)
+    throw new Error("Duplicate inherited descriptor refused.");
+  for (const fd of descriptors) {
+    if (!Number.isSafeInteger(fd) || fd < 3 || fd > 2147483647)
+      throw new Error("Invalid inherited descriptor.");
+    const stat = fstatSync(fd);
+    if (!stat.isDirectory() && !stat.isFile()) throw new Error("Unsupported inherited descriptor.");
+  }
+  return runBoundedProcessInternal(request, descriptors);
+}
+async function runBoundedProcessInternal(
+  request: ProcessRunRequest,
+  hostFDs: readonly number[],
+): Promise<ProcessRunResult> {
   const timeoutMs = request.limits?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxOutputBytes = request.limits?.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const killGraceMs = request.limits?.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
@@ -185,7 +212,7 @@ export async function runBoundedProcess(request: ProcessRunRequest): Promise<Pro
         // Detaching creates a POSIX process group so the whole tree can be
         // signalled together. Windows ignores this for grouping purposes.
         detached: process.platform !== "win32",
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", "pipe", ...hostFDs],
       });
     } catch (error: unknown) {
       resolve(

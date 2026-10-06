@@ -25,9 +25,11 @@ export function createConnectionHttpHandler() {
         connections: [],
         integrations: [
           {
-            provider: "codex",
-            method: "official-cli",
-            login: "npm run codex -- login --confirm-persist-login",
+            provider: "openai",
+            method: "official-chatgpt-plan-oauth",
+            login: "/agent",
+            execution: "standalone-harness",
+            searchBridge: "web-search-only",
           },
           {
             provider: "anthropic",
@@ -50,7 +52,7 @@ export function createConnectionHttpHandler() {
         error: {
           code: "CONNECTION_RETIRED",
           reason:
-            "OpenRouter integration was removed. Use a direct provider API key or the official Codex CLI bridge. Existing stored records are retained but inactive.",
+            "OpenRouter integration was removed. Use a direct provider API key or the official ChatGPT account setup. Existing stored records are retained but inactive.",
         },
       });
     }

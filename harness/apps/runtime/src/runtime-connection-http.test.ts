@@ -45,7 +45,7 @@ describe("direct provider integration boundary", () => {
     expect(result.body["connections"]).toEqual([]);
     expect(result.body["integrations"]).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ provider: "codex", method: "official-cli" }),
+        expect.objectContaining({ provider: "openai", method: "official-chatgpt-plan-oauth" }),
         expect.objectContaining({ provider: "anthropic", subscriptionOAuth: false }),
         expect.objectContaining({ provider: "xai", subscriptionOAuth: false }),
       ]),
@@ -53,18 +53,14 @@ describe("direct provider integration boundary", () => {
   });
   it("exposes native status without starting a process or consenting to login", async () => {
     const { send } = await startDaemon();
-    const status = await send("GET", "/api/codex");
+    const status = await send("GET", "/api/agent");
     expect(status.status).toBe(200);
-    expect(status.body).toMatchObject({ available: false, pendingApprovals: [] });
+    expect(status.body).toMatchObject({ engine: "native", toolApprovals: [] });
+    expect((await send("GET", "/api/auth/chatgpt")).body).toMatchObject({ state: "disconnected" });
     expect(
-      (
-        await send("POST", "/api/codex", {
-          action: "account/login/start",
-          params: { type: "chatgpt" },
-        })
-      ).status,
-    ).toBe(502);
-    expect((await send("GET", "/api/codex")).body["available"]).toBe(false);
+      (await send("POST", "/api/agent", { action: "account/login/start", params: {} })).status,
+    ).toBe(400);
+    expect((await send("GET", "/api/codex")).status).toBe(410);
     expect((await send("GET", "/api/models")).body["profiles"]).not.toContain("openrouter");
   });
 

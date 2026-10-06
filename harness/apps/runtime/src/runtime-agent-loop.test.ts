@@ -32,6 +32,7 @@ import type {
   ModelAdapter,
   ModelRequest,
   ModelResult,
+  ToolAdapter,
   NodeDefinition,
 } from "@zet-harness/plugin-api";
 
@@ -95,6 +96,11 @@ function scriptedModel(responses: readonly ModelResult[]): ScriptedModel {
       id: "test.model",
       version: "1",
       title: "Scripted model",
+      providerStateIdentity: {
+        provider: "openai-responses",
+        model: "gpt-test",
+        scope: "a".repeat(64),
+      },
       requiredCapabilities: [],
       features: {
         streaming: false,
@@ -195,7 +201,15 @@ function agentGraph(conversationId: string, maxIterations: number): GraphJsonV1 
   };
 }
 
-async function setup(responses: readonly ModelResult[], streaming = false) {
+async function setup(
+  responses: readonly ModelResult[],
+  streaming = false,
+  externalTools: readonly ToolAdapter[] = [],
+  executorOptions: Pick<
+    Parameters<typeof createAgentNodeExecutor>[0],
+    "providerStatePolicy" | "modelUserParts"
+  > = {},
+) {
   const database = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
   database.open();
   runSqliteMigrations(database.connection(), RUNTIME_DATABASE_MIGRATIONS);
@@ -259,6 +273,8 @@ async function setup(responses: readonly ModelResult[], streaming = false) {
   const executor = createAgentNodeExecutor({
     database,
     models: host.models,
+    tools: externalTools,
+    ...executorOptions,
     onStreamProgress: (update) => {
       progress.push({ textCharacters: update.textCharacters, completed: update.completed });
     },
@@ -275,12 +291,27 @@ async function setup(responses: readonly ModelResult[], streaming = false) {
   dispatchers.push(dispatcher);
   dispatcher.start();
 
-  const run = async (maxIterations: number) => {
-    const compiled = await compileEditorGraph(
-      agentGraph(conversationId, maxIterations),
-      { host },
-      authority,
-    );
+  const run = async (
+    maxIterations: number,
+    scope: { model?: readonly string[]; tools?: readonly string[] } = {},
+  ) => {
+    const graph = agentGraph(conversationId, maxIterations);
+    const scopedGraph = {
+      ...graph,
+      nodes: graph.nodes.map((node) => ({
+        ...node,
+        config: {
+          ...node.config,
+          ...(node.id === "think" && scope.model !== undefined
+            ? { toolAllowlist: [...scope.model] }
+            : {}),
+          ...(node.id === "act" && scope.tools !== undefined
+            ? { toolAllowlist: [...scope.tools] }
+            : {}),
+        },
+      })),
+    };
+    const compiled = await compileEditorGraph(scopedGraph, { host }, authority);
     if (!compiled.valid) {
       throw new Error(`The agent graph did not compile: ${JSON.stringify(compiled.diagnostics)}`);
     }
@@ -292,6 +323,63 @@ async function setup(responses: readonly ModelResult[], streaming = false) {
 }
 
 describe("the bounded agent loop", () => {
+  it("passes only the actual model/tools-node intersection as trusted child scope", async () => {
+    const scopes: (readonly string[] | undefined)[] = [];
+    const tool: ToolAdapter = {
+      manifest: {
+        id: "plugin.read",
+        version: "1",
+        title: "Scoped read",
+        inputSchema: { type: "object" },
+        outputSchema: { type: "object" },
+        behavior: {
+          primitiveFamily: "effect",
+          determinism: "nondeterministic",
+          effect: "external-read",
+          idempotency: "idempotent",
+          recovery: "rerun",
+          executionMode: "in-process",
+          requiredCapabilities: [],
+        },
+      },
+      invoke: (_input, context) => {
+        scopes.push(context.toolScope);
+        return Promise.resolve({ value: {} });
+      },
+    };
+    const { run, model } = await setup(
+      [callTool("scoped-read", "plugin_read", {}), reply("Done")],
+      false,
+      [tool],
+    );
+    expect((await run(4, { model: ["plugin.read"], tools: ["plugin.read"] })).report.status).toBe(
+      "completed",
+    );
+    expect(model.requests[0]?.tools?.map((entry) => entry.name)).toEqual(["plugin_read"]);
+    expect(scopes).toEqual([["plugin.read"]]);
+  });
+
+  it("a model-node empty allowlist cannot be bypassed by a hallucinated call or broad tools node", async () => {
+    const { database, projectId, model, run } = await setup([
+      callTool("scope-call", "harness_goals_create", { title: "Must not be created" }),
+      reply("Done"),
+    ]);
+    expect((await run(4, { model: [] })).report.status).toBe("completed");
+    expect(model.requests[0]?.tools).toBeUndefined();
+    expect(listGoals(database.connection(), projectId)).toHaveLength(0);
+  });
+  it("a narrower tools-node allowlist denies a call that the model was offered", async () => {
+    const { database, projectId, model, run } = await setup([
+      callTool("scope-call", "harness_goals_create", { title: "Must not be created" }),
+      reply("Done"),
+    ]);
+    expect((await run(4, { tools: [] })).report.status).toBe("completed");
+    expect(model.requests[0]?.tools?.some((tool) => tool.name === "harness_goals_create")).toBe(
+      true,
+    );
+    expect(listGoals(database.connection(), projectId)).toHaveLength(0);
+  });
+
   it("consumes streamed tool turns, stores one final message per step and publishes only counts", async () => {
     const { database, conversationId, model, progress, run } = await setup(
       [
@@ -447,4 +535,103 @@ describe("the bounded agent loop", () => {
       finishReason: "stop",
     });
   });
+});
+
+it("persists ordered opaque reasoning with tool calls and replays it into the next model step", async () => {
+  const state = {
+    kind: "provider-state" as const,
+    provider: "openai-responses" as const,
+    model: "gpt-test",
+    scope: "a".repeat(64),
+    id: "rs_loop",
+    encryptedContent: "opaque-loop-fixture",
+  };
+  const call = callTool("state-call", "harness_goals_list", {});
+  const first: ModelResult = {
+    ...call,
+    message: { role: "assistant", parts: [state, ...call.message.parts] },
+  };
+  const { run, model, database, conversationId } = await setup([first, reply("Done")]);
+  expect((await run(3)).report.status).toBe("completed");
+  const replay = model.requests[1]!.messages.filter((message) =>
+    message.parts.some(
+      (part) =>
+        part.kind === "provider-state" || part.kind === "tool-call" || part.kind === "tool-result",
+    ),
+  );
+  expect(replay.map((message) => message.parts.map((part) => part.kind))).toEqual([
+    ["provider-state", "tool-call"],
+    ["tool-result"],
+  ]);
+  expect(
+    readConversationMessages(database.connection(), conversationId).some((message) =>
+      message.parts.some((part) => part.kind === "provider-state"),
+    ),
+  ).toBe(true);
+});
+
+it("defaults to account-bound state refusal and records explicit host reset without losing visible history", async () => {
+  const state = {
+    kind: "provider-state" as const,
+    provider: "openai-responses" as const,
+    model: "gpt-test",
+    scope: "b".repeat(64),
+    id: "rs_foreign",
+    encryptedContent: "opaque-foreign-fixture",
+  };
+  const denied = await setup([reply("should not run")]);
+  const ids = new SortableIdGenerator({ now: () => 6000 });
+  appendMessage(denied.database.connection(), {
+    messageId: ids.next(),
+    conversationId: denied.conversationId,
+    role: "assistant",
+    parts: [state, { kind: "text", text: "Visible prior answer" }],
+    nowMs: 10,
+  });
+  expect((await denied.run(2)).report.status).toBe("failed");
+  expect(denied.model.requests).toHaveLength(0);
+  const allowed = await setup([reply("Continued")], false, [], {
+    providerStatePolicy: () => "omit-incompatible",
+  });
+  appendMessage(allowed.database.connection(), {
+    messageId: ids.next(),
+    conversationId: allowed.conversationId,
+    role: "assistant",
+    parts: [state, { kind: "text", text: "Visible prior answer" }],
+    nowMs: 10,
+  });
+  const completed = await allowed.run(2);
+  expect(completed.report.status).toBe("completed");
+  const request = allowed.model.requests[0]!;
+  expect(
+    request.messages
+      .flatMap((message) => message.parts)
+      .some((part) => part.kind === "provider-state"),
+  ).toBe(false);
+  expect(JSON.stringify(request)).toContain("Visible prior answer");
+  expect(JSON.stringify(request)).toContain("explicitly authorized model/account switch");
+  const usage = allowed.database
+    .connection()
+    .prepare(`SELECT usage_json FROM ${AGENT_STEPS_TABLE} WHERE run_id=? AND kind='model'`)
+    .get(completed.runId) as { usage_json: string };
+  expect(JSON.parse(usage.usage_json)).toMatchObject({
+    providerState: { droppedProviderStateCount: 1 },
+  });
+});
+it("adds host image refs only to the main model request with actual offered canonical scope, never durability", async () => {
+  let offered: readonly string[] | undefined;
+  const f = await setup([reply("Inspected")], false, [], {
+    modelUserParts: (context) => {
+      offered = context.toolScope;
+      return [{ kind: "image", artifactRef: "artifact:ephemeral-fixture", mediaType: "image/png" }];
+    },
+  });
+  expect((await f.run(2, { model: ["harness.goals.list"] })).report.status).toBe("completed");
+  expect(offered).toEqual(["harness.goals.list"]);
+  expect(f.model.requests[0]!.messages.at(-1)?.parts).toEqual([
+    { kind: "image", artifactRef: "artifact:ephemeral-fixture", mediaType: "image/png" },
+  ]);
+  expect(
+    JSON.stringify(readConversationMessages(f.database.connection(), f.conversationId)),
+  ).not.toContain("ephemeral-fixture");
 });

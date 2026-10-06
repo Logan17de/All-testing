@@ -1046,3 +1046,31 @@ button.timeline__row:focus-visible {
 .setupTyped {
   margin-top: 0.75rem;
 }
+
+/* Normal chat remains visible while its optional graph preview is open. */
+.chatWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 380px);
+  gap: 1rem;
+  align-items: start;
+}
+.chatWorkspaceMain,
+.chatGraphPanel {
+  min-width: 0;
+}
+.chatGraphPanel {
+  position: sticky;
+  top: 1rem;
+}
+.chatGraphPanel--expanded {
+  grid-column: 1 / -1;
+  position: static;
+}
+@media (max-width: 850px) {
+  .chatWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chatGraphPanel {
+    position: static;
+  }
+}

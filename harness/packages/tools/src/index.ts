@@ -22,6 +22,7 @@ export {
 export {
   createMinimalEnvironment,
   runBoundedProcess,
+  runBoundedProcessWithDescriptors,
   terminateProcessTree,
   type ProcessRunLimits,
   type ProcessRunOutcome,

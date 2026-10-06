@@ -146,7 +146,7 @@ Phase 11 Packaging + optional scale-out     🚧 4/9 (start, setup, backup, grap
 
 To try it, run `npm start` and open `http://127.0.0.1:3000`: the first screen asks for the
 workspace folder, then for a model — use an OpenAI API credential or a local model,
-or use Ollama. For native Codex and ChatGPT login open `/codex` or use `npm run codex -- help`; see
+or use Ollama. Open `/agent` for the standalone coding workspace or use `npm run agent -- help`; see
 [Supported coding paths](./CODEX-CAPABILITIES.md) and the
 [independent acceptance checklist](./CODEX-ACCEPTANCE.md). More in [Running the harness](./PLUGINS.md#running-the-harness) and
 [Building and running a graph](./PLUGINS.md#building-and-running-a-graph). Plugins can be
