@@ -325,7 +325,7 @@ public static class ZetProcessSandbox {
     }
    }
    foreach(SourceObject item in sourceObjects)if(item.directory)ProveSourceFuture(item.path,token,creator,started);
-   phase="project-source-parent-access";RequireKernelDenied(sourceParent,token,64,true);
+   phase="project-source-parent-access";RequireKernelDenied(sourceParent,token,64,true);phase="project-source-proof-limit";Check((DateTime.UtcNow-started).TotalSeconds<=15);
   }finally{foreach(IntPtr handle in new IntPtr[]{creator,token,primary})if(handle!=IntPtr.Zero)CloseHandle(handle);}
  }
  static void RequirePlainDacl(IntPtr descriptor) {
@@ -443,8 +443,8 @@ public static class ZetProcessSandbox {
    }return held;
   }catch{foreach(Locks item in held)item.Dispose();foreach(SafeFileHandle item in privateHandles)item.Dispose();privateHandles.Clear();throw;}
  }
- static IntPtr Descriptor(string path) {
-  IntPtr owner,group,dacl,sacl,descriptor;uint error=GetNamedSecurityInfo(path,1,7,out owner,out group,out dacl,out sacl,out descriptor);
+ static IntPtr Descriptor(string path,uint information=7) {
+  IntPtr owner,group,dacl,sacl,descriptor;uint error=GetNamedSecurityInfo(path,1,information,out owner,out group,out dacl,out sacl,out descriptor);
   if(error!=0){nativeError=(int)error;throw new InvalidOperationException();}return descriptor;
  }
  static void RequireReadDenied(IntPtr descriptor,IntPtr token) {
@@ -454,15 +454,18 @@ public static class ZetProcessSandbox {
  }
  static void ProvePrivateHostDenied(IntPtr process) {
   IntPtr primary=IntPtr.Zero,token=IntPtr.Zero,creator=IntPtr.Zero;
-  try {Check(OpenProcessToken(process,0xa,out primary));Check(DuplicateToken(primary,2,out token));Check(OpenProcessToken(GetCurrentProcess(),0xa,out creator));
+  try {Check(OpenProcessToken(process,0x8a,out primary));Check(OpenProcessToken(GetCurrentProcess(),0xa,out creator));RequireSourceTokenPolicy(primary,creator);Check(DuplicateToken(primary,2,out token));phase="project-private-host-access";
    IntPtr identity=Marshal.AllocHGlobal(64);uint returned;try{Check(GetTokenInformation(primary,29,identity,64,out returned));Check(Marshal.ReadInt32(identity)==1);Check(GetTokenInformation(primary,30,identity,64,out returned));Check(Marshal.ReadInt32(identity)==0);}finally{Marshal.FreeHGlobal(identity);}
+   DateTime started=DateTime.UtcNow;
    foreach(string path in privateFiles) {
+    phase="project-private-proof-limit";Check((DateTime.UtcNow-started).TotalSeconds<=15);
     // Locks prevent namespace replacement. External malicious ACL changes are outside this proof.
-    if(File.Exists(path)){IntPtr actual=Descriptor(path);try{RequireReadDenied(actual,token);}finally{LocalFree(actual);}RequireKernelReadDenied(path,token,false);}
-    IntPtr parent=Descriptor(Path.GetDirectoryName(path)),future=IntPtr.Zero;
-    try {RequireReadDenied(parent,token);RequireKernelReadDenied(Path.GetDirectoryName(path),token,true);MAPPING mapping=new MAPPING();mapping.read=0x120089;mapping.write=0x120116;mapping.execute=0x1200a0;mapping.all=0x1f01ff;
-     Check(CreatePrivateObjectSecurityEx(parent,IntPtr.Zero,out future,IntPtr.Zero,false,1,creator,ref mapping));RequireReadDenied(future,token);
+    if(File.Exists(path)){IntPtr actual=Descriptor(path);try{phase="project-private-acl-shape";RequirePlainDacl(actual);phase="project-private-host-access";RequireReadDenied(actual,token);}finally{LocalFree(actual);}RequireKernelReadDenied(path,token,false);foreach(uint right in new uint[]{2,4,16,256,65536,262144,524288})RequireKernelDenied(path,token,right,false);}
+    IntPtr parent=Descriptor(Path.GetDirectoryName(path),0x17),future=IntPtr.Zero;
+    try {phase="project-private-acl-shape";RequirePlainDacl(parent);phase="project-private-host-access";RequireReadDenied(parent,token);foreach(uint right in new uint[]{1,2,4,16,64,256,65536,262144,524288})RequireKernelDenied(Path.GetDirectoryName(path),token,right,true);MAPPING mapping=new MAPPING();mapping.read=0x120089;mapping.write=0x120116;mapping.execute=0x1200a0;mapping.all=0x1f01ff;
+     phase="project-private-future-inheritance";Check(CreatePrivateObjectSecurityEx(parent,IntPtr.Zero,out future,IntPtr.Zero,false,3,creator,ref mapping));phase="project-private-acl-shape";RequirePlainDacl(future);phase="project-private-host-access";RequireReadDenied(future,token);phase="project-private-future-access";RequireFutureIntegrity(future);
     }finally{if(future!=IntPtr.Zero)DestroyPrivateObjectSecurity(ref future);LocalFree(parent);}
+    phase="project-private-proof-limit";Check((DateTime.UtcNow-started).TotalSeconds<=15);
    }
   }finally{foreach(IntPtr handle in new IntPtr[]{creator,token,primary})if(handle!=IntPtr.Zero)CloseHandle(handle);}
  }

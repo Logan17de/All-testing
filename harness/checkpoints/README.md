@@ -36,6 +36,22 @@ Unsupported setters still refuse before execution; host privileges and ACLs are
 unchanged. Fixture readback permits only the identical requested ACE with the
 observed inheritance marker. Native acceptance remains required.
 
+Native run `37409100736` at `b35109f6b21cc4eafbd96ba2d230ee424bbddb6d`
+passed Ubuntu and failed Windows focused acceptance (six passed, five failed).
+Windows rejected the suspended-token policy change with
+`project-source-token-policy-strengthen:1314` (required privilege not held).
+Another private-path negative stopped at `file-canonical:0`. No host privileges
+were enabled and no weaker policy or host execution fallback was used.
+Windows project commands remain unavailable on this tested configuration.
+Use the accepted Linux execution route, or separately review a supported Windows
+sandbox setup; persistent accounts or credentials require explicit user consent.
+
+The private-state follow-up also rejects unsupported DACL rules outside the source
+tree, checks each existing-file/parent mutation right separately, and validates
+inherited future sidecar integrity. These guards and their synthetic native
+fixtures have source/local verification only until the Windows prerequisite is
+resolved. They do not remove the availability gate.
+
 Two test-only durability fixtures have explicit bounded setup budgets after
 observed Windows I/O timeouts. Assertions, SQLite settings, production deadlines
 and numeric performance guards are unchanged.

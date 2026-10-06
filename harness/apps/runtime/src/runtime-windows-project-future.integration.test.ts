@@ -31,6 +31,20 @@ function acl(root: string, args: string[]): void {
     stdio: "pipe",
   });
 }
+function conditionalAcl(target: string): void {
+  ps(`Add-Type @'
+using System;using System.Runtime.InteropServices;
+public static class ConditionalFixture {
+[DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]public static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string s,uint r,out IntPtr p,out uint n);
+[DllImport("advapi32.dll",SetLastError=true)]public static extern bool GetSecurityDescriptorDacl(IntPtr p,out bool present,out IntPtr acl,out bool def);
+[DllImport("advapi32.dll",CharSet=CharSet.Unicode)]public static extern uint SetNamedSecurityInfo(string p,uint t,uint info,IntPtr o,IntPtr g,IntPtr d,IntPtr s);
+[DllImport("advapi32.dll",CharSet=CharSet.Unicode)]public static extern uint GetNamedSecurityInfo(string p,uint t,uint info,out IntPtr o,out IntPtr g,out IntPtr d,out IntPtr s,out IntPtr sd);
+[DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]public static extern bool ConvertSecurityDescriptorToStringSecurityDescriptor(IntPtr sd,uint r,uint info,out IntPtr text,out uint n);
+[DllImport("kernel32.dll")]public static extern IntPtr LocalFree(IntPtr p);
+}
+'@;$p=${literal(target)};$original=(Get-Acl -LiteralPath $p).GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access);$input=$original+'(XA;OIIO;FR;;;AC;(@Resource.ZetFixture == "yes"))';$sd=[IntPtr]::Zero;$n=0;if(-not[ConditionalFixture]::ConvertStringSecurityDescriptorToSecurityDescriptor($input,1,[ref]$sd,[ref]$n)){throw 'fixture-conditional-construct'};try{$present=$false;$default=$false;$dacl=[IntPtr]::Zero;if(-not[ConditionalFixture]::GetSecurityDescriptorDacl($sd,[ref]$present,[ref]$dacl,[ref]$default)){throw 'fixture-conditional-read'};if([ConditionalFixture]::SetNamedSecurityInfo($p,1,4,[IntPtr]::Zero,[IntPtr]::Zero,$dacl,[IntPtr]::Zero)-ne0){throw 'fixture-conditional-set'};$o=[IntPtr]::Zero;$g=[IntPtr]::Zero;$d=[IntPtr]::Zero;$sa=[IntPtr]::Zero;$read=[IntPtr]::Zero;$text=[IntPtr]::Zero;$len=0;try{if([ConditionalFixture]::GetNamedSecurityInfo($p,1,4,[ref]$o,[ref]$g,[ref]$d,[ref]$sa,[ref]$read)-ne0){throw 'fixture-conditional-readback'};if(-not[ConditionalFixture]::ConvertSecurityDescriptorToStringSecurityDescriptor($read,1,4,[ref]$text,[ref]$len)){throw 'fixture-conditional-serialize'};$actual=[Runtime.InteropServices.Marshal]::PtrToStringUni($text);if(-not$actual.Contains('(XA;OIIO;')-or-not$actual.Contains('@Resource.ZetFixture')){throw 'fixture-conditional-normalized'}}finally{if($text-ne[IntPtr]::Zero){[void][ConditionalFixture]::LocalFree($text)};if($read-ne[IntPtr]::Zero){[void][ConditionalFixture]::LocalFree($read)}}}finally{[void][ConditionalFixture]::LocalFree($sd)}`);
+}
+
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "win-future-project-")));
   const state = await realpath(await mkdtemp(join(tmpdir(), "win-future-state-")));
@@ -87,19 +101,7 @@ public static class LabelFixture {
           ps(
             `$p=${literal(target)};$a=Get-Acl -LiteralPath $p;$sid=[System.Security.Principal.SecurityIdentifier]::new('S-1-15-2-1');$inherit=[System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit';$a.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid,[System.Security.AccessControl.FileSystemRights]::ReadData,$inherit,[System.Security.AccessControl.PropagationFlags]'InheritOnly,NoPropagateInherit',[System.Security.AccessControl.AccessControlType]::Deny));$a.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid,[System.Security.AccessControl.FileSystemRights]::ReadData,$inherit,[System.Security.AccessControl.PropagationFlags]::InheritOnly,[System.Security.AccessControl.AccessControlType]::Allow));Set-Acl -LiteralPath $p -AclObject $a;$rules=@((Get-Acl -LiteralPath $p).GetAccessRules($true,$false,[System.Security.Principal.SecurityIdentifier])|Where-Object{$_.IdentityReference.Value-eq'S-1-15-2-1'});$deny=@($rules|Where-Object{$_.AccessControlType-eq'Deny'-and[int]$_.InheritanceFlags-eq3-and[int]$_.PropagationFlags-eq3-and(([int]$_.FileSystemRights-band1)-eq1)});$allow=@($rules|Where-Object{$_.AccessControlType-eq'Allow'-and[int]$_.InheritanceFlags-eq3-and[int]$_.PropagationFlags-eq2-and(([int]$_.FileSystemRights-band1)-eq1)});if($deny.Count-ne1-or$allow.Count-ne1){throw 'fixture-grandchild-inheritance-normalized'}`,
           );
-        if (mode === "conditional") {
-          ps(`Add-Type @'
-using System;using System.Runtime.InteropServices;
-public static class ConditionalFixture {
-[DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]public static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string s,uint r,out IntPtr p,out uint n);
-[DllImport("advapi32.dll",SetLastError=true)]public static extern bool GetSecurityDescriptorDacl(IntPtr p,out bool present,out IntPtr acl,out bool def);
-[DllImport("advapi32.dll",CharSet=CharSet.Unicode)]public static extern uint SetNamedSecurityInfo(string p,uint t,uint info,IntPtr o,IntPtr g,IntPtr d,IntPtr s);
-[DllImport("advapi32.dll",CharSet=CharSet.Unicode)]public static extern uint GetNamedSecurityInfo(string p,uint t,uint info,out IntPtr o,out IntPtr g,out IntPtr d,out IntPtr s,out IntPtr sd);
-[DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]public static extern bool ConvertSecurityDescriptorToStringSecurityDescriptor(IntPtr sd,uint r,uint info,out IntPtr text,out uint n);
-[DllImport("kernel32.dll")]public static extern IntPtr LocalFree(IntPtr p);
-}
-'@;$p=${literal(target)};$original=(Get-Acl -LiteralPath $p).GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access);$input=$original+'(XA;OIIO;FR;;;AC;(@Resource.ZetFixture == "yes"))';$sd=[IntPtr]::Zero;$n=0;if(-not[ConditionalFixture]::ConvertStringSecurityDescriptorToSecurityDescriptor($input,1,[ref]$sd,[ref]$n)){throw 'fixture-conditional-construct'};try{$present=$false;$default=$false;$dacl=[IntPtr]::Zero;if(-not[ConditionalFixture]::GetSecurityDescriptorDacl($sd,[ref]$present,[ref]$dacl,[ref]$default)){throw 'fixture-conditional-read'};if([ConditionalFixture]::SetNamedSecurityInfo($p,1,4,[IntPtr]::Zero,[IntPtr]::Zero,$dacl,[IntPtr]::Zero)-ne0){throw 'fixture-conditional-set'};$o=[IntPtr]::Zero;$g=[IntPtr]::Zero;$d=[IntPtr]::Zero;$sa=[IntPtr]::Zero;$read=[IntPtr]::Zero;$text=[IntPtr]::Zero;$len=0;try{if([ConditionalFixture]::GetNamedSecurityInfo($p,1,4,[ref]$o,[ref]$g,[ref]$d,[ref]$sa,[ref]$read)-ne0){throw 'fixture-conditional-readback'};if(-not[ConditionalFixture]::ConvertSecurityDescriptorToStringSecurityDescriptor($read,1,4,[ref]$text,[ref]$len)){throw 'fixture-conditional-serialize'};$actual=[Runtime.InteropServices.Marshal]::PtrToStringUni($text);if(-not$actual.Contains('(XA;OIIO;')-or-not$actual.Contains('@Resource.ZetFixture')){throw 'fixture-conditional-normalized'}}finally{if($text-ne[IntPtr]::Zero){[void][ConditionalFixture]::LocalFree($text)};if($read-ne[IntPtr]::Zero){[void][ConditionalFixture]::LocalFree($read)}}}finally{[void][ConditionalFixture]::LocalFree($sd)}`);
-        }
+        if (mode === "conditional") conditionalAcl(target);
         await expect(
           executeWindowsSandboxedProjectScript({ cwd: f.root, command: "project-test" }, f),
         ).rejects.toThrow(
@@ -193,4 +195,56 @@ it.skipIf(process.platform !== "win32")(
     }
   },
   240000,
+);
+
+it.skipIf(process.platform !== "win32")(
+  "native private-state parent rejects unsupported conditional inheritance outside source",
+  async () => {
+    const f = await fixture();
+    try {
+      // Keep the existing synthetic DB ordinary so the parent descriptor is the threat.
+      ps(
+        `$p=${literal(f.privatePaths[0]!)};$a=Get-Acl -LiteralPath $p;$a.SetAccessRuleProtection($true,$true);Set-Acl -LiteralPath $p -AclObject $a`,
+      );
+      conditionalAcl(f.state);
+      await expect(
+        executeWindowsSandboxedProjectScript({ cwd: f.root, command: "project-test" }, f),
+      ).rejects.toThrow("project-private-acl-shape");
+      expect(await readFile(f.privatePaths[0]!, "utf8")).toBe("synthetic private state");
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+      await rm(f.state, { recursive: true, force: true });
+    }
+  },
+  240000,
+);
+
+it.skipIf(process.platform !== "win32")(
+  "native private-state integrity refuses read-denied write-only grants outside source",
+  async () => {
+    for (const mode of ["database-write", "parent-create"] as const) {
+      const f = await fixture();
+      try {
+        const database = f.privatePaths[0]!;
+        ps(
+          `$p=${literal(database)};$a=Get-Acl -LiteralPath $p;$a.SetAccessRuleProtection($true,$true);Set-Acl -LiteralPath $p -AclObject $a`,
+        );
+        const target = mode === "database-write" ? database : f.state;
+        // WD means WRITE_DATA for a file and ADD_FILE for a directory; no READ grant.
+        acl(target, ["/setintegritylevel", "L"]);
+        acl(target, ["/grant", "*S-1-15-2-1:(WD)"]);
+        ps(
+          `$p=${literal(target)};$rules=@((Get-Acl -LiteralPath $p).GetAccessRules($true,$false,[System.Security.Principal.SecurityIdentifier])|Where-Object{$_.IdentityReference.Value-eq'S-1-15-2-1'});if($rules.Count-ne1-or$rules[0].AccessControlType-ne'Allow'-or([int]$rules[0].FileSystemRights-band2)-ne2-or([int]$rules[0].FileSystemRights-band1)-ne0-or[int]$rules[0].InheritanceFlags-ne0){throw 'fixture-private-write-only-normalized'}`,
+        );
+        await expect(
+          executeWindowsSandboxedProjectScript({ cwd: f.root, command: "project-test" }, f),
+        ).rejects.toThrow("project-private-host-access");
+        expect(await readFile(database, "utf8")).toBe("synthetic private state");
+      } finally {
+        await rm(f.root, { recursive: true, force: true });
+        await rm(f.state, { recursive: true, force: true });
+      }
+    }
+  },
+  480000,
 );
