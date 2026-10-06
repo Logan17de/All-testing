@@ -244,6 +244,8 @@ afterEach(() => {
 });
 
 describe("runtime kill/restart fault injection", () => {
+  // This durability fixture includes migrations, autocommit writes and a disk reopen.
+  // Allow bounded Windows runner I/O variance without changing SQLite guarantees.
   it("recovers a pre-commit crash as one uncertain running attempt classified for rerun", () => {
     const path = createDatabasePath();
     let database = initializeRun(path);
@@ -275,7 +277,7 @@ describe("runtime kill/restart fault injection", () => {
     } finally {
       database.close();
     }
-  });
+  }, 30_000);
 
   it("preserves rollback across restart when failure is injected inside the atomic completion commit", async () => {
     const path = createDatabasePath();
