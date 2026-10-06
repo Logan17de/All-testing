@@ -31,6 +31,8 @@ describe("Windows native process sandbox", () => {
     expect(WINDOWS_PROCESS_BRIDGE).not.toContain("File.WriteAllText(script,source)");
     expect(WINDOWS_PROCESS_BRIDGE).not.toContain('"probe.js"');
     expect(WINDOWS_PROCESS_BRIDGE).toContain('string source=command=="probe-hold" ?');
+    expect(WINDOWS_PROCESS_BRIDGE).toContain("{stdio:'inherit'}");
+    expect(WINDOWS_PROCESS_BRIDGE).not.toContain("{stdio:'ignore'}");
   });
   it.skipIf(process.platform === "win32")("fails closed on other platforms", async () => {
     await expect(
@@ -88,8 +90,10 @@ describe("Windows native process sandbox", () => {
         result.outcome,
         `exit=${result.exitCode}; stderr=${result.stderr.slice(0, 4096)}`,
       ).toBe("timed-out");
-      const pid = Number(result.stdout.trim());
+      const output = result.stdout.trim().split(/\r?\n/);
+      const pid = Number(output.find((line) => /^\d+$/.test(line)));
       expect(pid).toBeGreaterThan(0);
+      expect(output).toContain(`descendant-ready:${pid}`);
       expect(() => process.kill(pid, 0)).toThrow();
     },
     160_000,
