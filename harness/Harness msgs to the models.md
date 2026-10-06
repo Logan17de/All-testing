@@ -160,6 +160,14 @@ The following appendix inventories fixed error/description expressions in the li
 | 108 | Error construction; see delivery rules; trigger/context bridge; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Windows process sandbox failed; no host fallback.")</code> |
 | 181 | Error construction; see delivery rules; trigger/context invoke; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Native sandbox refused.")</code> |
 
+### apps/runtime/src/runtime-windows-project-sandbox.ts
+
+| Line | Trigger/delivery category | Exact source expression |
+|---|---|---|
+| 27 | Error construction; see delivery rules; trigger/context executeWindowsSandboxedProjectScript; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Windows project sandbox unavailable or command unsupported.")</code> |
+| 30 | Error construction; see delivery rules; trigger/context executeWindowsSandboxedProjectScript; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Configure trusted ZET_NPM_CLI for Windows project commands.")</code> |
+| 42 | Error construction; see delivery rules; trigger/context executeWindowsSandboxedProjectScript; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new Error("Invalid Windows private state path.")</code> |
+
 ### apps/web/app/agent/desktop-image-consent.tsx
 
 | Line | Trigger/delivery category | Exact source expression |
@@ -1421,4 +1429,4 @@ The following appendix inventories fixed error/description expressions in the li
 |---|---|---|
 | 146 | Error construction; see delivery rules; trigger/context fail; runtime/provider transport; model delivery only through documented envelope; recovery: applicable family above; implemented | <code>new DurableMemoryError(code, message, field)</code> |
 
-Inventory coverage: 81 selected implementation modules; 944 fixed schema/description/error/UI expressions. Tests, provider-owned text, user files and unrelated llm/tts projects are excluded. Runtime transport serializers and their exact role/result shapes are documented above. New integrations must add their implemented wording and visibility before claiming inventory completion. UI JSX/source expressions preserve code spelling; whitespace follows normal JSX rendering. Per-module entries inherit the applicable trigger/delivery and recovery rules above; errors do not themselves grant authority or automatically authorize a retry.
+Inventory coverage: 82 selected implementation modules; 947 fixed schema/description/error/UI expressions. Tests, provider-owned text, user files and unrelated llm/tts projects are excluded. Runtime transport serializers and their exact role/result shapes are documented above. New integrations must add their implemented wording and visibility before claiming inventory completion. UI JSX/source expressions preserve code spelling; whitespace follows normal JSX rendering. Per-module entries inherit the applicable trigger/delivery and recovery rules above; errors do not themselves grant authority or automatically authorize a retry.
