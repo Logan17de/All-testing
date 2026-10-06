@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, writeFile, readFile, rm, link, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, link, symlink, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
@@ -90,8 +90,10 @@ describe("experimental Windows project copy sandbox", () => {
   it.skipIf(process.platform !== "win32")(
     "runs all four npm scripts with private state excluded, dependencies read-only and host/network denied",
     async () => {
-      const root = await mkdtemp(join(tmpdir(), "zet-win-project-fixture-"));
-      const outside = await mkdtemp(join(tmpdir(), "zet-win-project-outside-"));
+      // Node's Windows tmpdir may use an 8.3 alias; production accepts canonical paths only.
+      // Resolve these empty fixture roots before creating any links or private files.
+      const root = await realpath(await mkdtemp(join(tmpdir(), "zet-win-project-fixture-")));
+      const outside = await realpath(await mkdtemp(join(tmpdir(), "zet-win-project-outside-")));
       const server = createServer((socket) => socket.destroy());
       try {
         const npmCliPath = process.env["ZET_NPM_CLI"] ?? process.env["npm_execpath"];
@@ -172,7 +174,7 @@ socket.once('connect',()=>process.exit(21));socket.once('error',()=>{console.log
   it.skipIf(process.platform !== "win32")(
     "refuses source links and hardlinked private state before running scripts",
     async () => {
-      const root = await mkdtemp(join(tmpdir(), "zet-win-project-links-"));
+      const root = await realpath(await mkdtemp(join(tmpdir(), "zet-win-project-links-")));
       const npmCliPath = process.env["ZET_NPM_CLI"] ?? process.env["npm_execpath"];
       if (!npmCliPath) throw new Error("Native fixture requires trusted npm.");
       try {
@@ -186,6 +188,15 @@ socket.once('connect',()=>process.exit(21));socket.once('error',()=>{console.log
           ),
         ).rejects.toThrow("project-private-file-identity");
         await rm(join(root, "alias.sqlite"));
+        const privateParentLink = join(root, "private-parent-link");
+        await symlink(root, privateParentLink, "junction");
+        await expect(
+          executeWindowsSandboxedProjectScript(
+            { cwd: root, command: "project-test" },
+            { npmCliPath, privatePaths: [join(privateParentLink, "state.sqlite")] },
+          ),
+        ).rejects.toThrow("source-directory");
+        await rm(privateParentLink);
         await symlink(root, join(root, "source-link"), "junction");
         await expect(
           executeWindowsSandboxedProjectScript(
@@ -202,7 +213,7 @@ socket.once('connect',()=>process.exit(21));socket.once('error',()=>{console.log
   it.skipIf(process.platform !== "win32")(
     "refuses ambient readable private files and file-only inheritance for absent sidecars",
     async () => {
-      const root = await mkdtemp(join(tmpdir(), "zet-win-private-ambient-"));
+      const root = await realpath(await mkdtemp(join(tmpdir(), "zet-win-private-ambient-")));
       const npmCliPath = process.env["ZET_NPM_CLI"] ?? process.env["npm_execpath"];
       if (!npmCliPath) throw new Error("Native fixture requires trusted npm.");
       const icacls = join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "icacls.exe");
@@ -233,5 +244,56 @@ socket.once('connect',()=>process.exit(21));socket.once('error',()=>{console.log
       }
     },
     360_000,
+  );
+  it.skipIf(process.platform !== "win32")(
+    "refuses a DOS short-name private path rather than silently canonicalizing it",
+    async (context) => {
+      const root = await realpath(await mkdtemp(join(tmpdir(), "zet-win-shortname-fixture-")));
+      const npmCliPath = process.env["ZET_NPM_CLI"] ?? process.env["npm_execpath"];
+      if (!npmCliPath) throw new Error("Native fixture requires trusted npm.");
+      try {
+        const database = join(root, "runtime-state-fixture.sqlite");
+        await writeFile(database, "private alias fixture");
+        const script = `$ErrorActionPreference='Stop'
+Add-Type -TypeDefinition 'using System;using System.Text;using System.Runtime.InteropServices;public static class ZetFixtureShortPath{[DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]public static extern uint GetShortPathName(string path,StringBuilder result,uint size);}'
+$result=New-Object System.Text.StringBuilder 32768
+$length=[ZetFixtureShortPath]::GetShortPathName($env:ZET_ALIAS_FIXTURE,$result,32768)
+if($length -eq 0 -or $length -ge 32768){throw 'Fixture short-path API failed.'}
+[Console]::Out.Write($result.ToString())`;
+        const system = process.env["SystemRoot"] ?? "C:\\Windows";
+        const alias = execFileSync(
+          join(system, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+          [
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-EncodedCommand",
+            Buffer.from(script, "utf16le").toString("base64"),
+          ],
+          {
+            encoding: "utf8",
+            timeout: 60_000,
+            maxBuffer: 64 * 1024,
+            env: { SystemRoot: system, TEMP: tmpdir(), TMP: tmpdir(), ZET_ALIAS_FIXTURE: database },
+          },
+        ).trim();
+        if (alias.toLowerCase() === database.toLowerCase()) {
+          console.info(
+            "DOS short names unavailable on fixture filesystem; alias-negative test skipped.",
+          );
+          context.skip();
+          return;
+        }
+        await expect(
+          executeWindowsSandboxedProjectScript(
+            { cwd: root, command: "project-test" },
+            { npmCliPath, privatePaths: [alias] },
+          ),
+        ).rejects.toThrow("project-private-normalized");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    180_000,
   );
 });
