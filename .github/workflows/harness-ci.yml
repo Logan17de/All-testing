@@ -116,6 +116,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Windows launcher preflight
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: '"Start Zet Harness.cmd" --check'
+
       - name: Baseline check
         id: baseline
         env:
@@ -134,4 +139,28 @@ jobs:
           name: zet-harness-baseline-${{ matrix.os }}
           path: harness/tmp/baseline/*.json
           if-no-files-found: warn
+          retention-days: 14
+
+  package-windows-test:
+    name: Package Windows test kit
+    needs: verify
+    if: github.ref == 'refs/heads/zet-harness-v1'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout verified source
+        uses: actions/checkout@v4
+      - name: Archive exact reviewed source
+        shell: pwsh
+        run: |
+          git archive --format=zip --output="$env:RUNNER_TEMP\zet-harness-windows-test-kit.zip" HEAD harness
+          if ($LASTEXITCODE -ne 0) { throw 'git archive failed' }
+          if (-not (Test-Path "$env:RUNNER_TEMP\zet-harness-windows-test-kit.zip")) { throw 'Archive missing' }
+      - name: Upload Windows test kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: zet-harness-windows-test-kit
+          path: ${{ runner.temp }}\\zet-harness-windows-test-kit.zip
+          if-no-files-found: error
           retention-days: 14
