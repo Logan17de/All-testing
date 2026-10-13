@@ -17,11 +17,12 @@ import {
   desktopSessionActive,
   desktopStatus,
   monitorContains,
+  previewPointToDesktop,
   type DesktopStatus,
 } from "./desktop-view";
 
 type Value = Record<string, unknown>;
-type Capture = { artifactId: string; width: number; height: number; generation: number };
+type Capture = { artifactId: string; width: number; height: number; generation: number; scope: { x: number; y: number; width: number; height: number } };
 const object = (value: unknown): Value =>
   value && typeof value === "object" ? (value as Value) : {};
 
@@ -305,7 +306,14 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
                     result.height <= 0
                   )
                     throw new Error("The companion returned an invalid local capture.");
+                  const scope = object(result.captureScope);
+                  if (
+                    ![scope.x, scope.y, scope.width, scope.height].every(Number.isSafeInteger) ||
+                    scope.width !== result.width ||
+                    scope.height !== result.height
+                  ) throw new Error("The companion did not identify a valid capture frame.");
                   setCapture({
+                    scope: { x: scope.x as number, y: scope.y as number, width: result.width, height: result.height },
                     artifactId: result.artifactId,
                     width: result.width,
                     height: result.height,
@@ -319,15 +327,54 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
           </p>
           {capture && armed ? (
             <div>
-              <Image
-                src={`/api/editor/desktop/artifacts/${encodeURIComponent(capture.artifactId)}?generation=${capture.generation}`}
-                alt="Local desktop screenshot preview"
-                width={capture.width}
-                height={capture.height}
-                unoptimized
-                style={{ width: "100%", height: "auto" }}
-              />
+              <button
+                type="button"
+                className="desktopSession__previewTarget"
+                disabled={!canAct || busy}
+                aria-label="Choose a desktop click location in the latest screenshot"
+                title="Select a point. An action and separate approval are still required."
+                onClick={(event) => {
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const point = previewPointToDesktop(
+                    capture.scope,
+                    capture.width,
+                    capture.height,
+                    bounds.width,
+                    bounds.height,
+                    event.clientX - bounds.left,
+                    event.clientY - bounds.top,
+                  );
+                  if (!point) return;
+                  setX(String(point.x));
+                  setY(String(point.y));
+                  setKind("observed-click");
+                  setMessage("Point selected. Review the coordinates and request host approval below.");
+                }}
+              >
+                <Image
+                  src={`/api/editor/desktop/artifacts/${encodeURIComponent(capture.artifactId)}?generation=${capture.generation}`}
+                  alt="Local desktop screenshot preview"
+                  width={capture.width}
+                  height={capture.height}
+                  unoptimized
+                  style={{ width: "100%", height: "auto" }}
+                />
+                {kind === "observed-click" && Number.isInteger(Number(x)) && Number.isInteger(Number(y)) &&
+                Number(x) >= capture.scope.x && Number(y) >= capture.scope.y &&
+                Number(x) < capture.scope.x + capture.scope.width &&
+                Number(y) < capture.scope.y + capture.scope.height ? (
+                  <span
+                    className="desktopSession__previewMarker"
+                    style={{
+                      left: `${((Number(x) - capture.scope.x + 0.5) / capture.scope.width) * 100}%`,
+                      top: `${((Number(y) - capture.scope.y + 0.5) / capture.scope.height) * 100}%`,
+                    }}
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </button>
               <p className="muted">
+                Select a point on the screenshot to prepare an observed click. It will not execute until you request the action and approve it separately.
                 This preview stays between your browser and the local runtime. It is not attached to
                 a model request automatically.
               </p>
