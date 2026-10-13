@@ -55,6 +55,7 @@ import {
 import { actionToolSpecifications, modelToolName } from "./runtime-action-tools.js";
 import { createGoalActionTools } from "./runtime-goal-actions.js";
 import { createMemoryActionTools } from "./runtime-memory-actions.js";
+import { createSessionSearchTool } from "./runtime-session-search.js";
 import type { RuntimeNodeExecution, RuntimeNodeExecutionResult } from "./runtime-run-dispatcher.js";
 
 /** Tokens kept free for a reply when a model step does not say. */
@@ -559,7 +560,8 @@ export function createAgentNodeExecutor(
         ? []
         : createGoalActionTools({ database, projectId, now, createId })),
       ...(memories && options.projectContext !== false
-        ? createMemoryActionTools({ database, projectId, runId, now, createId })
+        ? [...createMemoryActionTools({ database, projectId, runId, now, createId }),
+           createSessionSearchTool(database, projectId)]
         : []),
     ];
     for (const tool of builtins) builtinOwners.add(tool);
