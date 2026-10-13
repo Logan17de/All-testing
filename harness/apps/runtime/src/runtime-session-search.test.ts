@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import type { JsonObject } from "@zet-harness/plugin-api";
 import { SqliteDatabase, SQLITE_MEMORY_PATH, runSqliteMigrations } from "@zet-harness/db";
 import { createSortableId } from "@zet-harness/db/sortable-id";
 import { createProject } from "@zet-harness/db/durable-project-records";
@@ -45,7 +46,7 @@ it("searches prior chat text only in the current project, excluding reasoning an
     const allowed = add(p1.projectId, "Remember the blue mountain project plan");
     add(p2.projectId, "blue mountain private unrelated account");
     const agent = createSessionSearchTool(db, p1.projectId);
-    const invoke = async (input: Record<string, unknown>) =>
+    const invoke = async (input: JsonObject) =>
       agent.invoke(input, {
         runId: "fixture",
         logicalEffectId: "fixture",
