@@ -147,3 +147,33 @@
     margin-right: 0;
   }
 }
+
+.desktopSession .desktopSession__previewTarget {
+  display: block;
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  line-height: 0;
+  border: 1px solid #465264;
+  background: #101318;
+  cursor: crosshair;
+  overflow: hidden;
+}
+.desktopSession__previewTarget img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.desktopSession__previewMarker {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #3171d880;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 2px #171a20a6;
+  pointer-events: none;
+}
