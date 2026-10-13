@@ -40,7 +40,9 @@ describe("confined workspace read tools (local fixtures)", () => {
     await writeFile(path.join(root, ".env.local"), "secret");
     await mkdir(path.join(root, ".git"));
     await mkdir(path.join(root, "src"));
-    await symlink(path.join(root, "safe.ts"), path.join(root, "shortcut"));
+    // Native reads are Linux-only; other hosts still exercise the fail-closed assertions.
+    if (process.platform === "linux")
+      await symlink(path.join(root, "safe.ts"), path.join(root, "shortcut"));
     const result = await executeWorkspaceReadTool(root, "harness.fs.list", {});
     if (process.platform !== "linux") {
       expect(result).toEqual(rejected);
@@ -82,8 +84,10 @@ describe("confined workspace read tools (local fixtures)", () => {
   });
   it("rejects final and parent symlinks, hardlinks, directories, unknown tools", async () => {
     await writeFile(path.join(root, "safe.ts"), "safe");
-    await symlink("safe.ts", path.join(root, "file-link"));
-    await symlink(tmpdir(), path.join(root, "dir-link"));
+    if (process.platform === "linux") {
+      await symlink("safe.ts", path.join(root, "file-link"));
+      await symlink(tmpdir(), path.join(root, "dir-link"));
+    }
     await link(path.join(root, "safe.ts"), path.join(root, "hardlink"));
     for (const file of ["file-link", "dir-link/test", "hardlink", "."])
       expect((await read(root, { path: file })).success).toBe(false);

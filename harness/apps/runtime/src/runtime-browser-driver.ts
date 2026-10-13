@@ -7,13 +7,16 @@ import type {
   BrowserAction,
   BrowserScope,
   RuntimeBrowserDriver,
+  BrowserWorkerFailure,
 } from "./runtime-browser-session.js";
 
 /** Structural Playwright boundary permits deterministic fixtures without launching a browser. */
 export interface BrowserEngine {
   launch(options: {
     headless: boolean;
+    channel: "chromium";
     chromiumSandbox: boolean;
+    timeout: number;
     args: string[];
   }): Promise<BrowserInstance>;
 }
@@ -58,6 +61,8 @@ export interface BrowserLocator {
 /** No persistent context, cookies, stored profiles, CDP, JS execution, or host-process fallback. */
 export async function createPlaywrightBrowserDriver(options: {
   engine: BrowserEngine;
+  onStartupFailure?: (code: BrowserWorkerFailure) => void;
+  onStartupPhase?: (phase: "launch" | "context" | "routes" | "page" | "ready") => void;
   scope: BrowserScope;
   pins: BrowserPinnedAddress[];
   signal: AbortSignal;
@@ -68,11 +73,23 @@ export async function createPlaywrightBrowserDriver(options: {
       throw new Error("Invalid browser DNS pin");
     return `MAP ${pin.hostname} ${pin.family === 6 ? `[${pin.address}]` : pin.address}`;
   });
+  const closing = new WeakSet<BrowserInstance>();
+  const closeBrowser = (value: BrowserInstance) => {
+    if (closing.has(value)) return Promise.resolve();
+    closing.add(value);
+    return boundedBrowserClose(value);
+  };
   let browser: BrowserInstance;
+  let discardedLaunch = false;
+  let launchTimer: ReturnType<typeof setTimeout> | undefined;
+  let launchAbort: (() => void) | undefined;
   try {
-    browser = await options.engine.launch({
+    options.onStartupPhase?.("launch");
+    const launching = options.engine.launch({
       headless: true,
+      channel: "chromium",
       chromiumSandbox: true,
+      timeout: 10_000,
       args: [
         `--host-resolver-rules=${rules.join(",")},MAP * ~NOTFOUND`,
         "--disable-quic",
@@ -81,8 +98,34 @@ export async function createPlaywrightBrowserDriver(options: {
         "--disable-background-networking",
       ],
     });
-  } catch {
+    void launching.then(
+      (late) => {
+        if (discardedLaunch) void closeBrowser(late).catch(() => undefined);
+      },
+      () => undefined,
+    );
+    browser = await Promise.race([
+      launching,
+      new Promise<never>((_resolve, reject) => {
+        launchAbort = () => {
+          discardedLaunch = true;
+          reject(new Error("Browser stopped"));
+        };
+        options.signal.addEventListener("abort", launchAbort, { once: true });
+        launchTimer = setTimeout(() => {
+          discardedLaunch = true;
+          reject(new Error("Browser startup deadline"));
+        }, 10_000);
+        if (options.signal.aborted) launchAbort();
+      }),
+    ]);
+  } catch (error) {
+    options.onStartupFailure?.(browserStartupFailure(error));
+    discardedLaunch = true;
     throw new Error("Sandboxed browser unavailable");
+  } finally {
+    if (launchTimer) clearTimeout(launchTimer);
+    if (launchAbort) options.signal.removeEventListener("abort", launchAbort);
   }
   let directory: string | undefined;
   let closed = false;
@@ -90,17 +133,7 @@ export async function createPlaywrightBrowserDriver(options: {
     if (closed) return;
     closed = true;
     options.signal.removeEventListener("abort", abort);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        browser.close().catch(() => undefined),
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, 3000);
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    await closeBrowser(browser);
     if (directory) await rm(directory, { recursive: true, force: true });
   };
   const abort = () => {
@@ -109,37 +142,52 @@ export async function createPlaywrightBrowserDriver(options: {
   options.signal.addEventListener("abort", abort, { once: true });
   try {
     if (options.signal.aborted) throw new Error("Browser stopped");
-    const context = await browser.newContext({
-      acceptDownloads: false,
-      serviceWorkers: "block",
-      permissions: [],
-      viewport: { width: 1280, height: 720 },
-    });
+    options.onStartupPhase?.("context");
+    const context = await startupAwait(
+      browser.newContext({
+        acceptDownloads: false,
+        serviceWorkers: "block",
+        permissions: [],
+        viewport: { width: 1280, height: 720 },
+      }),
+      options.signal,
+    );
+    options.onStartupPhase?.("routes");
     // Network-mutating requests remain disabled even after input approval in this initial subset.
-    await context.route("**/*", async (route) => {
-      const request = route.request();
-      if (
-        closed ||
-        options.signal.aborted ||
-        !options.scope.permits(request.url()) ||
-        !["GET", "HEAD"].includes(request.method())
-      )
-        await route.abort();
-      else await route.continue();
-    });
-    await context.routeWebSocket("**/*", (socket) => socket.close());
+    await startupAwait(
+      context.route("**/*", async (route) => {
+        const request = route.request();
+        if (
+          closed ||
+          options.signal.aborted ||
+          !options.scope.permits(request.url()) ||
+          !["GET", "HEAD"].includes(request.method())
+        )
+          await route.abort();
+        else await route.continue();
+      }),
+      options.signal,
+    );
+    await startupAwait(
+      context.routeWebSocket("**/*", (socket) => socket.close()),
+      options.signal,
+    );
     // Fixed hardening only; the public API never accepts scripts. Chromium routing
     // is not OS egress isolation. Block non-HTTP browser transports as precautions.
-    await context.addInitScript(`
+    await startupAwait(
+      context.addInitScript(`
       for (const key of ["RTCPeerConnection", "webkitRTCPeerConnection", "WebTransport"]) {
         Object.defineProperty(globalThis, key, { value: undefined, configurable: false, writable: false });
       }
-    `);
+    `),
+      options.signal,
+    );
     const primary = { ready: false };
     context.on("page", (opened) => {
       if (primary.ready) void opened.close().catch(() => undefined);
     });
-    const page = await context.newPage();
+    options.onStartupPhase?.("page");
+    const page = await startupAwait(context.newPage(), options.signal);
     primary.ready = true;
     page.on("dialog", (dialog) => {
       void dialog.dismiss().catch(() => undefined);
@@ -152,6 +200,7 @@ export async function createPlaywrightBrowserDriver(options: {
       await rm(directory, { recursive: true, force: true });
       throw new Error("Browser stopped");
     }
+    options.onStartupPhase?.("ready");
     return {
       close,
       async execute(action: BrowserAction, signal: AbortSignal) {
@@ -199,8 +248,85 @@ export async function createPlaywrightBrowserDriver(options: {
         }
       },
     };
-  } catch {
+  } catch (error) {
+    options.onStartupFailure?.(browserStartupFailure(error));
     await close();
     throw new Error("Sandboxed browser unavailable");
   }
+}
+
+async function boundedBrowserClose(browser: BrowserInstance): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      browser.close().catch(() => undefined),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, 3000);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+async function startupAwait<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  let abort: (() => void) | undefined;
+  try {
+    const result = await Promise.race([
+      pending,
+      new Promise<never>((_resolve, reject) => {
+        abort = () => reject(new Error("Browser stopped"));
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+      }),
+    ]);
+    signal.throwIfAborted();
+    return result;
+  } finally {
+    if (abort) signal.removeEventListener("abort", abort);
+  }
+}
+
+export function browserStartupFailure(error: unknown): BrowserWorkerFailure {
+  if (!(error instanceof Error)) return "setup-failed";
+  // Inspect only fixed SDK/status signatures; never return or persist error text.
+  const errno = (error as Error & { code?: unknown }).code;
+  if (
+    errno === "ENOENT" ||
+    /^browserType\.launch: (?:Failed to launch: (?:Error: )?)?spawn [^\r\n]+ ENOENT(?:\r?\n|$)/u.test(
+      error.message,
+    )
+  )
+    return "browser-spawn-not-found";
+  if (
+    errno === "EACCES" ||
+    errno === "EPERM" ||
+    /^browserType\.launch: (?:Failed to launch: (?:Error: )?)?spawn [^\r\n]+ (?:EACCES|EPERM)(?:\r?\n|$)/u.test(
+      error.message,
+    )
+  )
+    return "browser-spawn-denied";
+  if (error.message.includes("Executable doesn't exist at ")) return "browser-spawn-not-found";
+  if (error.message.includes("Host system is missing dependencies"))
+    return "browser-dependency-missing";
+  if (/process did exit: exitCode=-1073741819(?:\D|$)/u.test(error.message))
+    return "browser-access-violation";
+  if (/process did exit: exitCode=-1073741790(?:\D|$)/u.test(error.message))
+    return "browser-access-denied";
+  const processExit = /process did exit: exitCode=(-?[0-9]{1,10}),/u.exec(error.message);
+  if (processExit)
+    return processExit[1] === "0"
+      ? "browser-exit-zero"
+      : processExit[1] === "1"
+        ? "browser-exit-one"
+        : "browser-exit-other";
+  if (error.name === "ProtocolError") return "browser-protocol-error";
+  if (error.name === "TypeError") return "browser-launch-type-error";
+  if (error.name === "RangeError") return "browser-launch-range-error";
+  if (error.name === "TimeoutError" || error.message === "Browser startup deadline")
+    return "page-timeout";
+  if (/Page crashed/u.test(error.message)) return "page-crashed";
+  if (/Target page, context or browser has been closed/u.test(error.message))
+    return "target-closed";
+  if (error.name === "AbortError" || error.message === "Browser stopped") return "cancelled";
+  return "setup-failed";
 }

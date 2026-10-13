@@ -382,7 +382,9 @@ describe("durable human approval transactions", () => {
     expect(() => database.connection().exec("UPDATE approvals SET op_index = 1")).toThrow(
       "immutable",
     );
-    expect(() => database.connection().exec("DELETE FROM approvals")).toThrow("retained");
+    expect(() => database.connection().exec("DELETE FROM approvals")).toThrow(
+      "Archived chat deletion transaction required",
+    );
     await service.resume({ ...credentials, decision: "approved" });
     expect(() => database.connection().exec("UPDATE approvals SET response_json = '{}' ")).toThrow(
       "immutable",

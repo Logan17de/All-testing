@@ -5,21 +5,27 @@ import { useState, type FormEvent } from "react";
 
 import { workspaceRequest } from "../../lib/workspace-client";
 import type { ProjectView } from "../../lib/workspace-types";
+import { FolderPicker } from "../setup/folder-picker";
 
-export function NewProjectForm() {
+export function NewProjectForm({ defaultFolder = "" }: { defaultFolder?: string }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [folder, setFolder] = useState<string | null>(null);
+  const [trusted, setTrusted] = useState(false);
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
+    if (!folder || !trusted) return;
     setBusy(true);
     setError(null);
     const result = await workspaceRequest<{ readonly project: ProjectView }>("projects", {
       name,
       description,
+      workspacePath: folder,
+      trusted: true,
     });
     setBusy(false);
     if (!result.ok) {
@@ -39,44 +45,86 @@ export function NewProjectForm() {
       }}
     >
       <h2 className="panelTitle">New project</h2>
-      <label className="field">
-        <span className="field__label">Name</span>
-        <input
-          className="field__input"
-          value={name}
-          maxLength={200}
-          required
-          onChange={(event) => {
-            setName(event.target.value);
-          }}
-        />
-      </label>
-      <label className="field">
-        <span className="field__label">Description</span>
-        <textarea
-          className="field__input"
-          value={description}
-          maxLength={4000}
-          rows={3}
-          onChange={(event) => {
-            setDescription(event.target.value);
-          }}
-        />
-      </label>
-      {error === null ? null : (
-        <p className="field__error" role="alert">
-          {error}
-        </p>
+      {!folder ? (
+        <FolderPicker initialPath={defaultFolder} onChoose={setFolder} />
+      ) : !trusted ? (
+        <section aria-label="Trust project folder">
+          <h3>Trust this folder?</h3>
+          <p>
+            <code>{folder}</code>
+          </p>
+          <p className="muted">
+            Only trust folders whose contents and instructions you recognize. Existing action
+            approvals still apply.
+          </p>
+          <div className="btnRow">
+            <button className="btn btn--primary" type="button" onClick={() => setTrusted(true)}>
+              Trust this folder
+            </button>
+            <button className="btn" type="button" onClick={() => setFolder(null)}>
+              Choose another folder
+            </button>
+          </div>
+        </section>
+      ) : (
+        <>
+          <p className="muted small">
+            Folder: <code>{folder}</code> · Trusted for this project
+          </p>
+          <button
+            className="btn"
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setFolder(null);
+              setTrusted(false);
+            }}
+          >
+            Change folder
+          </button>
+          <label className="field">
+            <span className="field__label">Project display name</span>
+            <input
+              className="field__input"
+              value={name}
+              maxLength={200}
+              required
+              onChange={(event) => {
+                setName(event.target.value);
+              }}
+            />
+          </label>
+          <p className="muted small">
+            This names the project in the harness. The PC folder keeps its current name.
+          </p>
+          <label className="field">
+            <span className="field__label">Description</span>
+            <textarea
+              className="field__input"
+              value={description}
+              maxLength={4000}
+              rows={3}
+              onChange={(event) => {
+                setDescription(event.target.value);
+              }}
+            />
+          </label>
+          {error === null ? null : (
+            <p className="field__error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="btnRow">
+            <button
+              className="btn btn--primary"
+              type="submit"
+              disabled={busy || !folder || !trusted || name.trim().length === 0}
+            >
+              {busy ? "Creating…" : "Create project"}
+            </button>
+          </div>
+        </>
       )}
-      <div className="btnRow">
-        <button
-          className="btn btn--primary"
-          type="submit"
-          disabled={busy || name.trim().length === 0}
-        >
-          {busy ? "Creating…" : "Create project"}
-        </button>
-      </div>
     </form>
   );
 }

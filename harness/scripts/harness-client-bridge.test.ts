@@ -135,7 +135,11 @@ describe("the client bridge (9.12)", () => {
     const { origin, local, issueToken } = await startHarness();
     const client = new HarnessClient({ origin, token: await issueToken(["read", "messages"]) });
 
-    const project = await local("POST", "/api/projects", { name: "Launch" });
+    const project = await local("POST", "/api/projects", {
+      name: "Launch",
+      workspacePath: root,
+      trusted: true,
+    });
     const projectId = (project["project"] as { readonly projectId: string }).projectId;
     const conversation = await local("POST", `/api/projects/${projectId}/conversations`, {
       title: "Planning",

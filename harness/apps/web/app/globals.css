@@ -3,6 +3,8 @@
 }
 
 html {
+  --app-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --app-nav-font-size: 13px;
   color-scheme: dark;
   background: #0a0a0a;
 }
@@ -12,7 +14,7 @@ body {
   min-height: 100vh;
   background: #0a0a0a;
   color: #f5f5f5;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--app-font-sans);
 }
 
 button,
@@ -20,6 +22,20 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+/* A single family for navigation, content, graph labels and editors. */
+code,
+pre,
+kbd,
+samp,
+svg text {
+  font-family: var(--app-font-sans);
+}
+
+:is(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid #d6d6d6;
+  outline-offset: 3px;
 }
 
 .shell {
@@ -117,7 +133,7 @@ h1 {
 }
 
 code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-font-sans);
   font-size: 0.88em;
   background: #171717;
   border: 1px solid #262626;
@@ -297,7 +313,7 @@ code {
 }
 
 .cap {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-font-sans);
   font-size: 0.78rem;
   padding: 3px 9px;
   border-radius: 6px;

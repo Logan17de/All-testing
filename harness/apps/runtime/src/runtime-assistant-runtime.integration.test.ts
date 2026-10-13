@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { GraphJsonV1 } from "@zet-harness/graph";
 import type { ModelResult, ModelRequest, ToolAdapter } from "@zet-harness/plugin-api";
 import { expect, it, vi } from "vitest";
@@ -9,6 +12,7 @@ interface AssistantSnapshot {
   grants: { chatId: string; permissions: string[] }[];
 }
 it("real offline daemon guards assistant connections with CSRF, explicit consent and immutable child subsets", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "zet-assistant-workspace-"));
   const daemon = new RuntimeDaemon({
     api: { port: 0 },
     database: { path: SQLITE_MEMORY_PATH },
@@ -21,6 +25,12 @@ it("real offline daemon guards assistant connections with CSRF, explicit consent
     const { csrfToken } = (await (await fetch(`${base}/api/session`)).json()) as {
       csrfToken: string;
     };
+    const setup = await fetch(`${base}/api/setup/workspace`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-zet-csrf": csrfToken },
+      body: JSON.stringify({ path: workspace, trusted: true }),
+    });
+    expect(setup.status).toBe(200);
     const post = (
       path: string,
       action: string,
@@ -83,6 +93,7 @@ it("real offline daemon guards assistant connections with CSRF, explicit consent
     expect(revoked.binding.epoch).toBeGreaterThan(granted.binding.epoch);
   } finally {
     await daemon.stop();
+    await rm(workspace, { recursive: true, force: true });
   }
 });
 

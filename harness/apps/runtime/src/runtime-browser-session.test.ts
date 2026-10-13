@@ -19,7 +19,7 @@ function fixture(approve = () => Promise.resolve(true)) {
       domains: ["allowed.org"],
       minutes: 1,
       maxActions: 3,
-      confirm: true,
+      confirm: true as const,
     });
   return { session, driver, arm };
 }
@@ -91,4 +91,34 @@ describe("native browser session", () => {
     ).rejects.toThrow("action");
     await session.stop();
   });
+});
+
+it("revokes worker-failed generation without revoking a replacement session", async () => {
+  const failures: (() => void)[] = [];
+  const driver = { execute: () => Promise.resolve(null), close: vi.fn(() => Promise.resolve()) };
+  const session = new RuntimeBrowserSession({
+    createDriver: (options) => {
+      failures.push(options.onFailure!);
+      return Promise.resolve(driver);
+    },
+    approve: () => Promise.resolve(true),
+    createScope: () => ({ permits: () => true, pin: () => Promise.resolve([]) }),
+  });
+  const params = {
+    task: "fixture",
+    domains: ["example.com"],
+    minutes: 1,
+    maxActions: 3,
+    confirm: true as const,
+  };
+  const first = await session.arm(params);
+  failures[0]!();
+  expect(session.status().armed).toBe(false);
+  expect(session.status().generation).toBeGreaterThan(first.generation);
+  await session.arm(params);
+  failures[0]!();
+  expect(session.status().armed).toBe(true);
+  failures[1]!();
+  expect(session.status().armed).toBe(false);
+  await session.stop();
 });

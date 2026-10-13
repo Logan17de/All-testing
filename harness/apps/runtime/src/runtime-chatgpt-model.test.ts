@@ -1,6 +1,58 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AdapterInvocationContext, ModelRequest } from "@zet-harness/plugin-api";
 import { createChatGPTPlanModelAdapter, listChatGPTPlanModels } from "./runtime-chatgpt-model.js";
+import { ChatGPTAuthError } from "./runtime-chatgpt-auth.js";
+it.each([0, 1_024, 8_193, Number.POSITIVE_INFINITY, 2_048.5])(
+  "refuses an unsafe local context budget %s",
+  (contextBudgetTokens) => {
+    expect(() =>
+      createChatGPTPlanModelAdapter({
+        id: "budget.fixture",
+        model: "fixture",
+        accessToken: () => Promise.resolve("fixture"),
+        contextBudgetTokens,
+      }),
+    ).toThrow("MODEL_CONFIGURATION_INVALID");
+  },
+);
+it.each(["CHATGPT_LOGIN_REQUIRED", "CHATGPT_AUTH_HTTP_ERROR", "CHATGPT_PLAN_PERMISSION_REQUIRED"])(
+  "preserves safe credential failure %s before any provider request",
+  async (code) => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const accessToken = () => Promise.reject(new ChatGPTAuthError(code));
+    const adapter = createChatGPTPlanModelAdapter({
+      id: "auth.fixture",
+      model: "fixture",
+      accessToken,
+      fetch,
+    });
+    await expect(adapter.generate({ messages: [] }, context())).rejects.toMatchObject({ code });
+    await expect(listChatGPTPlanModels({ accessToken, fetch })).rejects.toMatchObject({ code });
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
+it.each([new Error("private-credential-text"), new ChatGPTAuthError("private-credential-text")])(
+  "sanitizes unknown credential exceptions without exposing their text",
+  async (error) => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const accessToken = () => Promise.reject(error);
+    const adapter = createChatGPTPlanModelAdapter({
+      id: "auth.fixture",
+      model: "fixture",
+      accessToken,
+      fetch,
+    });
+    await expect(adapter.generate({ messages: [] }, context())).rejects.toMatchObject({
+      code: "MODEL_CREDENTIAL_UNAVAILABLE",
+      message: "MODEL_CREDENTIAL_UNAVAILABLE",
+    });
+    await expect(listChatGPTPlanModels({ accessToken, fetch })).rejects.toMatchObject({
+      code: "MODEL_CREDENTIAL_UNAVAILABLE",
+      message: "MODEL_CREDENTIAL_UNAVAILABLE",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
 const context = (signal = new AbortController().signal): AdapterInvocationContext => ({
   runId: "run",
   opIndex: 0,
@@ -56,6 +108,124 @@ function setup(events: unknown[]) {
   };
 }
 describe("native ChatGPT Responses inference adapter (mock provider)", () => {
+  it.each([
+    {
+      event: {
+        type: "response.failed",
+        response: {
+          error: { code: "subscription_sharing_usage_limit_exceeded", message: "private-body" },
+        },
+      },
+      code: "MODEL_RESPONSE_LIMIT",
+      stage: "responses.subscription-usage-limit",
+    },
+    {
+      event: {
+        type: "response.failed",
+        response: {
+          error: { code: "subscription_sharing_usage_unavailable", message: "private-body" },
+        },
+      },
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.subscription-usage-unavailable",
+    },
+    {
+      event: {
+        type: "response.failed",
+        response: { error: { code: "private-body", message: "private-body" } },
+      },
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.failed",
+    },
+    {
+      event: { type: "error", code: "private-body", message: "private-body" },
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.provider-error",
+    },
+    {
+      event: {
+        type: "response.incomplete",
+        response: { incomplete_details: { reason: "max_output_tokens" } },
+      },
+      code: "MODEL_RESPONSE_LIMIT",
+      stage: "responses.incomplete-output-limit",
+    },
+    {
+      event: {
+        type: "response.incomplete",
+        response: { incomplete_details: { reason: "content_filter" } },
+      },
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.incomplete-content-filter",
+    },
+    {
+      event: {
+        type: "response.incomplete",
+        response: { incomplete_details: { reason: "private-body" } },
+      },
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.incomplete",
+    },
+    {
+      event: { type: "response.completed", response: { status: "incomplete", output: [] } },
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.completed-shape",
+    },
+    {
+      event: completed([{ type: "reasoning", id: "rs_test" }]),
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.reasoning-state",
+    },
+    {
+      event: completed([{ type: "message", role: "user", content: [] }]),
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.message-shape",
+    },
+    {
+      event: completed([
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "private-body", text: "private-body" }],
+        },
+      ]),
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.message-content",
+    },
+    {
+      event: completed([message], { output_tokens: -1 }),
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.usage",
+    },
+  ])(
+    "categorizes terminal/parser failure $stage without retaining provider content",
+    async ({ event, code, stage }) => {
+      const fixture = setup([event]);
+      const failure = await fixture.adapter
+        .generate(request, context())
+        .catch((error: unknown) => error);
+      expect(failure).toMatchObject({ code, stage });
+      expect(JSON.stringify(failure)).not.toContain("private-body");
+      expect(fixture.fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("distinguishes malformed stream data from unexpected content type without retaining bodies", async () => {
+    const fixture = setup([]);
+    fixture.fetch.mockResolvedValueOnce(
+      new Response("data: private-body\n\n", { headers: { "Content-Type": "text/event-stream" } }),
+    );
+    await expect(fixture.adapter.generate(request, context())).rejects.toMatchObject({
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.event-json",
+    });
+    fixture.fetch.mockResolvedValueOnce(
+      new Response("private-body", { headers: { "Content-Type": "text/html" } }),
+    );
+    await expect(fixture.adapter.generate(request, context())).rejects.toMatchObject({
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.media-html",
+    });
+  });
   it("streams text and completed measured results without unsupported plan parameters", async () => {
     const f = setup([
       { type: "response.output_text.delta", delta: "answer" },
@@ -572,4 +742,303 @@ it("allows only explicit incompatible state omission, retaining call/result orde
     "function_call",
     "function_call_output",
   ]);
+});
+
+it("validates a single bounded JSON final response through the Responses completion gates", async () => {
+  const f = setup([]);
+  f.fetch.mockResolvedValueOnce(
+    new Response(JSON.stringify(completed([message]).response), {
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    }),
+  );
+  const result = await f.adapter.generate(request, context());
+  expect(result.message.parts).toEqual([{ kind: "text", text: "answer" }]);
+  expect(f.fetch).toHaveBeenCalledTimes(1);
+  const init = f.fetch.mock.calls[0]![1]!;
+  expect(init.headers).toMatchObject({ Accept: "text/event-stream" });
+  expect(typeof init.body).toBe("string");
+  expect(JSON.parse(init.body as string)).toMatchObject({ stream: true, store: false });
+});
+it.each([
+  ["private-body", "MODEL_RESPONSE_INVALID", "responses.json-body"],
+  [
+    JSON.stringify({ status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }),
+    "MODEL_RESPONSE_LIMIT",
+    "responses.incomplete-output-limit",
+  ],
+  [
+    JSON.stringify({
+      status: "failed",
+      error: { code: "subscription_sharing_usage_limit_exceeded", message: "private-body" },
+    }),
+    "MODEL_RESPONSE_LIMIT",
+    "responses.subscription-usage-limit",
+  ],
+  [
+    JSON.stringify({
+      status: "completed",
+      output: [{ type: "hosted_tool", private: "private-body" }],
+    }),
+    "MODEL_RESPONSE_INVALID",
+    "responses.output-item",
+  ],
+  [
+    JSON.stringify(
+      completed([message], { input_tokens: 5, output_tokens: 101, total_tokens: 106 }).response,
+    ),
+    "MODEL_RESPONSE_LIMIT",
+    "responses.output-budget",
+  ],
+  [
+    JSON.stringify({ status: "completed", output: [], padding: "x".repeat(2_097_152) }),
+    "MODEL_RESPONSE_LIMIT",
+    "responses.json-body",
+  ],
+])(
+  "rejects invalid, incomplete, or over-budget JSON without retaining response text",
+  async (body, code, stage) => {
+    const f = setup([]);
+    f.fetch.mockResolvedValueOnce(
+      new Response(body, { headers: { "Content-Type": "application/json" } }),
+    );
+    try {
+      await f.adapter.generate(request, context());
+      throw new Error("expected rejection");
+    } catch (error) {
+      expect(error).toMatchObject({ code, stage });
+      expect(JSON.stringify(error)).not.toContain("private-body");
+    }
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([undefined, "text/plain; charset=utf-8", "application/octet-stream"])(
+  "validates protocol bodies despite generic or missing MIME %s",
+  async (media) => {
+    for (const format of ["json", "sse"]) {
+      const f = setup([]);
+      const payload =
+        format === "json"
+          ? JSON.stringify(completed([message]).response)
+          : `data: ${JSON.stringify(completed([message]))}\n\n`.replaceAll("\\n", "\n");
+      // Uint8Array avoids Response's automatic text/plain header when MIME is absent.
+      f.fetch.mockResolvedValueOnce(
+        new Response(new TextEncoder().encode(payload), {
+          headers: media ? { "Content-Type": media } : {},
+        }),
+      );
+      expect((await f.adapter.generate(request, context())).message.parts).toEqual([
+        { kind: "text", text: "answer" },
+      ]);
+      expect(f.fetch).toHaveBeenCalledTimes(1);
+    }
+  },
+);
+it.each([
+  [undefined, "responses.media-missing"],
+  ["text/plain", "responses.media-textplain"],
+  ["application/octet-stream", "responses.media-octetstream"],
+  ["text/html", "responses.media-html"],
+  ["application/xml", "responses.media-other"],
+])("rejects non-protocol text using only a fixed media classification %s", async (media, stage) => {
+  const f = setup([]);
+  f.fetch.mockResolvedValueOnce(
+    new Response(new TextEncoder().encode("<html>private-body</html>"), {
+      headers: media ? { "Content-Type": media } : {},
+    }),
+  );
+  await expect(f.adapter.generate(request, context())).rejects.toMatchObject({
+    code: "MODEL_RESPONSE_INVALID",
+    stage,
+  });
+});
+it("does not accept incomplete or invalid protocol bodies under generic MIME", async () => {
+  const f = setup([]);
+  f.fetch.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({ status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }),
+      { headers: { "Content-Type": "text/plain" } },
+    ),
+  );
+  await expect(f.adapter.generate(request, context())).rejects.toMatchObject({
+    code: "MODEL_RESPONSE_LIMIT",
+    stage: "responses.incomplete-output-limit",
+  });
+  f.fetch.mockResolvedValueOnce(
+    new Response("data: private-body\n\n", {
+      headers: { "Content-Type": "application/octet-stream" },
+    }),
+  );
+  await expect(f.adapter.generate(request, context())).rejects.toMatchObject({
+    code: "MODEL_RESPONSE_INVALID",
+    stage: "responses.event-json",
+  });
+});
+
+it.each([
+  [new Uint8Array([0xff, 0xfe]), "MODEL_RESPONSE_INVALID"],
+  [new TextEncoder().encode("{"), "MODEL_RESPONSE_INVALID"],
+  [new Uint8Array(2_097_153).fill(120), "MODEL_RESPONSE_LIMIT"],
+])(
+  "bounds and rejects invalid generic response bytes without retaining secrets",
+  async (body, code) => {
+    const f = setup([]);
+    f.fetch.mockResolvedValueOnce(
+      new Response(body, { headers: { "Content-Type": "text/plain" } }),
+    );
+    let caught: unknown;
+    try {
+      await f.adapter.generate(request, context());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({ code });
+    expect(JSON.stringify(caught)).not.toContain("volatile-secret");
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(
+  [
+    [],
+    [{ type: "message", role: "assistant", content: [] }],
+    [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "" }] }],
+    [{ type: "message", role: "assistant", content: [{ type: "output_text", text: " \n\t" }] }],
+  ].map((output) => ({ output })),
+)("rejects a completed blank assistant rather than storing false success", async ({ output }) => {
+  for (const transport of ["sse", "json"]) {
+    const f = setup([completed(output)]);
+    if (transport === "json")
+      f.fetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(completed(output).response), {
+          headers: { "Content-Type": "text/plain" },
+        }),
+      );
+    let caught: unknown;
+    try {
+      await f.adapter.generate(request, context());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      code: "MODEL_RESPONSE_INVALID",
+      stage: "responses.empty-output",
+    });
+    expect(JSON.stringify(caught)).not.toContain("volatile-secret");
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  }
+});
+
+it("recovers validated finalized items only after an empty terminal completed output", async () => {
+  const item = { ...message, id: "msg_final" };
+  const f = setup([{ type: "response.output_item.done", output_index: 0, item }, completed([])]);
+  expect((await f.adapter.generate(request, context())).message.parts).toEqual([
+    { kind: "text", text: "answer" },
+  ]);
+});
+it("accepts valid completed JSON with an explicitly null error", async () => {
+  const f = setup([]);
+  f.fetch.mockResolvedValueOnce(
+    new Response(JSON.stringify({ ...completed([message]).response, error: null }), {
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  expect((await f.adapter.generate(request, context())).message.parts).toEqual([
+    { kind: "text", text: "answer" },
+  ]);
+});
+it.each(
+  [
+    [
+      { type: "response.output_item.done", output_index: 1, item: { ...message, id: "msg_1" } },
+      completed([]),
+    ],
+    [
+      { type: "response.output_item.done", output_index: 0, item: { ...message, id: "msg_1" } },
+      { type: "response.output_item.done", output_index: 0, item: { ...message, id: "msg_1" } },
+      completed([]),
+    ],
+    [
+      { type: "response.output_item.done", output_index: 0, item: { ...message, id: "msg_1" } },
+      completed([{ ...message, id: "msg_2" }]),
+    ],
+    [
+      { type: "response.output_item.done", output_index: 0, item: { ...message, id: "msg_1" } },
+      completed([
+        { ...message, id: "msg_1", content: [{ type: "output_text", text: "conflict" }] },
+      ]),
+    ],
+  ].map((events) => ({ events })),
+)("rejects duplicate, gapped, or conflicting finalized output", async ({ events }) => {
+  await expect(setup(events).adapter.generate(request, context())).rejects.toMatchObject({
+    code: "MODEL_RESPONSE_INVALID",
+  });
+});
+it("never recovers from deltas alone, truncated done items, failed terminal, or unoffered tools", async () => {
+  const done = {
+    type: "response.output_item.done",
+    output_index: 0,
+    item: { ...message, id: "msg_1" },
+  };
+  await expect(
+    setup([
+      { type: "response.output_text.delta", delta: "answer" },
+      completed([]),
+    ]).adapter.generate(request, context()),
+  ).rejects.toMatchObject({ stage: "responses.empty-output" });
+  await expect(setup([done]).adapter.generate(request, context())).rejects.toMatchObject({
+    code: "MODEL_STREAM_TRUNCATED",
+  });
+  await expect(
+    setup([done, { type: "response.failed", response: { status: "failed" } }]).adapter.generate(
+      request,
+      context(),
+    ),
+  ).rejects.toMatchObject({ stage: "responses.failed" });
+  await expect(
+    setup([
+      {
+        ...done,
+        item: {
+          id: "fc_1",
+          type: "function_call",
+          namespace: "harness",
+          name: "unknown",
+          call_id: "call1",
+          arguments: "{}",
+        },
+      },
+      completed([]),
+    ]).adapter.generate(request, context()),
+  ).rejects.toMatchObject({ stage: "responses.function-call" });
+});
+
+it.each(
+  [
+    [
+      { type: "response.output_item.done", item: { ...message, id: "msg_1" } },
+      "responses.finalized-item-shape",
+    ],
+    [
+      { type: "response.output_item.done", output_index: 1, item: { ...message, id: "msg_1" } },
+      "responses.finalized-item-gap",
+    ],
+  ].map(([event, stage]) => ({ event, stage })),
+)("distinguishes finalized item shape and gap diagnostics", async ({ event, stage }) => {
+  await expect(
+    setup([event, completed([])]).adapter.generate(request, context()),
+  ).rejects.toMatchObject({ stage });
+});
+
+it.each(["in_progress", "incomplete"])("rejects unfinished done-item status %s", async (status) => {
+  await expect(
+    setup([
+      {
+        type: "response.output_item.done",
+        output_index: 0,
+        item: { ...message, id: "msg_1", status },
+      },
+      completed([]),
+    ]).adapter.generate(request, context()),
+  ).rejects.toMatchObject({ stage: "responses.finalized-item-shape" });
 });

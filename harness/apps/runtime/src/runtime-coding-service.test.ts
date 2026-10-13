@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import {
 } from "@zet-harness/core";
 import { SqliteDatabase, SQLITE_MEMORY_PATH, runSqliteMigrations } from "@zet-harness/db";
 import { saveModelConfig } from "@zet-harness/db/durable-model-records";
+import { createSortableId } from "@zet-harness/db/sortable-id";
 import {
   PLUGIN_API_VERSION,
   type ToolAdapter,
@@ -37,8 +38,8 @@ interface TurnResult {
 }
 describe("standalone coding service (scripted inference only)", () => {
   it("uses durable graph loop, persists sessions, switches models and isolates workspace scope", async () => {
-    const root = await mkdtemp(join(tmpdir(), "native-coding-"));
-    const other = await mkdtemp(join(tmpdir(), "native-coding-other-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "native-coding-")));
+    const other = await realpath(await mkdtemp(join(tmpdir(), "native-coding-other-")));
     const db = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
     db.open();
     runSqliteMigrations(db.connection(), RUNTIME_DATABASE_MIGRATIONS);
@@ -249,6 +250,30 @@ describe("standalone coding service (scripted inference only)", () => {
         title: "Native session",
       })) as SessionResult;
       const sessionId = created.session.id;
+      expect(await coding.action("session/pin", { sessionId, pinned: true })).toMatchObject({
+        session: { id: sessionId, pinned: true },
+      });
+      const reloaded = new RuntimeCodingService(services);
+      expect(await reloaded.action("session/list")).toMatchObject({
+        data: [expect.objectContaining({ id: sessionId, pinned: true })],
+      });
+      const emptyExport = (await coding.action("session/export", { sessionId })) as {
+        export: { content: string };
+      };
+      expect(emptyExport.export.content).toContain("No messages.");
+      expect(emptyExport).toMatchObject({
+        export: {
+          filename: `chat-${sessionId}.md`,
+          mediaType: "text/markdown; charset=utf-8",
+        },
+      });
+      await expect(coding.action("session/pin", { sessionId, pinned: "true" })).rejects.toThrow();
+      await expect(
+        coding.action("session/export", { sessionId, path: "arbitrary.md" }),
+      ).rejects.toThrow();
+      await expect(
+        coding.action("session/export", { sessionId: createSortableId() }),
+      ).rejects.toThrow();
       expect(await coding.action("session/graph", { sessionId })).toEqual({
         sessionId,
         graphId: null,
@@ -507,19 +532,12 @@ describe("standalone coding service (scripted inference only)", () => {
       await coding.action("session/restore", { sessionId });
       selected = other;
       expect(coding.snapshot().scopeGeneration).toBe(1);
-      expect(coding.snapshot().events).toEqual([]);
-      await expect(coding.action("session/read", { sessionId })).rejects.toThrow("outside");
-      for (const action of ["session/graph", "session/plugins", "session/plugin-scope"])
-        await expect(
-          coding.action(action, {
-            sessionId,
-            ...(action === "session/plugin-scope" ? { model: null, tools: null } : {}),
-          }),
-        ).rejects.toThrow("outside");
-      await expect(
-        coding.action("turn/interrupt", { sessionId, turnId: turn.turn.id }),
-      ).rejects.toThrow("outside");
-      expect(await coding.action("session/list")).toEqual({ data: [] });
+      expect(await coding.action("session/read", { sessionId })).toHaveProperty(
+        "session.id",
+        sessionId,
+      );
+      const allSessions = (await coding.action("session/list")) as { data: { id: string }[] };
+      expect(allSessions.data.map((entry) => entry.id)).toContain(sessionId);
     } finally {
       coding.close();
       await dispatcher.stop();

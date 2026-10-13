@@ -1,0 +1,101 @@
+.menu {
+  position: fixed;
+  z-index: 100;
+  width: 190px;
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid #393939;
+  border-radius: 15px;
+  background: #292929;
+  box-shadow: 0 8px 24px #0004;
+  color: #ededed;
+  font: 13px/20px var(--app-font-sans);
+  user-select: none;
+  cursor: default;
+}
+.menu .item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+.item:hover:not(:disabled),
+.item:focus-visible {
+  background: #3a3a3a;
+  outline: none;
+}
+.item:disabled {
+  opacity: 0.4;
+}
+.item svg {
+  flex-shrink: 0;
+  color: #b1b1b1;
+}
+.item:hover:not(:disabled) svg {
+  color: #fff;
+}
+.divider {
+  height: 1px;
+  margin: 4px 5px;
+  background: #414141;
+}
+.confirm {
+  width: 430px;
+  max-width: calc(100vw - 32px);
+  padding: 22px;
+  border: 1px solid #424242;
+  border-radius: 18px;
+  background: #292929;
+  color: #eee;
+  font: 14px/1.5 var(--app-font-sans);
+  cursor: default;
+}
+.confirm::backdrop {
+  background: #0007;
+}
+.confirm h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+.confirm p {
+  margin: 0 0 18px;
+  color: #c5c5c5;
+}
+.confirm footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.confirm button {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #aaa;
+  font: inherit;
+  cursor: default;
+}
+.confirm .confirmAction {
+  background: #503331;
+  color: #ff7269;
+}
+.confirm button:disabled {
+  opacity: 0.5;
+}
+.confirm button:focus-visible {
+  outline: 1px solid #aaa;
+  outline-offset: 2px;
+}
+.confirm .error {
+  color: #ff9990;
+}

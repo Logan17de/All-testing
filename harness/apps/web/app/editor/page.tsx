@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { EditorLoader } from "./editor-loader";
+import "./editor.css";
 
 export const metadata = { title: "Editor — Zet Harness" };
 

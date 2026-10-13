@@ -1,6 +1,37 @@
 import { randomUUID } from "node:crypto";
+import type { BrowserExecutableMetadata } from "./runtime-browser-worker-metadata.js";
 import { BrowserDomainPolicy, type BrowserPinnedAddress } from "./runtime-browser-policy.js";
 
+export type BrowserProtocolCounts = Record<
+  string,
+  { sent: number; received: number; events: number; outstanding: number }
+>;
+export type BrowserWorkerFailure =
+  | "startup-timeout"
+  | "page-timeout"
+  | "page-crashed"
+  | "target-closed"
+  | "protocol-assertion"
+  | "worker-exit"
+  | "worker-error"
+  | "worker-module-unavailable"
+  | "setup-failed"
+  | "cancelled"
+  | "browser-access-violation"
+  | "browser-access-denied"
+  | "browser-sandbox-executable-denied"
+  | "startup-diagnostic-complete"
+  | "browser-exit-zero"
+  | "browser-exit-one"
+  | "browser-exit-other"
+  | "browser-spawn-not-found"
+  | "browser-spawn-denied"
+  | "browser-protocol-error"
+  | "browser-launch-type-error"
+  | "browser-launch-range-error"
+  | "browser-dependency-missing";
+export type BrowserWorkerPhase =
+  "worker-start" | "launch" | "context" | "routes" | "page" | "ready" | "action";
 export type BrowserAction =
   | { kind: "navigate"; url: string }
   | { kind: "read"; selector: string }
@@ -36,6 +67,13 @@ export interface RuntimeBrowserSessionOptions {
     scope: BrowserScope;
     pins: BrowserPinnedAddress[];
     signal: AbortSignal;
+    onFailure?: (
+      stage?: BrowserWorkerPhase,
+      code?: BrowserWorkerFailure,
+      timings?: Partial<Record<BrowserWorkerPhase, number>>,
+      protocol?: BrowserProtocolCounts,
+      environment?: BrowserExecutableMetadata,
+    ) => void;
   }): Promise<RuntimeBrowserDriver>;
   approve(request: BrowserInputApproval, signal: AbortSignal): Promise<boolean>;
   /** Trusted host injection for isolated fixtures; never populated from HTTP requests. */
@@ -64,7 +102,7 @@ function bounded(value: unknown, limit: number): value is string {
     !value.includes("\0")
   );
 }
-function checkedAction(value: BrowserAction): BrowserAction {
+export function checkedBrowserAction(value: BrowserAction): BrowserAction {
   const allowed = {
     navigate: ["kind", "url"],
     read: ["kind", "selector"],
@@ -113,11 +151,21 @@ export class RuntimeBrowserSession {
   #busy = false;
   #armPending = false;
   #captures: BrowserCapture[] = [];
+  #failureStage: BrowserWorkerPhase | undefined;
+  #failureCode: BrowserWorkerFailure | undefined;
+  #failureTimings: Partial<Record<BrowserWorkerPhase, number>> = {};
+  #failureProtocol: BrowserProtocolCounts = {};
+  #failureEnvironment: BrowserExecutableMetadata | undefined;
   constructor(private readonly options: RuntimeBrowserSessionOptions) {}
   status() {
     if (this.#controller && this.#now() >= this.#expiresAt) void this.stop().catch(() => undefined);
     return {
       generation: this.#generation,
+      failureStage: this.#failureStage ?? null,
+      failureCode: this.#failureCode ?? null,
+      failureTimings: { ...this.#failureTimings },
+      failureProtocol: structuredClone(this.#failureProtocol),
+      failureEnvironment: this.#failureEnvironment ? { ...this.#failureEnvironment } : null,
       armed: !!this.#driver && !this.#controller?.signal.aborted,
       task: this.#task,
       expiresAt: this.#expiresAt,
@@ -170,6 +218,11 @@ export class RuntimeBrowserSession {
       throw new Error("Explicit bounded browser scope is required");
     await this.stop();
     const generation = this.#generation;
+    this.#failureStage = undefined;
+    this.#failureCode = undefined;
+    this.#failureTimings = {};
+    this.#failureProtocol = {};
+    this.#failureEnvironment = undefined;
     const controller = new AbortController();
     this.#controller = controller;
     this.#task = input.task;
@@ -183,7 +236,21 @@ export class RuntimeBrowserSession {
         new BrowserDomainPolicy({ domains: input.domains });
       this.#scope = scope;
       const pins = await abortable(scope.pin(), controller.signal);
-      const launching = this.options.createDriver({ scope, pins, signal: controller.signal });
+      const launching = this.options.createDriver({
+        scope,
+        pins,
+        signal: controller.signal,
+        onFailure: (stage, code, timings, protocol, environment) => {
+          if (generation === this.#generation) {
+            this.#failureStage = stage;
+            this.#failureCode = code;
+            this.#failureTimings = { ...timings };
+            this.#failureProtocol = structuredClone(protocol ?? {});
+            this.#failureEnvironment = environment ? { ...environment } : undefined;
+            void this.stop().catch(() => undefined);
+          }
+        },
+      });
       void launching.then(
         (driver) => {
           if (controller.signal.aborted || generation !== this.#generation)
@@ -202,7 +269,7 @@ export class RuntimeBrowserSession {
     }
   }
   async execute(input: BrowserAction, generation: number) {
-    const action = checkedAction(input);
+    const action = checkedBrowserAction(input);
     if (
       generation !== this.#generation ||
       !this.status().armed ||

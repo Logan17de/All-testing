@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ChatGPTAuthError } from "./runtime-chatgpt-auth.js";
 import type {
   AdapterInvocationContext,
   AdapterUsage,
@@ -17,6 +18,8 @@ import {
   readModelJson,
   readModelSse,
   record,
+  type ModelResponseStage,
+  type ModelTransportErrorCode,
 } from "@zet-harness/models";
 
 export interface ChatGPTImageArtifact {
@@ -33,6 +36,8 @@ export interface ChatGPTModelOptions {
   model: string;
   accessToken: () => Promise<string>;
   fetch?: typeof globalThis.fetch;
+  /** Local harness budget, not a claim about the provider's advertised maximum. */
+  contextBudgetTokens?: number;
   /** Absent by default. Never accepts arbitrary paths/URLs or adds model tool authority. */
   resolveImage?: ChatGPTImageResolver;
   /** Nonsecret stable SHA-256 account/client identity digest supplied by the host. */
@@ -40,9 +45,81 @@ export interface ChatGPTModelOptions {
   /** Host rechecks current run/account/desktop consent at the last synchronous outbound boundary. */
   validateImageAuthority?: (context: AdapterInvocationContext) => void;
 }
+/** Conservative host-local input/output budget; never an unlimited provider window. */
+export const CHATGPT_LOCAL_CONTEXT_BUDGET_TOKENS = 8_192;
+function responseFailure(
+  stage: ModelResponseStage,
+  code: ModelTransportErrorCode = "MODEL_RESPONSE_INVALID",
+) {
+  return new ModelTransportError(code, undefined, stage);
+}
+function responseRecord(value: unknown, stage: ModelResponseStage): Record<string, unknown> {
+  try {
+    return record(value);
+  } catch {
+    throw responseFailure(stage);
+  }
+}
+function responseJson(value: string, stage: ModelResponseStage): unknown {
+  try {
+    return parseJson(value);
+  } catch {
+    throw responseFailure(stage);
+  }
+}
+function terminalFailure(event: Record<string, unknown>) {
+  const response =
+    event.response && typeof event.response === "object" && !Array.isArray(event.response)
+      ? (event.response as Record<string, unknown>)
+      : undefined;
+  const error = response?.error ?? event.error;
+  const code =
+    error && typeof error === "object" && !Array.isArray(error)
+      ? (error as Record<string, unknown>).code
+      : event.code;
+  // Only these documented provider codes select a fixed local category. Never retain raw values.
+  if (code === "subscription_sharing_usage_limit_exceeded")
+    return responseFailure("responses.subscription-usage-limit", "MODEL_RESPONSE_LIMIT");
+  if (code === "subscription_sharing_usage_unavailable")
+    return responseFailure("responses.subscription-usage-unavailable");
+  if (event.type === "response.incomplete") {
+    const details = response?.incomplete_details;
+    const reason =
+      details && typeof details === "object" && !Array.isArray(details)
+        ? (details as Record<string, unknown>).reason
+        : undefined;
+    if (reason === "max_output_tokens")
+      return responseFailure("responses.incomplete-output-limit", "MODEL_RESPONSE_LIMIT");
+    if (reason === "content_filter") return responseFailure("responses.incomplete-content-filter");
+    return responseFailure("responses.incomplete");
+  }
+  return responseFailure(
+    event.type === "response.failed" ? "responses.failed" : "responses.provider-error",
+  );
+}
 const unsupported = (): never => {
   throw new ModelTransportError("MODEL_REQUEST_UNSUPPORTED");
 };
+const SAFE_AUTH_CODES = new Set([
+  "CHATGPT_LOGIN_REQUIRED",
+  "CHATGPT_AUTH_INVALID",
+  "CHATGPT_AUTH_HTTP_ERROR",
+  "CHATGPT_PLAN_PERMISSION_REQUIRED",
+  "CHATGPT_AUTH_DENIED",
+]);
+function credentialFailure(error: unknown): Error {
+  return error instanceof ChatGPTAuthError && SAFE_AUTH_CODES.has(error.code)
+    ? new ChatGPTAuthError(error.code)
+    : new ModelTransportError("MODEL_CREDENTIAL_UNAVAILABLE");
+}
+async function readCredential(credential: () => Promise<string>, signal: AbortSignal) {
+  try {
+    return await abortable(credential(), signal);
+  } catch (error) {
+    signal.throwIfAborted();
+    throw credentialFailure(error);
+  }
+}
 function toolName(name: string): string {
   return `tool_${createHash("sha256").update(name).digest("hex").slice(0, 24)}`;
 }
@@ -282,7 +359,7 @@ async function prepare(
 }
 function parseUsage(value: unknown): AdapterUsage | undefined {
   if (value === undefined) return undefined;
-  const source = record(value);
+  const source = responseRecord(value, "responses.usage");
   const result: Record<string, number> = {};
   for (const [key, target] of [
     ["input_tokens", "inputTokens"],
@@ -292,7 +369,7 @@ function parseUsage(value: unknown): AdapterUsage | undefined {
     const number = source[key];
     if (number === undefined) continue;
     if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 0)
-      throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+      throw responseFailure("responses.usage");
     result[target] = number;
   }
   return immutable(result);
@@ -303,15 +380,15 @@ function complete(
   model: string,
   stateScope?: string,
 ): ModelResult {
-  const response = record(value);
+  const response = responseRecord(value, "responses.completed-shape");
   if (response.status !== "completed" || !Array.isArray(response.output))
-    throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+    throw responseFailure("responses.completed-shape");
   const parts: ModelMessagePart[] = [];
   const calls = new Set<string>();
   const stateIds = new Set<string>();
   let stateBytes = 0;
   for (const raw of response.output) {
-    const item = record(raw);
+    const item = responseRecord(raw, "responses.output-item");
     if (item.type === "reasoning") {
       if (
         !stateScope ||
@@ -322,11 +399,11 @@ function complete(
         !item.encrypted_content ||
         /[\x00-\x20\x7f]/u.test(item.encrypted_content)
       )
-        throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+        throw responseFailure("responses.reasoning-state");
       stateIds.add(item.id);
       const size = Buffer.byteLength(item.encrypted_content);
       if (size > 65_536 || (stateBytes += size) > 262_144)
-        throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
+        throw responseFailure("responses.reasoning-state", "MODEL_RESPONSE_LIMIT");
       parts.push({
         kind: "provider-state",
         provider: "openai-responses",
@@ -339,11 +416,11 @@ function complete(
     }
     if (item.type === "message") {
       if (item.role !== "assistant" || !Array.isArray(item.content))
-        throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+        throw responseFailure("responses.message-shape");
       for (const rawPart of item.content) {
-        const part = record(rawPart);
+        const part = responseRecord(rawPart, "responses.message-content");
         if (part.type !== "output_text" || typeof part.text !== "string")
-          throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+          throw responseFailure("responses.message-content");
         parts.push({ kind: "text", text: part.text });
       }
     } else if (item.type === "function_call") {
@@ -356,16 +433,28 @@ function complete(
         calls.has(item.call_id) ||
         typeof item.arguments !== "string"
       )
-        throw new ModelTransportError("MODEL_RESPONSE_INVALID");
+        throw responseFailure("responses.function-call");
       calls.add(item.call_id);
       parts.push({
         kind: "tool-call",
         callId: item.call_id,
         name: offered.get(item.name)!,
-        arguments: record(parseJson(item.arguments)) as JsonObject,
+        arguments: responseRecord(
+          responseJson(item.arguments, "responses.function-arguments"),
+          "responses.function-arguments",
+        ) as JsonObject,
       });
-    } else throw new ModelTransportError("MODEL_RESPONSE_INVALID"); // no hosted tools or unsolicited execution
+    } else throw responseFailure("responses.output-item"); // no hosted tools or unsolicited execution
   }
+  if (
+    !parts.some(
+      (part) =>
+        part.kind === "tool-call" ||
+        part.kind === "provider-state" ||
+        (part.kind === "text" && part.text.trim().length > 0),
+    )
+  )
+    throw responseFailure("responses.empty-output");
   const usage = parseUsage(response.usage);
   return immutable({
     message: { role: "assistant" as const, parts },
@@ -377,7 +466,61 @@ function complete(
   });
 }
 
+/** A mislabelled transport may still carry the Responses protocol; never accept arbitrary text. */
+async function normalizeResponsesMedia(response: Response, signal: AbortSignal): Promise<Response> {
+  const media = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  if (media === "application/json" || media === "text/event-stream") return response;
+  const stage: ModelResponseStage = !media
+    ? "responses.media-missing"
+    : media === "text/plain"
+      ? "responses.media-textplain"
+      : media === "application/octet-stream"
+        ? "responses.media-octetstream"
+        : media === "text/html" || media === "application/xhtml+xml"
+          ? "responses.media-html"
+          : "responses.media-other";
+  if (stage === "responses.media-html" || stage === "responses.media-other" || !response.body) {
+    void response.body?.cancel().catch(() => undefined);
+    throw responseFailure(stage);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let text = "";
+  let bytes = 0;
+  try {
+    while (true) {
+      const chunk = await abortable(reader.read(), signal);
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > 2_097_152) throw responseFailure(stage, "MODEL_RESPONSE_LIMIT");
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    text += decoder.decode();
+  } catch (error) {
+    signal.throwIfAborted();
+    if (error instanceof ModelTransportError) throw error;
+    throw responseFailure(stage);
+  } finally {
+    void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  const prefix = text.trimStart();
+  const contentType = prefix.startsWith("{")
+    ? "application/json"
+    : /^(?:data:|event:|id:|retry:|:)/u.test(prefix)
+      ? "text/event-stream"
+      : undefined;
+  if (!contentType) throw responseFailure(stage);
+  return new Response(text, { headers: { "Content-Type": contentType } });
+}
 export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): ModelAdapter {
+  const contextBudgetTokens = options.contextBudgetTokens ?? CHATGPT_LOCAL_CONTEXT_BUDGET_TOKENS;
+  if (
+    !Number.isSafeInteger(contextBudgetTokens) ||
+    contextBudgetTokens <= 1_024 ||
+    contextBudgetTokens > CHATGPT_LOCAL_CONTEXT_BUDGET_TOKENS
+  )
+    throw new ModelTransportError("MODEL_CONFIGURATION_INVALID");
   if (!options.id || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u.test(options.model))
     throw new ModelTransportError("MODEL_CONFIGURATION_INVALID");
   const fetch = options.fetch ?? globalThis.fetch;
@@ -405,7 +548,7 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
         validateImageAuthority,
         context,
       );
-      const token = await abortable(credential(), signal);
+      const token = await readCredential(credential, signal);
       if (!token || /\s/u.test(token))
         throw new ModelTransportError("MODEL_CREDENTIAL_UNAVAILABLE");
       signal.throwIfAborted();
@@ -417,12 +560,16 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
           unsupported();
         }
       }
-      const response = await abortable(
+      let response = await abortable(
         fetch("https://api.openai.com/v1/responses", {
           method: "POST",
           redirect: "error",
           signal,
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+          },
           body: prepared.body,
         }),
         signal,
@@ -431,23 +578,122 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
         void response.body?.cancel().catch(() => undefined);
         throw new ModelTransportError("MODEL_HTTP_ERROR", response.status);
       }
+      response = await normalizeResponsesMedia(response, signal);
       let result: ModelResult | undefined;
-      for await (const data of readModelSse(response, 2_097_152, signal)) {
-        if (data === "[DONE]") continue;
-        if (result) throw new ModelTransportError("MODEL_RESPONSE_INVALID");
-        const event = record(parseJson(data));
-        if (event.type === "response.output_text.delta") {
-          if (typeof event.delta !== "string")
-            throw new ModelTransportError("MODEL_RESPONSE_INVALID");
-          yield { type: "text-delta", text: event.delta };
-        } else if (
-          event.type === "response.failed" ||
-          event.type === "response.incomplete" ||
-          event.type === "error"
-        )
-          throw new ModelTransportError("MODEL_RESPONSE_INVALID");
-        else if (event.type === "response.completed")
-          result = complete(event.response, prepared.offered, model, stateScope);
+      const finalized = new Map<number, Record<string, unknown>>();
+      const finalizedIds = new Set<string>();
+      let lastSequence = -1;
+      const finish = (value: unknown): ModelResult => {
+        const terminal = responseRecord(value, "responses.completed-shape");
+        const ordered = [...finalized].sort(([a], [b]) => a - b);
+        if (ordered.some(([index], position) => index !== position))
+          throw responseFailure("responses.finalized-item-gap");
+        if (Array.isArray(terminal.output) && terminal.output.length === 0 && ordered.length)
+          return complete(
+            { ...terminal, output: ordered.map(([, item]) => item) },
+            prepared.offered,
+            model,
+            stateScope,
+          );
+        const final = complete(terminal, prepared.offered, model, stateScope);
+        if (ordered.length) {
+          const done = complete(
+            { ...terminal, output: ordered.map(([, item]) => item) },
+            prepared.offered,
+            model,
+            stateScope,
+          );
+          if (JSON.stringify(final.message.parts) !== JSON.stringify(done.message.parts))
+            throw responseFailure("responses.finalized-item-conflict");
+          const output = terminal.output as Record<string, unknown>[];
+          if (output.some((item, index) => item.id !== ordered[index]?.[1].id))
+            throw responseFailure("responses.finalized-item-conflict");
+        }
+        return final;
+      };
+      const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+      if (contentType === "application/json") {
+        try {
+          const body = await readModelJson(response, 2_097_152, signal);
+          if (body.status === "failed" || body.status === "incomplete")
+            throw terminalFailure({ type: `response.${body.status}`, response: body });
+          if (body.error !== undefined && body.error !== null)
+            throw terminalFailure({ type: "error", error: body.error });
+          result = complete(body, prepared.offered, model, stateScope);
+        } catch (error) {
+          if (
+            error instanceof ModelTransportError &&
+            error.stage === undefined &&
+            ["MODEL_RESPONSE_INVALID", "MODEL_RESPONSE_LIMIT"].includes(error.code)
+          )
+            throw responseFailure("responses.json-body", error.code);
+          throw error;
+        }
+      } else if (contentType === "text/event-stream") {
+        try {
+          for await (const data of readModelSse(response, 2_097_152, signal)) {
+            if (data === "[DONE]") continue;
+            if (result) throw responseFailure("responses.after-completion");
+            const event = responseRecord(
+              responseJson(data, "responses.event-json"),
+              "responses.event-shape",
+            );
+            if (event.sequence_number !== undefined) {
+              if (
+                typeof event.sequence_number !== "number" ||
+                !Number.isSafeInteger(event.sequence_number) ||
+                event.sequence_number <= lastSequence
+              )
+                throw responseFailure("responses.finalized-item-shape");
+              lastSequence = event.sequence_number;
+            }
+            if (typeof event.type !== "string") throw responseFailure("responses.event-shape");
+            if (event.type === "response.output_text.delta") {
+              if (typeof event.delta !== "string") throw responseFailure("responses.text-delta");
+              yield { type: "text-delta", text: event.delta };
+            } else if (event.type === "response.output_item.done") {
+              const index = event.output_index;
+              const item = responseRecord(event.item, "responses.finalized-item-shape");
+              if (
+                typeof index !== "number" ||
+                !Number.isSafeInteger(index) ||
+                index < 0 ||
+                index >= 256 ||
+                (item.status !== undefined && item.status !== "completed") ||
+                typeof item.id !== "string" ||
+                !/^[A-Za-z0-9_.:-]{1,200}$/u.test(item.id)
+              )
+                throw responseFailure("responses.finalized-item-shape");
+              if (finalized.has(index) || finalizedIds.has(item.id))
+                throw responseFailure("responses.finalized-item-conflict");
+              complete(
+                { status: "completed", output: [item] },
+                prepared.offered,
+                model,
+                stateScope,
+              );
+              finalized.set(index, item);
+              finalizedIds.add(item.id);
+            } else if (
+              event.type === "response.failed" ||
+              event.type === "response.incomplete" ||
+              event.type === "error"
+            )
+              throw terminalFailure(event);
+            else if (event.type === "response.completed") result = finish(event.response);
+          }
+        } catch (error) {
+          if (
+            error instanceof ModelTransportError &&
+            error.stage === undefined &&
+            ["MODEL_RESPONSE_INVALID", "MODEL_RESPONSE_LIMIT"].includes(error.code)
+          )
+            throw responseFailure("responses.stream-framing", error.code);
+          throw error;
+        }
+      } else {
+        void response.body?.cancel().catch(() => undefined);
+        throw responseFailure("responses.stream-content-type");
       }
       if (!result) throw new ModelTransportError("MODEL_STREAM_TRUNCATED");
       if (prepared.droppedProviderStateCount)
@@ -461,7 +707,7 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
         (result.usage?.outputTokens === undefined ||
           result.usage.outputTokens > request.maxOutputTokens)
       )
-        throw new ModelTransportError("MODEL_RESPONSE_LIMIT");
+        throw responseFailure("responses.output-budget", "MODEL_RESPONSE_LIMIT");
       for (const part of result.message.parts)
         if (part.kind === "tool-call") yield { type: "tool-call", call: part };
       if (result.usage) yield { type: "usage", usage: result.usage };
@@ -470,6 +716,7 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
       if (context.signal.aborted) throw context.signal.reason;
       if (signal.aborted) throw new ModelTransportError("MODEL_TIMEOUT");
       if (error instanceof ModelTransportError) throw error;
+      if (error instanceof ChatGPTAuthError) throw credentialFailure(error);
       throw new ModelTransportError("MODEL_NETWORK_ERROR");
     }
   }
@@ -489,6 +736,7 @@ export function createChatGPTPlanModelAdapter(options: ChatGPTModelOptions): Mod
       title: `ChatGPT plan: ${model}`,
       requiredCapabilities: Object.freeze([]),
       features: Object.freeze({
+        contextWindowTokens: contextBudgetTokens,
         streaming: true,
         tools: true,
         vision: resolveImage !== undefined,
@@ -515,7 +763,7 @@ export async function listChatGPTPlanModels(options: {
     ...(options.signal ? [options.signal] : []),
   ]);
   try {
-    const token = await abortable(options.accessToken(), signal);
+    const token = await readCredential(options.accessToken, signal);
     if (!token || /\s/u.test(token)) throw new ModelTransportError("MODEL_CREDENTIAL_UNAVAILABLE");
     const response = await abortable(
       (options.fetch ?? globalThis.fetch)("https://api.openai.com/v1/models", {
@@ -550,6 +798,7 @@ export async function listChatGPTPlanModels(options: {
     if (options.signal?.aborted) throw options.signal.reason;
     if (signal.aborted) throw new ModelTransportError("MODEL_TIMEOUT");
     if (error instanceof ModelTransportError) throw error;
+    if (error instanceof ChatGPTAuthError) throw credentialFailure(error);
     throw new ModelTransportError("MODEL_NETWORK_ERROR");
   }
 }

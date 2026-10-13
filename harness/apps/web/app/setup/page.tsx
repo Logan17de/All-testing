@@ -12,7 +12,7 @@ export default async function SetupPage() {
 
   return (
     <main className="page">
-      <nav className="crumbs">
+      <nav className="crumbs" aria-label="Breadcrumb">
         <Link href="/">Overview</Link>
         <span aria-hidden="true">/</span>
         <span>Setup</span>

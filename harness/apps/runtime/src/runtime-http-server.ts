@@ -9,6 +9,7 @@ import {
 } from "./runtime-desktop-http.js";
 import { createBrowserHttpHandler, isBrowserHttpPath } from "./runtime-browser-http.js";
 import type { RuntimeBrowserService } from "./runtime-browser-service.js";
+import { createTerminalHttpHandler, type TerminalHttpServices } from "./runtime-terminal-http.js";
 import {
   createChatGPTAuthHttpHandler,
   type ChatGPTLoginController,
@@ -197,6 +198,7 @@ export class RuntimeHttpServer {
   private readonly chatGPTAuthHandler: ReturnType<typeof createChatGPTAuthHttpHandler> | undefined;
   private readonly desktopHandler: ReturnType<typeof createDesktopHttpHandler> | undefined;
   private readonly browserHandler: ReturnType<typeof createBrowserHttpHandler> | undefined;
+  private readonly terminalHandler: ReturnType<typeof createTerminalHttpHandler> | undefined;
   private readonly pluginMakerHandler: ReturnType<typeof createPluginMakerHttpHandler> | undefined;
   private readonly assistantHandler: ReturnType<typeof createAssistantHttpHandler> | undefined;
   private readonly codingHandler: ReturnType<typeof createCodingHttpHandler> | undefined;
@@ -250,6 +252,7 @@ export class RuntimeHttpServer {
       readonly assistant?: RuntimeAssistantController;
       readonly pluginMaker?: RuntimePluginMakerController;
       readonly browser?: RuntimeBrowserService;
+      readonly terminal?: TerminalHttpServices;
       readonly desktop?: RuntimeDesktopController;
       readonly chatGPTAuth?: { controller: ChatGPTLoginController; search?: CodexSearchBridge };
       /** Standing reasons to start a run: manual, cron, webhook and api triggers. */
@@ -279,6 +282,9 @@ export class RuntimeHttpServer {
         : createChatGPTAuthHttpHandler(services.chatGPTAuth);
     this.desktopHandler = services.desktop ? createDesktopHttpHandler(services.desktop) : undefined;
     this.browserHandler = services.browser ? createBrowserHttpHandler(services.browser) : undefined;
+    this.terminalHandler = services.terminal
+      ? createTerminalHttpHandler(services.terminal)
+      : undefined;
     this.pluginMakerHandler = services.pluginMaker
       ? createPluginMakerHttpHandler(services.pluginMaker)
       : undefined;
@@ -478,6 +484,16 @@ export class RuntimeHttpServer {
           return;
         }
         void this.desktopHandler(request, response, url, this.security).catch((error: unknown) =>
+          writeRuntimeApiError(response, error),
+        );
+        return;
+      }
+      if (url.pathname === "/api/terminal") {
+        if (!this.terminalHandler) {
+          writeJson(response, 503, { error: { code: "TERMINAL_UNAVAILABLE" } });
+          return;
+        }
+        void this.terminalHandler(request, response, url, this.security).catch((error: unknown) =>
           writeRuntimeApiError(response, error),
         );
         return;

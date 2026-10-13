@@ -1,243 +1,102 @@
 "use client";
-
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
-
+import { useState } from "react";
 import type { SetupStatus } from "../../lib/runtime-client";
 import { workspaceRequest } from "../../lib/workspace-client";
-
-interface FolderListing {
-  readonly path: string;
-  readonly parent: string | null;
-  readonly home: string;
-  readonly roots: readonly string[];
-  readonly folders: readonly { readonly name: string; readonly path: string }[];
-  readonly truncated: boolean;
-}
-
-/**
- * First-run setup: pick the workspace, then connect a model.
- *
- * The browser cannot hand a web page a folder's real path, so the runtime — which
- * runs on this machine — lists folders and the page walks through them. Only
- * folders are listed, never files.
- */
+import { FolderPicker } from "./folder-picker";
 export function SetupWizard({ initial }: { readonly initial: SetupStatus }) {
-  const [status, setStatus] = useState<SetupStatus>(initial);
-  const [changing, setChanging] = useState(initial.workspace === null || !initial.workspace.exists);
-  const [listing, setListing] = useState<FolderListing | null>(null);
-  const [browseTo, setBrowseTo] = useState<string>(initial.workspace?.path ?? "");
-  const [typed, setTyped] = useState("");
+  const [status, setStatus] = useState(initial);
+  const [changing, setChanging] = useState(
+    initial.workspace === null || !initial.workspace.exists || initial.workspace.trusted !== true,
+  );
+  const [selected, setSelected] = useState<string | null>(
+    initial.workspace?.exists && initial.workspace.trusted !== true ? initial.workspace.path : null,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!changing) return;
-    let cancelled = false;
-    const query = browseTo.length === 0 ? "" : `?path=${encodeURIComponent(browseTo)}`;
-    void workspaceRequest<{ readonly folders: FolderListing }>(`setup/folders${query}`).then(
-      (result) => {
-        if (cancelled) return;
-        if (result.ok) {
-          setListing(result.data.folders);
-          setTyped(result.data.folders.path);
-        } else {
-          setError(result.reason);
-        }
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [changing, browseTo]);
-
-  const open = (path: string): void => {
-    setError(null);
-    setBrowseTo(path);
-  };
-
-  const choose = async (path: string): Promise<void> => {
+  const workspace = status.workspace;
+  async function choose(path: string) {
     setBusy(true);
     setError(null);
-    const saved = await workspaceRequest<{ readonly workspace: SetupStatus["workspace"] }>(
+    const saved = await workspaceRequest<{ workspace: SetupStatus["workspace"] }>(
       "setup/workspace",
-      { path },
+      { path, trusted: true },
     );
     if (!saved.ok) {
       setBusy(false);
       setError(saved.reason);
       return;
     }
-    const refreshed = await workspaceRequest<{ readonly setup: SetupStatus }>("setup");
+    const refreshed = await workspaceRequest<{ setup: SetupStatus }>("setup");
     setBusy(false);
     if (refreshed.ok) setStatus(refreshed.data.setup);
+    else setStatus({ ...status, workspace: saved.data.workspace });
+    setSelected(null);
     setChanging(false);
-  };
-
-  const workspace = status.workspace;
-
+  }
   return (
     <>
-      <section className="panel setupStep" aria-label="Workspace">
+      <section className="panel setupStep" aria-label="Default folder">
         <p className="eyebrow">Step 1</p>
-        <h2 className="panelTitle">Where should the harness work?</h2>
+        <h2 className="panelTitle">Default folder</h2>
         <p className="muted">
-          Pick the folder your projects live in. New projects start there, and anything an agent
-          does with files stays inside it.
+          New chat uses this folder by default. Projects can choose their own folder. Selecting it
+          does not rename or move anything.
         </p>
-
-        {workspace !== null && !changing ? (
+        {!changing && workspace ? (
           <>
             <p className="setupChosen">
-              <span className="statusDot statusDot--on" aria-hidden="true" />
               <code>{workspace.path}</code>
+            </p>
+            <button className="btn" type="button" onClick={() => setChanging(true)}>
+              Change default folder
+            </button>
+          </>
+        ) : selected ? (
+          <section aria-label="Trust default folder">
+            <h3>Trust this folder?</h3>
+            <p>
+              <code>{selected}</code>
+            </p>
+            <p className="muted">
+              Trust only a folder whose files and instructions you recognize. File changes and other
+              protected actions still require their existing approvals.
             </p>
             <div className="btnRow">
               <button
+                className="btn btn--primary"
                 type="button"
-                className="btn"
+                disabled={busy}
                 onClick={() => {
-                  setBrowseTo(workspace.path);
-                  setChanging(true);
+                  void choose(selected);
                 }}
               >
-                Change folder
+                {busy ? "Saving…" : "Trust and use as default"}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy}
+                onClick={() => setSelected(null)}
+              >
+                Choose another folder
               </button>
             </div>
-          </>
+          </section>
         ) : (
-          <>
-            {workspace !== null && !workspace.exists ? (
-              <p className="warn">
-                The folder chosen before, <code>{workspace.path}</code>, is gone. Pick another.
-              </p>
-            ) : null}
-            {listing === null ? (
-              <p className="muted" role="status">
-                Reading folders…
-              </p>
-            ) : (
-              <div className="folderPicker">
-                <div className="folderPicker__bar">
-                  <code className="folderPicker__path">{listing.path}</code>
-                  <div className="btnRow">
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={listing.parent === null}
-                      onClick={() => {
-                        if (listing.parent !== null) open(listing.parent);
-                      }}
-                    >
-                      ↑ Up
-                    </button>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        open(listing.home);
-                      }}
-                    >
-                      Home
-                    </button>
-                    {listing.roots.length > 1
-                      ? listing.roots.map((root) => (
-                          <button
-                            key={root}
-                            type="button"
-                            className="btn"
-                            onClick={() => {
-                              open(root);
-                            }}
-                          >
-                            {root}
-                          </button>
-                        ))
-                      : null}
-                  </div>
-                </div>
-                {listing.folders.length === 0 ? (
-                  <p className="muted small">No folders inside this one.</p>
-                ) : (
-                  <ul className="folderPicker__list">
-                    {listing.folders.map((folder) => (
-                      <li key={folder.path}>
-                        <button
-                          type="button"
-                          className="folderPicker__item"
-                          onClick={() => {
-                            open(folder.path);
-                          }}
-                        >
-                          <span aria-hidden="true">📁</span> {folder.name}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {listing.truncated ? (
-                  <p className="muted small">Only the first 500 folders are shown.</p>
-                ) : null}
-                <div className="btnRow">
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    disabled={busy}
-                    onClick={() => {
-                      void choose(listing.path);
-                    }}
-                  >
-                    {busy ? "Saving…" : "Use this folder"}
-                  </button>
-                  {workspace !== null && workspace.exists ? (
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        setChanging(false);
-                        setError(null);
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            )}
-
-            <form
-              className="setupTyped"
-              onSubmit={(event: FormEvent<HTMLFormElement>) => {
-                event.preventDefault();
-                open(typed.trim());
-              }}
-            >
-              <label className="field">
-                <span className="field__label">Or type a folder path</span>
-                <input
-                  className="field__input"
-                  value={typed}
-                  placeholder="D:\Projects\my-app"
-                  onChange={(event) => {
-                    setTyped(event.target.value);
-                  }}
-                />
-              </label>
-              <div className="btnRow">
-                <button className="btn" type="submit" disabled={typed.trim().length === 0}>
-                  Go to folder
-                </button>
-              </div>
-            </form>
-          </>
+          <FolderPicker
+            initialPath={workspace?.path ?? ""}
+            busy={busy}
+            onChoose={setSelected}
+            onCancel={workspace?.exists ? () => setChanging(false) : undefined}
+          />
         )}
-        {error === null ? null : (
-          <p className="field__error" role="alert">
+        {error ? (
+          <p role="alert" className="field__error">
             {error}
           </p>
-        )}
+        ) : null}
       </section>
-
       <section
         className={`panel setupStep${workspace === null ? " setupStep--waiting" : ""}`}
         aria-label="Model"

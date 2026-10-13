@@ -1,0 +1,286 @@
+.settingsGeneral {
+  font-family: var(--app-font-sans);
+  font-size: 13px;
+  color: #dedede;
+  container-type: inline-size;
+}
+.generalSection + .generalSection {
+  margin-top: 42px;
+}
+.generalSection > h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 16px;
+  color: #ededed;
+}
+.generalCard {
+  padding: 0 16px;
+  border: 1px solid #383838;
+  border-radius: 16px;
+  background: #232323;
+}
+.generalCard > * + * {
+  border-top: 1px solid #383838;
+}
+.generalRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 64px;
+  padding: 14px 0;
+}
+.generalRowText {
+  min-width: 0;
+  flex: 1;
+}
+.generalRowText > strong {
+  display: block;
+  color: #ededed;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.generalRowText p {
+  margin: 4px 0 0;
+  color: #aaa;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.generalRowControl {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  max-width: 48%;
+}
+.settingsGeneral .generalButton,
+.generalRowControl select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #414141;
+  border-radius: 9px;
+  background: #2c2c2c;
+  color: #eee;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  padding: 6px 11px;
+  min-height: 30px;
+  max-width: 100%;
+  text-decoration: none;
+  cursor: pointer;
+}
+.generalRowControl select {
+  padding-right: 8px;
+}
+.settingsGeneral .generalButton:hover:not(:disabled),
+.generalRowControl select:hover {
+  background: #353535;
+}
+.generalRowControl select:focus-visible,
+.settingsGeneral :is(button, a, input):focus-visible {
+  outline: 2px solid #8ebaff;
+  outline-offset: 3px;
+}
+.settingsGeneral :is(button, input, select):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.generalSwitch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  min-height: 32px;
+  padding: 6px 3px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+.generalSwitchTrack {
+  display: block;
+  width: 32px;
+  height: 20px;
+  border-radius: 99px;
+  background: #454545;
+  padding: 2px;
+}
+.generalSwitchTrack > span {
+  display: block;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transform: translateX(0);
+}
+.generalSwitch[aria-checked="true"] .generalSwitchTrack {
+  background: #347ff2;
+}
+.generalSwitch[aria-checked="true"] .generalSwitchTrack > span {
+  transform: translateX(12px);
+}
+.generalStatus {
+  color: #aaa;
+  font-size: 12px;
+}
+.generalFolderControl {
+  max-width: 46%;
+}
+.generalFolderPath {
+  display: block;
+  min-width: 0;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #aaa;
+  font-size: 12px;
+}
+.generalFolderControl > button {
+  flex: none;
+}
+.generalRowText .generalFolderAttention {
+  color: #e1c090;
+}
+.generalFolderDetails {
+  padding: 16px 0 20px;
+  border-top: 1px solid #383838;
+}
+.generalFolderDetails h3 {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+.generalFolderDetails code {
+  font-family: inherit;
+  overflow-wrap: anywhere;
+}
+.settingsGeneral .generalFolderDetails .btn {
+  background: #303030;
+  border: 1px solid #484848;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settingsGeneral .generalFolderDetails .btn--primary {
+  background: #e3e3e3;
+  color: #222;
+}
+.settingsGeneral .folderPicker {
+  gap: 0;
+  margin: 8px 0 12px;
+}
+.settingsGeneral .folderPicker__path {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+.settingsGeneral .btnRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.settingsGeneral section[aria-label="Choose a PC folder"] > .muted {
+  margin: 0 0 8px;
+}
+.settingsGeneral .folderPicker__list {
+  max-height: 160px;
+  padding: 4px;
+  margin: 12px 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid #383838;
+  border-radius: 8px;
+  background: #1b1b1b;
+  scrollbar-color: #555 transparent;
+}
+.settingsGeneral .folderPicker__list .folderPicker__item {
+  justify-content: flex-start;
+  color: inherit;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 10px;
+  text-align: left;
+  border-color: transparent;
+  background: transparent;
+  border-radius: 4px;
+}
+.settingsGeneral .folderPicker__item:hover:not(:disabled) {
+  background: #303030;
+  color: #fff;
+}
+.settingsGeneral .folderPicker > .btn {
+  justify-self: start;
+  width: auto;
+  margin-bottom: 0;
+}
+.settingsGeneral .field {
+  margin-bottom: 12px;
+}
+.settingsGeneral :is(input, textarea):not(:disabled):not([readonly]) {
+  cursor: text;
+}
+.generalSoundControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.generalFootnote {
+  color: #929292;
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.generalFeedback {
+  color: #bababa;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 12px 0;
+}
+.generalError,
+.generalFolderError {
+  color: #efaaa5;
+  line-height: 1.5;
+}
+.generalFolderError {
+  padding: 16px 0;
+}
+.generalFolderError p {
+  margin: 0 0 12px;
+}
+@container (max-width: 480px) {
+  .generalCard {
+    padding-inline: 14px;
+  }
+  .generalRow {
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .generalRowText {
+    flex: 1 1 145px;
+  }
+  .generalRowControl {
+    max-width: 100%;
+  }
+  .generalRowControl:has(select),
+  .generalFolderControl {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+  .generalFolderPath {
+    max-width: min(210px, 65%);
+  }
+  .generalSoundControls {
+    justify-content: flex-start;
+  }
+  .generalSection + .generalSection {
+    margin-top: 32px;
+  }
+}

@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RuntimeApiSecurity } from "./runtime-api-security.js";
 import { writeRuntimeJson } from "./runtime-approval-http.js";
 import type { RuntimeCodingService } from "./runtime-coding-service.js";
+import { RuntimeCodingPreflightError } from "./runtime-coding-preflight.js";
+import { ArchivedChatError } from "./runtime-archived-chats.js";
 export function isCodingHttpPath(path: string): boolean {
   return path === "/api/agent" || path === "/api/codex";
 }
@@ -64,13 +66,18 @@ export function createCodingHttpHandler(service: RuntimeCodingService) {
       writeRuntimeJson(response, 200, {
         result: await service.action(action, params as Record<string, unknown>),
       });
-    } catch {
+    } catch (error) {
       writeRuntimeJson(response, 400, {
-        error: {
-          code: "AGENT_REQUEST_FAILED",
-          reason:
-            "Native agent request failed. Check the configured model, selected session, and run status.",
-        },
+        error:
+          error instanceof RuntimeCodingPreflightError
+            ? error.publicDiagnostic()
+            : error instanceof ArchivedChatError
+              ? { code: error.code, reason: error.reason }
+              : {
+                  code: "AGENT_REQUEST_FAILED",
+                  reason:
+                    "Native agent request failed. Check the configured model, selected session, and run status.",
+                },
       });
     }
   };

@@ -1,5 +1,8 @@
 import { createServer, type Server } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   DURABLE_MODEL_CONFIGS_MIGRATION,
@@ -12,11 +15,17 @@ import { SqliteDatabase, runSqliteMigrations, SQLITE_MEMORY_PATH } from "@zet-ha
 import { RuntimeModels } from "./runtime-models.js";
 import { RuntimeDaemon } from "./runtime-daemon.js";
 
+let workspace: string;
+beforeEach(async () => {
+  workspace = await realpath(await mkdtemp(join(tmpdir(), "zet-http-workspace-")));
+});
+
 const daemons: RuntimeDaemon[] = [];
 const servers: Server[] = [];
 
 afterEach(async () => {
   for (const daemon of daemons.splice(0)) await daemon.stop();
+  await rm(workspace, { recursive: true, force: true });
   for (const server of servers.splice(0)) {
     await new Promise<void>((resolve) => {
       server.close(() => {
@@ -317,7 +326,11 @@ describe("the models a person configures", () => {
       ).status,
     ).toBe(201);
 
-    const project = await send("POST", "/api/projects", { name: "Chat" });
+    const project = await send("POST", "/api/projects", {
+      name: "Chat",
+      workspacePath: workspace,
+      trusted: true,
+    });
     const projectId = (project.body["project"] as { readonly projectId: string }).projectId;
     const started = await send("POST", `/api/projects/${projectId}/conversations`, {
       title: "Hello",
@@ -369,7 +382,11 @@ describe("the models a person configures", () => {
       apiKey: "sk-agent-key",
     });
 
-    const project = await send("POST", "/api/projects", { name: "Chat" });
+    const project = await send("POST", "/api/projects", {
+      name: "Chat",
+      workspacePath: workspace,
+      trusted: true,
+    });
     const projectId = (project.body["project"] as { readonly projectId: string }).projectId;
     const started = await send("POST", `/api/projects/${projectId}/conversations`, {
       title: "Hello",

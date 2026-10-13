@@ -1,3 +1,4 @@
+import { readSetting } from "@zet-harness/db/durable-setting-records";
 import {
   createRuntimePluginMakerController,
   type RuntimePluginMakerController,
@@ -10,6 +11,7 @@ import {
   PARENT_DELEGABLE_NATIVE_TOOL_IDS,
 } from "./runtime-assistant-tool-access.js";
 import { DURABLE_NATIVE_CHAT_RUNS_MIGRATION } from "./runtime-native-chat-runs.js";
+import { DURABLE_ARCHIVED_CHAT_DELETION_MIGRATION } from "./runtime-archived-chats.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   DURABLE_ASSISTANT_ACCESS_MIGRATION,
@@ -36,12 +38,23 @@ import { createRuntimeCodingDesktopTools } from "./runtime-coding-desktop-tools.
 import { configuredDesktopController } from "./runtime-desktop-http.js";
 import { createRuntimeBrowserTools } from "./runtime-browser-tools.js";
 import { RuntimeBrowserService } from "./runtime-browser-service.js";
-import { createPlaywrightBrowserDriver } from "./runtime-browser-driver.js";
+import {
+  RuntimeTerminalService,
+  TerminalError,
+  type SandboxedTerminalAdapter,
+} from "./runtime-terminal-service.js";
+import { RuntimeTerminalAuthority } from "./runtime-terminal-authority.js";
+import { realpathSync, statSync } from "node:fs";
+import { createIsolatedBrowserDriver } from "./runtime-browser-isolated-driver.js";
 import { providerAwaitingDecision } from "./runtime-provider-policy.js";
 import { resolve, dirname, join, relative, isAbsolute, sep } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { createChatGPTPlanModelAdapter, listChatGPTPlanModels } from "./runtime-chatgpt-model.js";
+import {
+  createChatGPTPlanModelAdapter,
+  listChatGPTPlanModels,
+  CHATGPT_LOCAL_CONTEXT_BUDGET_TOKENS,
+} from "./runtime-chatgpt-model.js";
 
 import {
   DURABLE_CHECKPOINTS_MIGRATION,
@@ -174,10 +187,16 @@ export const RUNTIME_DATABASE_MIGRATIONS: readonly SqliteMigration[] = Object.fr
   DURABLE_ASSISTANT_ACCESS_MIGRATION,
   DURABLE_NATIVE_CHAT_RUNS_MIGRATION,
   DURABLE_ASSISTANT_TOOL_ACCESS_MIGRATION,
+  DURABLE_ARCHIVED_CHAT_DELETION_MIGRATION,
 ]);
 export type RuntimeDaemonState = "idle" | "running" | "stopped";
 
 export interface RuntimeDaemonOptions {
+  /** Host configuration only; omitted by default. Human grants remain per browser/chat. */
+  readonly humanTerminal?: {
+    readonly adapter: SandboxedTerminalAdapter;
+    readonly allowedRoots: readonly string[];
+  };
   readonly api?: RuntimeHttpServerOptions;
   readonly database?: SqliteDatabaseOptions;
   readonly migrations?: readonly SqliteMigration[];
@@ -262,6 +281,12 @@ export class RuntimeDaemon {
     isCurrent: (authority) => this.imageAuthorityCurrent(authority),
   });
   private readonly browser: RuntimeBrowserService;
+  private readonly terminal: RuntimeTerminalService;
+  private readonly terminalAuthority = new RuntimeTerminalAuthority();
+  private readonly terminalRoots: ReadonlySet<string> | undefined;
+  private readonly terminalLeaseTimer = setInterval(() => {
+    void this.terminal.expireLeases().catch(() => undefined);
+  }, 5_000).unref();
   private readonly chatGPTLogin = new ChatGPTLoginController(
     process.env["ZET_CHATGPT_HOST_ID"] ? { hostId: process.env["ZET_CHATGPT_HOST_ID"] } : {},
   );
@@ -281,6 +306,36 @@ export class RuntimeDaemon {
 
   constructor(options: RuntimeDaemonOptions = {}) {
     this.database = new SqliteDatabase(options.database ?? { path: DEFAULT_RUNTIME_DATABASE_PATH });
+    this.terminalRoots = options.humanTerminal
+      ? new Set(options.humanTerminal.allowedRoots.map((path) => resolve(path)))
+      : undefined;
+    if (
+      options.humanTerminal &&
+      (options.humanTerminal.adapter.capabilities.mode !== "human-host-pty" ||
+        this.terminalRoots?.size === 0)
+    )
+      throw new Error(
+        "Human terminal requires a verified adapter and explicit host-owned folder scope.",
+      );
+    this.terminal = new RuntimeTerminalService(
+      options.humanTerminal
+        ? {
+            adapter: options.humanTerminal.adapter,
+            humanGrant: (identity) => this.terminalAuthority.get(identity),
+            revokeHumanGrant: (identity) => this.terminalAuthority.revoke(identity),
+            validateCwd: async (identity, cwd) => {
+              const trusted = await this.terminalConversationRoot(identity.conversationId);
+              if (cwd !== trusted)
+                throw new TerminalError(
+                  "TERMINAL_FOLDER_UNTRUSTED",
+                  "Terminal folder changed.",
+                  409,
+                );
+              return trusted;
+            },
+          }
+        : {},
+    );
     this.migrations = options.migrations ?? RUNTIME_DATABASE_MIGRATIONS;
     this.redaction = options.redaction ?? new RuntimeRedactionRegistry();
     // Plugins load in start(), after construction, so both of these read plugin
@@ -319,14 +374,18 @@ export class RuntimeDaemon {
     const database = this.database;
     this.browser = new RuntimeBrowserService({
       cwd: () => readWorkspace(database)?.path ?? process.cwd(),
-      createDriver: async (options) => {
-        const { chromium } = await import("playwright-core");
-        return createPlaywrightBrowserDriver({ ...options, engine: chromium });
-      },
+      createDriver: (options) => createIsolatedBrowserDriver(options),
     });
     this.agent = new RuntimeCodingService({
       database,
-      workspace: () => readWorkspace(database)?.path ?? process.cwd(),
+      workspace: () => readWorkspace(database)?.path,
+      workspaceTrusted: () => {
+        const path = readWorkspace(database)?.path;
+        return (
+          path !== undefined &&
+          readSetting(database.connection(), "workspace.trusted")?.value === path
+        );
+      },
       approvals: this.approvals,
       sources: () => ({
         ...(this.pluginHost === undefined ? {} : { host: this.pluginHost }),
@@ -335,6 +394,8 @@ export class RuntimeDaemon {
       capabilityAuthority: () => authority ?? { evaluate: () => ({ decision: "deny" as const }) },
       redact: (value) => this.redaction.redact(withoutPrivateModelState(value)),
       dispatch: execution === undefined ? undefined : (runId) => this.dispatcher?.wake(runId),
+      isRunActive: (runId) => this.dispatcher?.isRunActive(runId) ?? false,
+      forgetDeletedRuns: (runIds) => this.dispatcher?.forgetDeletedRuns(runIds),
       modelCatalog: () => this.codingModelCatalog(),
       toolCatalog: () => this.installedAgentToolCatalog(),
       browserGeneration: () => {
@@ -475,6 +536,8 @@ export class RuntimeDaemon {
         setup: {
           database: this.database,
           onWorkspaceSelection: () => {
+            this.terminalAuthority.revokeAll();
+            void this.terminal.revokeAll().catch(() => undefined);
             this.pluginMakerGeneration++;
             this.pluginMakerController?.invalidateScope();
             this.pluginMakerState = undefined;
@@ -492,6 +555,11 @@ export class RuntimeDaemon {
           workspace: () => readWorkspace(this.database)?.path ?? process.cwd(),
         }),
         browser: this.browser,
+        terminal: {
+          service: this.terminal,
+          authority: this.terminalAuthority,
+          conversationRoot: (conversationId) => this.terminalConversationRoot(conversationId),
+        },
         desktop: this.desktop,
         chatGPTAuth: {
           controller: this.chatGPTLogin,
@@ -684,6 +752,41 @@ export class RuntimeDaemon {
     return this.dispatcher.waitForIdle(runId);
   }
 
+  private terminalConversationRoot(conversationId: string): Promise<string> {
+    const db = this.database.connection();
+    const chat = readConversation(db, conversationId);
+    const project = chat?.status === "active" ? readProject(db, chat.projectId) : undefined;
+    if (!project?.workspacePath || project.status !== "active")
+      throw new TerminalError(
+        "TERMINAL_FOLDER_UNTRUSTED",
+        "Select and trust this chat's folder.",
+        409,
+      );
+    const root = resolve(project.workspacePath);
+    if (
+      !statSync(root).isDirectory() ||
+      realpathSync.native(root) !== root ||
+      (this.terminalRoots && !this.terminalRoots.has(root))
+    )
+      throw new TerminalError(
+        "TERMINAL_FOLDER_UNTRUSTED",
+        "The folder is unavailable or outside the configured human terminal scope.",
+        409,
+      );
+    const exactTrust =
+      readSetting(db, `project.trusted.${project.projectId}`)?.value === project.workspacePath;
+    const workspaceTrust =
+      readWorkspace(this.database)?.path === root &&
+      readSetting(db, "workspace.trusted")?.value === root;
+    if (!exactTrust && !workspaceTrust)
+      throw new TerminalError(
+        "TERMINAL_FOLDER_UNTRUSTED",
+        "Confirm trust for this exact folder.",
+        409,
+      );
+    return Promise.resolve(root);
+  }
+
   async start(): Promise<boolean> {
     if (this.state === "stopped") {
       throw new TypeError("Runtime daemon cannot restart after it has stopped.");
@@ -695,6 +798,12 @@ export class RuntimeDaemon {
       : resolve(this.database.snapshot().path);
     try {
       runSqliteMigrations(this.database.connection(), this.migrations);
+      if (
+        this.migrations.some(
+          (migration) => migration.name === DURABLE_ARCHIVED_CHAT_DELETION_MIGRATION.name,
+        )
+      )
+        await this.agent.startArchiveMaintenance();
       // Measure host path limits before anything can write a project file, so a
       // Windows MAX_PATH limitation is reported rather than discovered later as
       // an unexplained tool failure. The probe is advisory: it never throws.
@@ -750,6 +859,8 @@ export class RuntimeDaemon {
       }
       await this.httpServer.start();
     } catch (error) {
+      this.agent.stopArchiveMaintenance();
+      await this.database.drainWrites();
       this.database.close();
       throw error;
     }
@@ -1643,6 +1754,7 @@ export class RuntimeDaemon {
           host.models.register(
             createChatGPTPlanModelAdapter({
               id,
+              contextBudgetTokens: CHATGPT_LOCAL_CONTEXT_BUDGET_TOKENS,
               model: model.slug,
               stateScope: accountKey,
               resolveImage: async (ref, context) => {
@@ -1792,6 +1904,7 @@ export class RuntimeDaemon {
   }
 
   private async stopOnce(): Promise<boolean> {
+    this.agent.stopArchiveMaintenance();
     this.pluginMakerGeneration++;
     this.pluginMakerController?.invalidateScope();
     this.pluginMakerState = undefined;
@@ -1805,6 +1918,9 @@ export class RuntimeDaemon {
     this.assistantSignals.clear();
     this.assistantService = undefined;
     await this.browser.close();
+    this.terminalAuthority.revokeAll();
+    clearInterval(this.terminalLeaseTimer);
+    await this.terminal.dispose();
     this.agent.close();
     await this.agent.drainCancellations();
     this.chatGPTLogin.close();

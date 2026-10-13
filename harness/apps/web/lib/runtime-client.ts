@@ -96,7 +96,7 @@ async function sendToRuntime(path: string, init: RequestInit): Promise<RuntimeRe
     const response = await fetch(`${runtimeOrigin()}${path}`, {
       ...init,
       cache: "no-store",
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(runtimeRequestDeadline(path, init)),
     });
     const text = await response.text();
     try {
@@ -118,6 +118,18 @@ async function sendToRuntime(path: string, init: RequestInit): Promise<RuntimeRe
   } catch {
     return RUNTIME_UNREACHABLE;
   }
+}
+
+/** Fixed browser budgets include native worker preparation; no caller timeout knob. */
+function runtimeRequestDeadline(path: string, init: RequestInit): number {
+  if (path !== "/api/browser" || init.method !== "POST" || typeof init.body !== "string")
+    return 15_000;
+  try {
+    const body = JSON.parse(init.body) as { action?: unknown };
+    if (body?.action === "arm") return 50_000;
+    if (body?.action === "execute") return 22_000;
+  } catch {}
+  return 15_000;
 }
 
 export function getFromRuntime(path: string): Promise<RuntimeResponse> {
@@ -209,7 +221,11 @@ export function fetchConnections(): Promise<
 }
 
 export interface SetupStatus {
-  readonly workspace: { readonly path: string; readonly exists: boolean } | null;
+  readonly workspace: {
+    readonly path: string;
+    readonly exists: boolean;
+    readonly trusted: boolean;
+  } | null;
   readonly modelsConfigured: number;
   readonly complete: boolean;
 }

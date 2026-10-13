@@ -7,6 +7,7 @@ export {
 export {
   ModelTransportError,
   type ModelTransportErrorCode,
+  type ModelResponseStage,
   type ModelHttpOptions,
 } from "./model-http.js";
 export {

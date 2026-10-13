@@ -17,7 +17,15 @@ import {
 } from "@xyflow/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+} from "react";
 
 import {
   addControlEdge,
@@ -54,11 +62,15 @@ import { harnessNodeTypes, type HarnessFlowNode } from "../harness-node";
 import { behaviourLabel, capabilityLabel, fieldLabel, pluginLabel } from "../../lib/plain-words";
 import { workspaceRequest } from "../../lib/workspace-client";
 import { SchemaField } from "./schema-field";
+import { canRequestRun, currentValidation, type Validation } from "./editor-state";
+import { Icon } from "../ui/workspace-icon";
+import { ResizeHandle, usePanelWidth } from "../ui/resize-handle";
+import { ConnectionBuilder, ConnectionList } from "./connection-panel";
+import { connectionIssue } from "./connections";
+import { useGraphHistory } from "./graph-history";
 
 const DRAFT_KEY = "zet-harness.editor.draft.v1";
 const DRAG_TYPE = "application/x-zet-harness-node";
-
-type Validation = "idle" | "checking" | "valid" | "invalid" | "unreachable";
 
 function loadDraft(): GraphDocument {
   try {
@@ -139,10 +151,22 @@ function EditorWorkspace() {
   const router = useRouter();
   const { screenToFlowPosition } = useReactFlow();
   const canvasRef = useRef<HTMLElement>(null);
+  const connectionPanelRef = useRef<HTMLElement>(null);
 
   const [palette, setPalette] = useState<readonly PaletteEntry[] | null>(null);
   const [paletteError, setPaletteError] = useState<string | null>(null);
-  const [graph, setGraph] = useState<GraphDocument>(loadDraft);
+  const { graph, setGraph, undo, redo, canUndo, canRedo } = useGraphHistory(loadDraft);
+  const [paletteWidth, setPaletteWidth] = usePanelWidth("zet.editor.palette-width", 208, 168, 360);
+  const [inspectorWidth, setInspectorWidth] = usePanelWidth(
+    "zet.editor.inspector-width",
+    300,
+    240,
+    480,
+  );
+  const [paletteSearch, setPaletteSearch] = useState("");
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [feedback, setFeedback] = useState("Click or drag a node from the library to begin.");
+  const [autosaveError, setAutosaveError] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [dragPositions, setDragPositions] = useState<Readonly<Record<string, EditorPoint>>>({});
@@ -153,10 +177,17 @@ function EditorWorkspace() {
   // Problems are held back until someone asks to run; see `problemsShown` below.
   const [problemsRequested, setProblemsRequested] = useState(false);
   const [validation, setValidation] = useState<Validation>("idle");
+  const [checkedBody, setCheckedBody] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [transfer, setTransfer] = useState<string | null>(null);
   const [transferError, setTransferError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!connectionsOpen) return;
+    connectionPanelRef.current?.querySelector("select")?.focus({ preventScroll: true });
+    connectionPanelRef.current?.scrollIntoView({ block: "nearest" });
+  }, [connectionsOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,14 +255,22 @@ function EditorWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setGraph]);
 
   useEffect(() => {
+    let failed = false;
+    let active = true;
     try {
       window.localStorage.setItem(DRAFT_KEY, JSON.stringify(graph));
     } catch {
-      // Autosave is a convenience; failing to store must not break editing.
+      failed = true;
     }
+    queueMicrotask(() => {
+      if (active) setAutosaveError(failed);
+    });
+    return () => {
+      active = false;
+    };
   }, [graph]);
 
   // Only executable content is sent for checking. Moving a node changes layout,
@@ -261,6 +300,8 @@ function EditorWorkspace() {
       })
         .then(async (response) => {
           const body = (await response.json()) as unknown;
+          if (controller.signal.aborted) return;
+          setCheckedBody(validationBody);
           if (!response.ok) {
             setDiagnostics([]);
             setValidation("unreachable");
@@ -277,7 +318,13 @@ function EditorWorkspace() {
           if (valid) setProblemsRequested(false);
         })
         .catch((error: unknown) => {
-          if (error instanceof DOMException && error.name === "AbortError") return;
+          if (
+            controller.signal.aborted ||
+            (error instanceof DOMException && error.name === "AbortError")
+          )
+            return;
+          setCheckedBody(validationBody);
+          setDiagnostics([]);
           setValidation("unreachable");
         });
     }, 450);
@@ -288,7 +335,7 @@ function EditorWorkspace() {
   }, [validationBody]);
 
   const empty = graph.nodes.length === 0;
-  const shownValidation: Validation = empty ? "idle" : validation;
+  const shownValidation = currentValidation(empty, validationBody, checkedBody, validation);
 
   /**
    * Problems appear when someone tries to run, not while they are still drawing.
@@ -299,7 +346,7 @@ function EditorWorkspace() {
    * but nothing is marked wrong until **Run graph** is pressed — and once a graph
    * becomes runnable again the marks clear, so the next thing built is quiet too.
    */
-  const problemsShown = problemsRequested && !empty;
+  const problemsShown = problemsRequested && shownValidation === "invalid";
   const shownDiagnostics = useMemo(
     () => (problemsShown ? diagnostics : []),
     [problemsShown, diagnostics],
@@ -373,7 +420,16 @@ function EditorWorkspace() {
           },
         };
       }),
-    [graph.nodes, graph.editor, palette, measured, dragPositions, selectedNodeId, nodeProblems],
+    [
+      graph.nodes,
+      graph.editor,
+      palette,
+      measured,
+      dragPositions,
+      selectedNodeId,
+      nodeProblems,
+      setGraph,
+    ],
   );
 
   const flowEdges = useMemo<Edge[]>(
@@ -394,6 +450,8 @@ function EditorWorkspace() {
           target: edge.to.nodeId,
           targetHandle: control ? controlHandleId(edge.to.port) : edge.to.port,
           selected: edge.id === selectedEdgeId,
+          interactionWidth: 28,
+          ariaLabel: `${control ? "Control" : "Data"} connection from ${edge.from.nodeId} to ${edge.to.nodeId}. Select to disconnect.`,
           ...(className.length === 0 ? {} : { className }),
           ...(problem === undefined ? {} : { label: problem }),
         };
@@ -453,76 +511,85 @@ function EditorWorkspace() {
         if (nextSelected !== null) setSelectedEdgeId(null);
       }
     },
-    [selectedNodeId, dragPositions],
+    [selectedNodeId, dragPositions, setGraph],
   );
 
-  const onEdgesChange = useCallback((changes: EdgeChange[]) => {
-    for (const change of changes) {
-      if (change.type === "remove") {
-        const id = change.id;
-        setGraph((current) => removeEdge(current, id));
-      } else if (change.type === "select") {
-        const id = change.id;
-        if (change.selected) {
-          setSelectedEdgeId(id);
-          setSelectedNodeId(null);
-        } else {
-          setSelectedEdgeId((current) => (current === id ? null : current));
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      for (const change of changes) {
+        if (change.type === "remove") {
+          const id = change.id;
+          setGraph((current) => removeEdge(current, id));
+        } else if (change.type === "select") {
+          const id = change.id;
+          if (change.selected) {
+            setSelectedEdgeId(id);
+            setSelectedNodeId(null);
+          } else {
+            setSelectedEdgeId((current) => (current === id ? null : current));
+          }
         }
       }
-    }
-  }, []);
+    },
+    [setGraph],
+  );
 
-  const onConnect = useCallback((connection: Connection) => {
-    const { source, target, sourceHandle, targetHandle } = connection;
-    if (sourceHandle === null || targetHandle === null) return;
-    const fromControl = controlPortOf(sourceHandle);
-    const toControl = controlPortOf(targetHandle);
-    if (fromControl === null && toControl === null) {
-      setGraph((current) =>
-        addDataEdge(
-          current,
-          { nodeId: source, port: sourceHandle },
-          { nodeId: target, port: targetHandle },
-        ),
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      const issue = connectionIssue(graph, palette, connection);
+      if (issue !== null) {
+        setFeedback(issue);
+        return;
+      }
+      const { source, target, sourceHandle, targetHandle } = connection;
+      if (sourceHandle === null || targetHandle === null) return;
+      const fromControl = controlPortOf(sourceHandle);
+      const toControl = controlPortOf(targetHandle);
+      if (fromControl === null && toControl === null) {
+        setGraph((current) =>
+          addDataEdge(
+            current,
+            { nodeId: source, port: sourceHandle },
+            { nodeId: target, port: targetHandle },
+          ),
+        );
+      } else if (fromControl !== null && toControl !== null) {
+        setGraph((current) =>
+          addControlEdge(
+            current,
+            { nodeId: source, ...(fromControl === undefined ? {} : { port: fromControl }) },
+            { nodeId: target, ...(toControl === undefined ? {} : { port: toControl }) },
+          ),
+        );
+      }
+      setFeedback(
+        "Connected. Select the line or use the connection list to disconnect. Undo restores the previous graph.",
       );
-    } else if (fromControl !== null && toControl !== null) {
-      setGraph((current) =>
-        addControlEdge(
-          current,
-          { nodeId: source, ...(fromControl === undefined ? {} : { port: fromControl }) },
-          { nodeId: target, ...(toControl === undefined ? {} : { port: toControl }) },
-        ),
-      );
-    }
-  }, []);
+    },
+    [graph, palette, setGraph],
+  );
 
   // A quick guard against obviously wrong wiring while dragging. The compiler
   // still decides: cycles and schema mismatches show up as diagnostics.
   const isValidConnection = useCallback(
-    (connection: Connection | Edge) => {
-      if (connection.source === connection.target) return false;
-      const targetHandle = connection.targetHandle;
-      if (connection.sourceHandle === null || connection.sourceHandle === undefined) return false;
-      if (targetHandle === null || targetHandle === undefined) return false;
-      // Control ports connect only to control ports, and data ports only to data ports.
-      const fromControl = controlPortOf(connection.sourceHandle);
-      const toControl = controlPortOf(targetHandle);
-      if ((fromControl === null) !== (toControl === null)) return false;
-      if (fromControl !== null) return true;
-      const target = graph.nodes.find((node) => node.id === connection.target);
-      const entry =
-        target === undefined ? undefined : findManifest(palette, target.type, target.version);
-      if (entry?.manifest.inputs[targetHandle]?.multiple === true) return true;
-      return !graph.edges.some(
-        (edge) =>
-          edge.kind === "data" &&
-          edge.to.nodeId === connection.target &&
-          edge.to.port === targetHandle,
-      );
-    },
-    [graph.nodes, graph.edges, palette],
+    (connection: Connection | Edge) => connectionIssue(graph, palette, connection) === null,
+    [graph, palette],
   );
+
+  const disconnect = (edgeId: string): void => {
+    setGraph((current) => removeEdge(current, edgeId));
+    setSelectedEdgeId(null);
+    setFeedback("Connection removed. Use Undo to restore it.");
+  };
+
+  const restoreHistory = (direction: "undo" | "redo"): void => {
+    if (direction === "undo") undo();
+    else redo();
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setDragPositions({});
+    setFeedback(direction === "undo" ? "Last edit undone." : "Edit restored.");
+  };
 
   const placeNode = (entry: PaletteEntry, position: EditorPoint): void => {
     const id = nextNodeId(graph, entry.manifest.type);
@@ -537,6 +604,7 @@ function EditorWorkspace() {
     );
     setSelectedNodeId(id);
     setSelectedEdgeId(null);
+    setFeedback(`${entry.manifest.title} added. Select it to configure inputs and connections.`);
   };
 
   /** Where a clicked palette item lands: near the middle of the visible canvas. */
@@ -569,9 +637,17 @@ function EditorWorkspace() {
   };
 
   const runGraph = async (): Promise<void> => {
-    if (palette === null) return;
+    if (
+      !canRequestRun(
+        shownValidation,
+        palette !== null && palette.length > 0 && paletteError === null,
+        running,
+      ) ||
+      palette === null
+    )
+      return;
     setRunError(null);
-    if (validation === "invalid") {
+    if (shownValidation === "invalid") {
       // This is the answer to "why won't it run?", so it arrives with the reasons.
       setProblemsRequested(true);
       setRunError(
@@ -587,7 +663,7 @@ function EditorWorkspace() {
       // the revision an earlier run recorded.
       const document = {
         ...finalizeGraph(graph, palette),
-        revisionId: `rev-${Date.now().toString(36)}`,
+        revisionId: `rev-${crypto.randomUUID()}`,
       };
       const response = await fetch("/api/editor/runs", {
         method: "POST",
@@ -604,6 +680,7 @@ function EditorWorkspace() {
         return;
       }
       if (response.status === 422) {
+        setCheckedBody(validationBody);
         setDiagnostics(diagnosticsOf(body));
         setValidation("invalid");
         setProblemsRequested(true);
@@ -633,6 +710,9 @@ function EditorWorkspace() {
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     setDragPositions({});
+    setMeasured({});
+    setRunError(null);
+    setProblemsRequested(false);
     setTransfer(null);
     setTransferError(null);
   };
@@ -640,264 +720,489 @@ function EditorWorkspace() {
   const selectedNode = graph.nodes.find((node) => node.id === selectedNodeId);
   const selectedEdge = graph.edges.find((edge) => edge.id === selectedEdgeId);
   const controlEdges = graph.edges.filter((edge) => edge.kind === "control").length;
+  const filteredPalette = (palette ?? []).filter((entry) =>
+    `${entry.manifest.title} ${entry.manifest.description ?? ""} ${pluginLabel(entry.pluginId)}`
+      .toLowerCase()
+      .includes(paletteSearch.trim().toLowerCase()),
+  );
 
   return (
-    <div className="editor">
-      <aside className="editorPanel" aria-label="Node palette">
-        <h2 className="panelTitle">Nodes</h2>
-        {palette === null ? <p className="muted small">Loading nodes…</p> : null}
-        {paletteError === null ? null : <p className="warn">{paletteError}</p>}
-        {palette !== null && palette.length === 0 && paletteError === null ? (
-          <p className="muted small">
-            No nodes are available yet. Enable a plugin on the <Link href="/plugins">Plugins</Link>{" "}
-            page.
-          </p>
-        ) : null}
-        <ul className="paletteList">
-          {(palette ?? []).map((entry) => (
-            <li key={`${entry.manifest.type}@${entry.manifest.version}`}>
-              <button
-                type="button"
-                className="paletteItem"
-                draggable
-                title={entry.manifest.description ?? entry.manifest.title}
-                onDragStart={(event) => {
-                  event.dataTransfer.setData(
-                    DRAG_TYPE,
-                    JSON.stringify({ type: entry.manifest.type, version: entry.manifest.version }),
-                  );
-                  event.dataTransfer.effectAllowed = "move";
-                }}
-                onClick={() => {
-                  placeNode(entry, canvasCenter());
-                }}
-              >
-                <span className="paletteItem__title">{entry.manifest.title}</span>
-                <span className="paletteItem__meta">
-                  {pluginLabel(entry.pluginId)}
-                  {entry.isolated ? " · runs isolated" : ""}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-        <p className="muted small">Drag a node onto the canvas, or click it to add it.</p>
-        <p className="muted small">
-          Side handles carry data. Handles above and below a node are control flow: use them to
-          order steps, or to wire Route branches and Wait lanes.
-        </p>
-      </aside>
-
-      <section
-        ref={canvasRef}
-        className="canvas"
-        aria-label="Graph canvas"
-        onDragOver={(event) => {
+    <div
+      className="editorWorkbench"
+      onKeyDown={(event) => {
+        const target = event.target;
+        if (
+          target instanceof HTMLElement &&
+          (target.isContentEditable || target.closest("input, textarea, select"))
+        )
+          return;
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
           event.preventDefault();
-          event.dataTransfer.dropEffect = "move";
-        }}
-        onDrop={onDrop}
+          if (event.shiftKey ? canRedo : canUndo) restoreHistory(event.shiftKey ? "redo" : "undo");
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+          event.preventDefault();
+          if (canRedo) restoreHistory("redo");
+        }
+      }}
+    >
+      <header className="editorToolbar">
+        <div className="editorToolbar__summary">
+          <h1>Graph editor</h1>
+          <p className="muted small" role="status">
+            {validationText(shownValidation, shownDiagnostics.length, problemsShown)}
+          </p>
+        </div>
+        <div className="editorToolbar__actions">
+          <button
+            className="btn editorIconButton"
+            type="button"
+            title="Undo (Ctrl / ⌘ Z)"
+            aria-label="Undo graph edit"
+            disabled={!canUndo}
+            onClick={() => {
+              restoreHistory("undo");
+            }}
+          >
+            <Icon name="undo" />
+          </button>
+          <button
+            className="btn editorIconButton"
+            type="button"
+            title="Redo (Ctrl / ⌘ Shift Z)"
+            aria-label="Redo graph edit"
+            disabled={!canRedo}
+            onClick={() => {
+              restoreHistory("redo");
+            }}
+          >
+            <Icon name="redo" />
+          </button>
+          <button
+            className="btn"
+            type="button"
+            aria-expanded={connectionsOpen}
+            aria-controls="graph-connect-panel"
+            onClick={() => {
+              setConnectionsOpen((current) => !current);
+            }}
+          >
+            <Icon name="link" />
+            <span>Connect nodes</span>
+          </button>
+          <Link className="btn" href="/editor/guide">
+            <Icon name="help" />
+            <span>Guide</span>
+          </Link>
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={
+              !canRequestRun(
+                shownValidation,
+                palette !== null && palette.length > 0 && paletteError === null,
+                running,
+              )
+            }
+            onClick={() => {
+              void runGraph();
+            }}
+          >
+            <Icon name="arrow-up" />
+            {running ? "Starting…" : "Run graph"}
+          </button>
+        </div>
+      </header>
+      {runError === null ? null : (
+        <p className="warn editorNotice" role="alert">
+          {runError}
+        </p>
+      )}
+      {autosaveError ? (
+        <p className="warn editorNotice" role="alert">
+          Browser storage is unavailable. Export the graph JSON before leaving to keep your work.
+        </p>
+      ) : null}
+      <div
+        className="editor"
+        style={
+          {
+            "--editor-palette-width": `${String(paletteWidth)}px`,
+            "--editor-inspector-width": `${String(inspectorWidth)}px`,
+          } as CSSProperties
+        }
       >
-        <ReactFlow
-          nodes={flowNodes}
-          edges={flowEdges}
-          nodeTypes={harnessNodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          isValidConnection={isValidConnection}
-          onPaneClick={() => {
-            setSelectedNodeId(null);
-            setSelectedEdgeId(null);
-          }}
-          deleteKeyCode={["Backspace", "Delete"]}
-          colorMode="dark"
-          fitView
-          fitViewOptions={{ maxZoom: 1 }}
+        <aside
+          id="graph-node-palette"
+          className="editorPanel editorPalette"
+          aria-label="Node palette"
         >
-          <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
-          <Controls />
-          <MiniMap pannable zoomable />
-        </ReactFlow>
-      </section>
+          <h2 className="panelTitle">Node library</h2>
+          <label className="editorSearch">
+            <Icon name="search" />
+            <input
+              type="search"
+              aria-label="Search nodes"
+              placeholder="Search nodes…"
+              value={paletteSearch}
+              onChange={(event) => {
+                setPaletteSearch(event.target.value);
+              }}
+            />
+          </label>
+          {palette === null ? <p className="muted small">Loading nodes…</p> : null}
+          {paletteError === null ? null : <p className="warn">{paletteError}</p>}
+          {palette !== null && palette.length === 0 && paletteError === null ? (
+            <p className="muted small">
+              No nodes are available yet. Enable a plugin on the{" "}
+              <Link href="/plugins">Plugins</Link> page.
+            </p>
+          ) : null}
+          <ul className="paletteList">
+            {filteredPalette.map((entry) => (
+              <li key={`${entry.manifest.type}@${entry.manifest.version}`}>
+                <button
+                  type="button"
+                  className="paletteItem"
+                  draggable
+                  title={entry.manifest.description ?? entry.manifest.title}
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData(
+                      DRAG_TYPE,
+                      JSON.stringify({
+                        type: entry.manifest.type,
+                        version: entry.manifest.version,
+                      }),
+                    );
+                    event.dataTransfer.effectAllowed = "move";
+                  }}
+                  onClick={() => {
+                    placeNode(entry, canvasCenter());
+                  }}
+                >
+                  <span className="paletteItem__title">{entry.manifest.title}</span>
+                  <span className="paletteItem__meta">
+                    {pluginLabel(entry.pluginId)}
+                    {entry.isolated ? " · runs isolated" : ""}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {palette !== null && palette.length > 0 && filteredPalette.length === 0 ? (
+            <p className="muted small">No nodes match “{paletteSearch}”. Try another name.</p>
+          ) : null}
+          <p className="muted small">Click to add. Drag to choose a position.</p>
+          <p className="muted small">
+            Side ports pass data. Top and bottom ports order steps.{" "}
+            <Link href="/editor/guide">Learn the basics</Link>
+          </p>
+        </aside>
 
-      <aside className="editorPanel" aria-label="Inspector">
-        {selectedNode !== undefined ? (
-          <NodeInspector
-            key={selectedNode.id}
-            node={selectedNode}
-            entry={findManifest(palette, selectedNode.type, selectedNode.version)}
-            paletteLoaded={palette !== null}
-            fed={fedPorts(graph, selectedNode.id)}
-            problems={nodeProblems.get(selectedNode.id) ?? []}
-            onConfig={(key, value) => {
-              setGraph((current) => setConfigValue(current, selectedNode.id, key, value));
-            }}
-            onLiteral={(port, value) => {
-              setGraph((current) => setLiteral(current, selectedNode.id, port, value));
-            }}
-            onDelete={() => {
-              setGraph((current) => removeNode(current, selectedNode.id));
+        <ResizeHandle
+          label="Resize node library"
+          controls="graph-node-palette"
+          value={paletteWidth}
+          min={168}
+          max={360}
+          defaultValue={208}
+          onChange={setPaletteWidth}
+          side="left"
+          className="editorResize"
+        />
+
+        <section
+          ref={canvasRef}
+          className="canvas"
+          aria-label="Graph canvas"
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          }}
+          onDrop={onDrop}
+        >
+          <ReactFlow
+            nodes={flowNodes}
+            edges={flowEdges}
+            nodeTypes={harnessNodeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onBeforeDelete={({ nodes, edges }) => {
+              // Commit one document so Undo restores nodes together with their edges.
+              setGraph((current) => {
+                let next = current;
+                for (const edge of edges) next = removeEdge(next, edge.id);
+                for (const node of nodes) next = removeNode(next, node.id);
+                return next;
+              });
               setSelectedNodeId(null);
+              setSelectedEdgeId(null);
+              setFeedback("Selection removed. Use Undo to restore it.");
+              return Promise.resolve(false);
             }}
-          />
-        ) : selectedEdge !== undefined ? (
-          <EdgeInspector
-            edge={selectedEdge}
-            problem={edgeProblems.get(selectedEdge.id)}
-            onDelete={() => {
-              setGraph((current) => removeEdge(current, selectedEdge.id));
+            onConnect={onConnect}
+            connectOnClick
+            connectionRadius={28}
+            onConnectStart={() => {
+              setFeedback(
+                "Choose a matching input port. Side ports carry data; top and bottom ports control order.",
+              );
+            }}
+            isValidConnection={isValidConnection}
+            onPaneClick={() => {
+              setSelectedNodeId(null);
               setSelectedEdgeId(null);
             }}
-          />
-        ) : (
-          <>
-            <h2 className="panelTitle">Graph</h2>
-            <p className="statusLine" role="status">
-              <span
-                className={`statusDot statusDot--${
-                  shownValidation === "valid"
-                    ? "on"
-                    : shownValidation === "invalid" || shownValidation === "unreachable"
-                      ? "off"
-                      : "warn"
-                }`}
-                aria-hidden="true"
-              />
-              {validationText(shownValidation, shownDiagnostics.length, problemsShown)}
-            </p>
-            <p className="muted small">
-              {countLabel(graph.nodes.length, "node")} ·{" "}
-              {countLabel(graph.edges.length - controlEdges, "connection")}
-              {controlEdges > 0 ? ` · ${countLabel(controlEdges, "control edge")}` : ""}
-            </p>
-            <div className="btnRow">
-              <button
-                type="button"
-                className="btn btn--primary"
-                disabled={palette === null || empty || running}
-                onClick={() => {
-                  void runGraph();
-                }}
-              >
-                {running ? "Starting…" : "Run graph"}
-              </button>
-            </div>
-            {runError === null ? null : (
-              <p className="warn" role="alert">
-                {runError}
+            deleteKeyCode={["Backspace", "Delete"]}
+            colorMode="dark"
+            fitView
+            fitViewOptions={{ maxZoom: 1 }}
+          >
+            <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
+            <Controls position="top-left" />
+            <MiniMap pannable zoomable position="bottom-right" />
+          </ReactFlow>
+          {empty ? (
+            <div className="editorEmptyCanvas">
+              <Icon name="graph" size={30} />
+              <h2>Build your first workflow</h2>
+              <p>
+                Add a Text box and an Output box from the library, then connect their side ports.
               </p>
-            )}
+              <Link href="/editor/guide">
+                Follow the quick start <Icon name="chevron-right" />
+              </Link>
+            </div>
+          ) : null}
+          <div className="editorCanvasHint" role="status" aria-live="polite">
+            {feedback}
+          </div>
+        </section>
 
-            {shownDiagnostics.length > 0 ? (
-              <>
-                <h3 className="sectionTitle">Problems</h3>
-                <ul className="diagList">
-                  {shownDiagnostics.map((diagnostic, index) => (
-                    <li key={`${diagnostic.code}-${String(index)}`}>
-                      <button
-                        type="button"
-                        className="diagItem"
-                        disabled={
-                          diagnostic.nodeId === undefined && diagnostic.edgeId === undefined
-                        }
-                        onClick={() => {
-                          if (diagnostic.nodeId !== undefined) {
-                            setSelectedNodeId(diagnostic.nodeId);
-                            setSelectedEdgeId(null);
-                          } else if (diagnostic.edgeId !== undefined) {
-                            setSelectedEdgeId(diagnostic.edgeId);
-                            setSelectedNodeId(null);
-                          }
-                        }}
-                      >
-                        {diagnostic.message}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : null}
+        <ResizeHandle
+          label="Resize graph inspector"
+          controls="graph-inspector"
+          value={inspectorWidth}
+          min={240}
+          max={480}
+          defaultValue={300}
+          onChange={setInspectorWidth}
+          side="right"
+          className="editorResize"
+        />
 
-            <h3 className="sectionTitle">Document</h3>
-            {transfer === null ? (
-              <div className="btnRow">
+        <aside id="graph-inspector" className="editorPanel editorInspector" aria-label="Inspector">
+          {connectionsOpen ? (
+            <section
+              ref={connectionPanelRef}
+              id="graph-connect-panel"
+              className="connectionComposer"
+            >
+              <div className="connectionComposer__heading">
+                <h2 className="panelTitle">Connect nodes</h2>
                 <button
+                  className="btn editorIconButton"
                   type="button"
-                  className="btn"
+                  aria-label="Close connection builder"
                   onClick={() => {
-                    setTransferError(null);
-                    setTransfer(JSON.stringify(finalizeGraph(graph, palette), null, 2));
+                    setConnectionsOpen(false);
                   }}
                 >
-                  Export JSON
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setTransferError(null);
-                    setTransfer("");
-                  }}
-                >
-                  Import JSON
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--danger"
-                  disabled={empty}
-                  onClick={() => {
-                    if (!window.confirm("Remove every node and connection from this graph?"))
-                      return;
-                    setGraph(emptyGraph(graph.graphId));
-                    setSelectedNodeId(null);
-                    setSelectedEdgeId(null);
-                    setDragPositions({});
-                  }}
-                >
-                  Clear
+                  <Icon name="x" />
                 </button>
               </div>
-            ) : (
-              <>
-                <textarea
-                  className="field__input transferBox"
-                  aria-label="Graph JSON"
-                  spellCheck={false}
-                  value={transfer}
-                  onChange={(event) => {
-                    setTransfer(event.target.value);
-                  }}
+              <ConnectionBuilder
+                key={selectedNodeId}
+                graph={graph}
+                palette={palette}
+                sourceNodeId={selectedNodeId}
+                onConnect={onConnect}
+              />
+            </section>
+          ) : null}
+          {selectedNode !== undefined || selectedEdge !== undefined ? (
+            <div className="btnRow inspectorNavigation">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setSelectedNodeId(null);
+                  setSelectedEdgeId(null);
+                }}
+              >
+                <Icon name="graph" /> Graph overview
+              </button>
+            </div>
+          ) : null}
+          {selectedNode !== undefined ? (
+            <NodeInspector
+              key={selectedNode.id}
+              node={selectedNode}
+              entry={findManifest(palette, selectedNode.type, selectedNode.version)}
+              paletteLoaded={palette !== null}
+              fed={fedPorts(graph, selectedNode.id)}
+              problems={nodeProblems.get(selectedNode.id) ?? []}
+              onConfig={(key, value) => {
+                setGraph((current) => setConfigValue(current, selectedNode.id, key, value));
+              }}
+              onLiteral={(port, value) => {
+                setGraph((current) => setLiteral(current, selectedNode.id, port, value));
+              }}
+              onDelete={() => {
+                setGraph((current) => removeNode(current, selectedNode.id));
+                setSelectedNodeId(null);
+                setFeedback("Node and its connections removed. Use Undo to restore them.");
+              }}
+            />
+          ) : selectedEdge !== undefined ? (
+            <EdgeInspector
+              edge={selectedEdge}
+              problem={edgeProblems.get(selectedEdge.id)}
+              onDelete={() => {
+                disconnect(selectedEdge.id);
+              }}
+            />
+          ) : (
+            <>
+              <h2 className="panelTitle">Graph</h2>
+              <p className="statusLine" role="status">
+                <span
+                  className={`statusDot statusDot--${
+                    shownValidation === "valid"
+                      ? "on"
+                      : shownValidation === "invalid" || shownValidation === "unreachable"
+                        ? "off"
+                        : "warn"
+                  }`}
+                  aria-hidden="true"
                 />
-                {transferError === null ? null : (
-                  <p className="field__error" role="alert">
-                    {transferError}
-                  </p>
-                )}
+                {validationText(shownValidation, shownDiagnostics.length, problemsShown)}
+              </p>
+              <p className="muted small">
+                {countLabel(graph.nodes.length, "node")} ·{" "}
+                {countLabel(graph.edges.length - controlEdges, "connection")}
+                {controlEdges > 0 ? ` · ${countLabel(controlEdges, "control edge")}` : ""}
+              </p>
+              {shownDiagnostics.length > 0 ? (
+                <>
+                  <h3 className="sectionTitle">Problems</h3>
+                  <ul className="diagList">
+                    {shownDiagnostics.map((diagnostic, index) => (
+                      <li key={`${diagnostic.code}-${String(index)}`}>
+                        <button
+                          type="button"
+                          className="diagItem"
+                          disabled={
+                            diagnostic.nodeId === undefined && diagnostic.edgeId === undefined
+                          }
+                          onClick={() => {
+                            if (diagnostic.nodeId !== undefined) {
+                              setSelectedNodeId(diagnostic.nodeId);
+                              setSelectedEdgeId(null);
+                            } else if (diagnostic.edgeId !== undefined) {
+                              setSelectedEdgeId(diagnostic.edgeId);
+                              setSelectedNodeId(null);
+                            }
+                          }}
+                        >
+                          {diagnostic.message}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              <h3 className="sectionTitle">Document</h3>
+              {transfer === null ? (
                 <div className="btnRow">
-                  <button type="button" className="btn btn--primary" onClick={applyImport}>
-                    Load this JSON
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      setTransferError(null);
+                      setTransfer(JSON.stringify(finalizeGraph(graph, palette), null, 2));
+                    }}
+                  >
+                    Export JSON
                   </button>
                   <button
                     type="button"
                     className="btn"
                     onClick={() => {
-                      setTransfer(null);
                       setTransferError(null);
+                      setTransfer("");
                     }}
                   >
-                    Close
+                    Import JSON
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--danger"
+                    disabled={empty}
+                    onClick={() => {
+                      if (!window.confirm("Remove every node and connection from this graph?"))
+                        return;
+                      setGraph(emptyGraph(graph.graphId));
+                      setSelectedNodeId(null);
+                      setSelectedEdgeId(null);
+                      setDragPositions({});
+                    }}
+                  >
+                    Clear
                   </button>
                 </div>
-              </>
-            )}
-            <p className="muted small">
-              The graph autosaves in this browser. Nodes nothing feeds start the run, and the
-              outputs of nodes nothing reads become the graph&apos;s outputs.
-            </p>
-          </>
-        )}
-      </aside>
+              ) : (
+                <>
+                  <textarea
+                    className="field__input transferBox"
+                    aria-label="Graph JSON"
+                    spellCheck={false}
+                    value={transfer}
+                    onChange={(event) => {
+                      setTransfer(event.target.value);
+                      setTransferError(null);
+                    }}
+                  />
+                  {transferError === null ? null : (
+                    <p className="field__error" role="alert">
+                      {transferError}
+                    </p>
+                  )}
+                  <div className="btnRow">
+                    <button type="button" className="btn btn--primary" onClick={applyImport}>
+                      Load this JSON
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        setTransfer(null);
+                        setTransferError(null);
+                      }}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </>
+              )}
+              <p className="muted small">
+                {autosaveError ? "Export JSON to keep your work." : "Draft saved in this browser."}{" "}
+                Each run records a new revision. Undo history lasts until you leave this page.
+              </p>
+            </>
+          )}
+          <ConnectionList
+            graph={graph}
+            palette={palette}
+            {...(selectedNode === undefined ? {} : { nodeId: selectedNode.id })}
+            onSelect={(edgeId) => {
+              setSelectedEdgeId(edgeId);
+              setSelectedNodeId(null);
+            }}
+            onDisconnect={disconnect}
+          />
+        </aside>
+      </div>
     </div>
   );
 }
@@ -1070,7 +1375,7 @@ function EdgeInspector({
       {problem === undefined ? null : <p className="warn">{problem}</p>}
       <div className="btnRow">
         <button type="button" className="btn btn--danger" onClick={onDelete}>
-          Delete connection
+          <Icon name="unlink" /> Disconnect
         </button>
       </div>
     </>

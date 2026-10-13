@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createPlaywrightBrowserDriver,
+  browserStartupFailure,
   type BrowserContext,
   type BrowserEngine,
   type BrowserRoute,
@@ -54,7 +55,18 @@ describe("sandboxed browser driver", () => {
       pins: [{ hostname: "allowed.org", address: "8.8.8.8", family: 4 }],
       signal,
     });
-    expect(launch.mock.calls[0]?.[0]).toMatchObject({ chromiumSandbox: true, headless: true });
+    expect(launch.mock.calls[0]?.[0]).toMatchObject({
+      chromiumSandbox: true,
+      headless: true,
+      channel: "chromium",
+    });
+    const launchOptions = launch.mock.calls[0]?.[0];
+    expect(launchOptions?.args).toContain(
+      "--host-resolver-rules=MAP allowed.org 8.8.8.8,MAP * ~NOTFOUND",
+    );
+    expect(launchOptions?.args).toContain("--no-proxy-server");
+    expect(launchOptions?.args).not.toContain("--no-sandbox");
+    expect(launchOptions).not.toHaveProperty("executablePath");
     const abort = vi.fn(() => Promise.resolve());
     const proceed = vi.fn(() => Promise.resolve());
     await routing?.({
@@ -206,4 +218,149 @@ describe("browser interaction refusal and lifecycle", () => {
       vi.useRealTimers();
     }
   });
+});
+
+it("cancels a pending launch promptly and closes late success without context setup", async () => {
+  const f = fixture();
+  let resolveLaunch!: (value: Awaited<ReturnType<BrowserEngine["launch"]>>) => void;
+  const newContext = vi.fn(() => Promise.resolve(f.context));
+  const launch = vi.fn(
+    () =>
+      new Promise<Awaited<ReturnType<BrowserEngine["launch"]>>>((resolve) => {
+        resolveLaunch = resolve;
+      }),
+  );
+  const creating = createPlaywrightBrowserDriver({ ...f.options, engine: { launch } });
+  const rejected = expect(creating).rejects.toThrow("Sandboxed browser unavailable");
+  f.controller.abort();
+  await rejected;
+  resolveLaunch({ newContext, close: f.close });
+  await Promise.resolve();
+  expect(newContext).not.toHaveBeenCalled();
+  expect(f.close).toHaveBeenCalledOnce();
+});
+it("bounds pending launch and closes late success after timeout", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  let resolveLaunch!: (value: Awaited<ReturnType<BrowserEngine["launch"]>>) => void;
+  const newContext = vi.fn(() => Promise.resolve(f.context));
+  const launch: BrowserEngine["launch"] = vi.fn(
+    () =>
+      new Promise<Awaited<ReturnType<BrowserEngine["launch"]>>>((resolve) => {
+        resolveLaunch = resolve;
+      }),
+  );
+  try {
+    const creating = createPlaywrightBrowserDriver({ ...f.options, engine: { launch } });
+    const rejected = expect(creating).rejects.toThrow("Sandboxed browser unavailable");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejected;
+    expect(launch).toHaveBeenCalledWith(
+      expect.objectContaining({ timeout: 10_000, chromiumSandbox: true, channel: "chromium" }),
+    );
+    resolveLaunch({ newContext, close: f.close });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(newContext).not.toHaveBeenCalled();
+    expect(f.close).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it("cancels pending context creation without subsequent setup or capture directory", async () => {
+  const f = fixture();
+  let resolveContext!: (value: BrowserContext) => void;
+  const newContext = vi.fn(
+    () =>
+      new Promise<BrowserContext>((resolve) => {
+        resolveContext = resolve;
+      }),
+  );
+  const route = vi.fn(() => Promise.resolve());
+  f.context.route = route;
+  const creating = createPlaywrightBrowserDriver({
+    ...f.options,
+    engine: { launch: () => Promise.resolve({ newContext, close: f.close }) },
+  });
+  const rejected = expect(creating).rejects.toThrow("Sandboxed browser unavailable");
+  await vi.waitFor(() => expect(newContext).toHaveBeenCalledOnce());
+  f.controller.abort();
+  await rejected;
+  resolveContext(f.context);
+  await Promise.resolve();
+  expect(route).not.toHaveBeenCalled();
+  expect(f.close).toHaveBeenCalledOnce();
+});
+
+it("classifies startup errors using closed codes without persisting dependency text", async () => {
+  const { browserStartupFailure } = await import("./runtime-browser-driver.js");
+  const timeout = new Error("secret timeout diagnostic");
+  timeout.name = "TimeoutError";
+  expect(browserStartupFailure(timeout)).toBe("page-timeout");
+  expect(
+    browserStartupFailure(
+      new Error("Target page, context or browser has been closed\nprivate diagnostic"),
+    ),
+  ).toBe("target-closed");
+  expect(browserStartupFailure(new Error("Page crashed private diagnostic"))).toBe("page-crashed");
+  expect(
+    browserStartupFailure(new Error("process did exit: exitCode=-1073741819, signal=null")),
+  ).toBe("browser-access-violation");
+  expect(browserStartupFailure(new Error("private arbitrary response"))).toBe("setup-failed");
+});
+
+it("maps fixed launch error names, errno and exit categories without exposing text", () => {
+  for (const [errno, expected] of [
+    ["ENOENT", "browser-spawn-not-found"],
+    ["EACCES", "browser-spawn-denied"],
+    ["EPERM", "browser-spawn-denied"],
+  ]) {
+    expect(browserStartupFailure(Object.assign(new Error("PRIVATE_BODY"), { code: errno }))).toBe(
+      expected,
+    );
+  }
+  for (const [name, expected] of [
+    ["ProtocolError", "browser-protocol-error"],
+    ["TypeError", "browser-launch-type-error"],
+    ["RangeError", "browser-launch-range-error"],
+  ]) {
+    const error = new Error("PRIVATE_BODY");
+    error.name = name!;
+    expect(browserStartupFailure(error)).toBe(expected);
+  }
+  for (const [code, expected] of [
+    [0, "browser-exit-zero"],
+    [1, "browser-exit-one"],
+    [42, "browser-exit-other"],
+    [-1073741819, "browser-access-violation"],
+    [-1073741790, "browser-access-denied"],
+  ]) {
+    expect(
+      browserStartupFailure(
+        new Error(`PRIVATE_BODY process did exit: exitCode=${code}, signal=null`),
+      ),
+    ).toBe(expected);
+  }
+  expect(
+    browserStartupFailure(new Error("Host system is missing dependencies! PRIVATE_BODY")),
+  ).toBe("browser-dependency-missing");
+  expect(browserStartupFailure(new Error("Executable doesn't exist at PRIVATE_BODY"))).toBe(
+    "browser-spawn-not-found",
+  );
+  expect(
+    browserStartupFailure(Object.assign(new Error("PRIVATE_BODY"), { code: "PRIVATE_BODY" })),
+  ).toBe("setup-failed");
+});
+
+it("recognizes only anchored serialized SDK spawn errno signatures", () => {
+  for (const errno of ["ENOENT", "EACCES", "EPERM"]) {
+    const code = errno === "ENOENT" ? "browser-spawn-not-found" : "browser-spawn-denied";
+    expect(
+      browserStartupFailure(
+        new Error(
+          `browserType.launch: Failed to launch: Error: spawn PRIVATE_PATH ${errno}\nPRIVATE_BODY`,
+        ),
+      ),
+    ).toBe(code);
+    expect(browserStartupFailure(new Error(`PRIVATE_BODY mentions ${errno}`))).toBe("setup-failed");
+  }
 });

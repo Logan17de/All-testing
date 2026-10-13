@@ -31,7 +31,12 @@ import {
 } from "../../../lib/plain-words";
 import { OUTPUT_BOX_TYPE, TEXT_BOX_TYPE, recordedText, textBoxValue } from "../../../lib/boxes";
 import { describeFailure } from "../../../lib/failure-words";
-import { isRunReplayView, replayNodeStatuses, type RunReplayView } from "../../../lib/replay-view";
+import {
+  isRunReplayView,
+  replayNodeStatuses,
+  terminalNodeStatus,
+  type RunReplayView,
+} from "../../../lib/replay-view";
 import { harnessNodeTypes, type HarnessFlowNode } from "../../harness-node";
 import { ApprovalCards } from "./approval-cards";
 import { GraphChanges } from "./graph-changes";
@@ -238,7 +243,13 @@ function Inspector({ runId }: { readonly runId: string }) {
 
   const graph = useMemo(() => (run === null ? undefined : parseGraphDocument(run.graph)), [run]);
   const stateByNode = useMemo(
-    () => new Map((run?.nodes ?? []).map((state) => [state.nodeId, state])),
+    () =>
+      new Map(
+        (run?.nodes ?? []).map((state) => [
+          state.nodeId,
+          { ...state, status: terminalNodeStatus(state.status, run?.status ?? "pending") },
+        ]),
+      ),
     [run],
   );
   const nodeByOp = useMemo(

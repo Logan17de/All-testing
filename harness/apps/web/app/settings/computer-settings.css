@@ -1,0 +1,58 @@
+.settingsComputer {
+  font-family: var(--app-font-sans);
+}
+.settingsComputer .desktopSession__status {
+  gap: 10px;
+}
+.settingsComputer .desktopSession__notice {
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: #c8c8c8;
+}
+.settingsComputer .desktopSession__controls {
+  margin-top: 16px;
+}
+.settingsComputer .desktopSession__controls > summary {
+  padding: 8px 0;
+  color: #bbb;
+  font-weight: 500;
+}
+.settingsComputer .desktopSession__controls > summary:hover {
+  color: #fff;
+}
+.settingsComputer .desktopSession__section {
+  margin-top: 20px;
+  padding-top: 16px;
+}
+.settingsComputer .desktopSession__fields {
+  gap: 12px;
+  margin-block: 14px;
+}
+.settingsComputer .desktopSession label {
+  gap: 6px;
+  color: #c8c8c8;
+  font-size: 13px;
+}
+.settingsComputer .desktopSession fieldset {
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px;
+}
+.settingsComputer .desktopSession fieldset legend {
+  color: #aaa;
+  font-size: 13px;
+}
+.settingsComputer .desktopSession :is(button, a, select, summary, label, input[type="checkbox"]) {
+  cursor: default;
+}
+.settingsComputer .desktopSession input:not([type="checkbox"]):not(:disabled):not([readonly]) {
+  cursor: text;
+}
+.settingsComputer .desktopSession :is(button, input, select):disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.settingsComputer .desktopSession :is(button, input, select, summary):focus-visible {
+  outline: 2px solid #929292;
+  outline-offset: 2px;
+}

@@ -1,0 +1,1195 @@
+.appShell {
+  position: relative;
+  --app-bg: #181818;
+  --app-panel: #222222;
+  --app-border: #393939;
+  --app-text: #dfdfdf;
+  --app-muted: #a3a3a3;
+  --app-accent: #d6d6d6;
+  display: grid;
+  grid-template-columns: var(--sidebar-width, 288px) minmax(0, 1fr);
+  min-height: 100dvh;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font: 13px/1.5 var(--app-font-sans);
+  scrollbar-color: #515151 #181818;
+}
+.appSidebar {
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  overflow-y: auto;
+  min-width: 0;
+  padding: 14px 12px 12px;
+  background: #212121;
+  border-right: 1px solid #303030;
+  gap: 8px;
+}
+.resizeHandle {
+  position: relative;
+  width: 10px;
+  min-width: 10px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  z-index: 6;
+}
+.resizeHandle::after {
+  content: "";
+  position: absolute;
+  inset: 0 4px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.resizeHandle:hover::after,
+.resizeHandle:focus-visible::after,
+.resizeHandle--dragging::after {
+  background: #a3a3a3;
+}
+.resizeHandle:focus-visible {
+  outline: 2px solid #d6d6d6;
+  outline-offset: -2px;
+}
+.appShell:has(.resizeHandle--dragging) {
+  user-select: none;
+  cursor: col-resize;
+}
+.appSidebarResize {
+  position: absolute;
+  top: 0;
+  left: calc(var(--sidebar-width, 288px) - 5px);
+  height: 100dvh;
+  z-index: 10;
+}
+@media (max-width: 760px) {
+  .appSidebarResize {
+    display: none;
+  }
+}
+.appSidebarBrandRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.appBrand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 8px 13px;
+  color: var(--app-text) !important;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+.appBrand > span {
+  font: 600 17px var(--app-font-sans);
+  color: #dedede;
+}
+.appShell .appSidebarClose {
+  display: none;
+}
+.appPrimaryNav {
+  display: grid;
+  gap: 2px;
+}
+.appSidebar a {
+  text-decoration: none;
+}
+.appPrimaryNav a,
+.appSectionNavigation nav a {
+  display: block;
+  padding: 7px 9px;
+  border-radius: 5px;
+  color: #c6c6c6 !important;
+}
+.appPrimaryNav a:hover,
+.appSectionNavigation nav a:hover,
+.appSavedItem:hover {
+  background: #292929;
+}
+.appPrimaryNav a[aria-current="page"],
+.appSectionNavigation a[aria-current="page"] {
+  background: #303030;
+  color: #fff !important;
+}
+.appSidebarProjects {
+  margin-top: 12px;
+}
+.appSidebarHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+}
+.appSidebarHeading h2,
+.codingSidebarLabel {
+  font-size: 12px;
+  color: #989898;
+  font-weight: 500;
+  margin: 0;
+}
+.appSidebarHeading > a {
+  color: #a3a3a3 !important;
+  font-size: 18px;
+}
+.appSavedItem {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border-radius: 5px;
+  color: #d2d2d2 !important;
+}
+.appSavedItem span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.appSidebarHint,
+.appSidebarMore {
+  display: block;
+  padding: 5px 8px;
+  color: #909090 !important;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.appChatSlot,
+.appSidebarRecents {
+  min-height: 0;
+  flex: 1;
+}
+.codingSidebarContent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+.appShell .codingNewChat {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  border-radius: 5px;
+  margin: 8px 0;
+}
+.appShell .codingNewChat:hover {
+  background: #303030;
+}
+.codingNewChat > span {
+  font-size: 18px;
+}
+.codingChatsHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 5px 8px 4px;
+}
+.appShell .codingQuiet {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  min-height: 24px;
+  font-size: 16px;
+  color: #a3a3a3;
+}
+.codingArchiveToggle {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 11px;
+  color: #999;
+  padding: 0 8px 6px;
+}
+.codingSessionList {
+  min-height: 0;
+  overflow: auto;
+}
+.appShell .codingSession {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  text-align: left;
+  padding: 7px 9px;
+  min-height: 32px;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font-size: 13px;
+}
+.codingSession span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.appShell .codingSession[aria-current="true"] {
+  background: #333;
+}
+.appShell .codingSession:hover:not(:disabled) {
+  background: #292929;
+}
+.codingSidebarHint {
+  padding: 5px 8px;
+  font-size: 12px;
+  color: #999;
+}
+.appSectionNavigation {
+  margin-top: 14px;
+  border-top: 1px solid #303030;
+  padding-top: 8px;
+}
+.appSectionNavigation > summary {
+  color: #a3a3a3;
+  font-size: 12px;
+  padding: 6px 8px !important;
+}
+.appSectionNavigation nav {
+  display: grid;
+  gap: 1px;
+}
+.appSidebarFooter {
+  margin-top: auto;
+  padding: 10px 8px 0;
+  border-top: 1px solid #303030;
+  font-size: 12px;
+}
+.appSidebarFooter a {
+  color: #c6c6c6 !important;
+}
+.appSidebarFooter span {
+  display: block;
+  margin-top: 7px;
+  color: #858585;
+  font-size: 11px;
+}
+.appNavigationBackdrop {
+  display: none;
+}
+.appStage {
+  min-width: 0;
+}
+.appTopbar {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 22px;
+  border-bottom: 1px solid #303030;
+  font-size: 12px;
+}
+.appTopbar > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--app-muted);
+}
+.appTopbar strong {
+  color: var(--app-text);
+  font-weight: 500;
+}
+.appTopbar > a {
+  color: var(--app-accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.appShell .appMenu {
+  display: none;
+}
+.appPageContent {
+  min-width: 0;
+}
+.appShell .page {
+  width: min(1180px, 100%);
+  margin: 0;
+  padding: 36px 40px 72px;
+}
+.appShell--section .appPageContent > main > .crumbs {
+  display: none;
+}
+.appShell ::selection {
+  background: #d6d6d6;
+  color: #1d1d1d;
+}
+.appShell {
+  scrollbar-color: #515151 #181818;
+}
+.appShell .pageTitle {
+  font-size: clamp(25px, 3vw, 34px);
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.8px;
+}
+.appShell .lede {
+  margin-top: 14px;
+  max-width: 780px;
+  font-size: 14px;
+  line-height: 1.75;
+  color: #b5b5b5;
+}
+.appShell .crumbs {
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  gap: 8px 12px;
+  font-size: 12px;
+}
+.appShell .crumbs a {
+  color: var(--app-muted);
+  border: 0;
+}
+.appShell :is(a, .navLinks a) {
+  color: var(--app-accent);
+  text-underline-offset: 3px;
+}
+.appShell .panel,
+.appShell .card,
+.appShell .editorPanel,
+.appShell .stat {
+  background: var(--app-panel);
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+}
+.appShell .panel {
+  margin-top: 22px;
+  padding: 22px;
+}
+.appShell .panelTitle {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+.appShell .panel p {
+  line-height: 1.7;
+}
+.appShell .panel p + :is(button, label, form) {
+  margin-top: 12px;
+}
+.appShell .panel--warn {
+  border-color: #806043;
+  background: #302820;
+  color: #f2d3b2;
+}
+.appShell :is(.muted, .cardMeta, .statLabel, .field__hint) {
+  color: var(--app-muted);
+}
+.appShell button,
+.appShell .btn,
+.appShell select {
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid #434343;
+  border-radius: 8px;
+  background: #303030;
+  color: var(--app-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.appShell :is(button, .btn):hover:not(:disabled) {
+  border-color: #777777;
+  background: #3b3b3b;
+}
+.appShell :is(button, select):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.appShell .btn--primary {
+  background: #dedede;
+  border-color: #dedede;
+  color: #202020;
+  font-weight: 600;
+}
+.appShell .btn--primary:hover:not(:disabled) {
+  background: #f4f4f4;
+  color: #202020;
+}
+.appShell .btn--danger {
+  color: #ffc1b9;
+  border-color: #82564f;
+  background: #3c2929;
+}
+.appShell :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  max-width: 100%;
+  border: 1px solid #454545;
+  border-radius: 8px;
+  background: #262626;
+  color: var(--app-text);
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 14px;
+}
+.appShell :is(input, textarea)::placeholder {
+  color: #979797;
+  opacity: 1;
+}
+.appShell textarea {
+  min-height: 96px;
+  resize: vertical;
+  line-height: 1.6;
+}
+.appShell input[type="checkbox"],
+.appShell input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  margin-right: 5px;
+  accent-color: #d6d6d6;
+  vertical-align: middle;
+}
+.appShell :is(button, a, input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 3px;
+}
+.appShell summary {
+  cursor: pointer;
+  padding: 7px 0;
+  font-weight: 500;
+}
+.appShell details[open] > summary {
+  margin-bottom: 10px;
+}
+.appShell label {
+  line-height: 1.7;
+}
+.appShell .field {
+  gap: 7px;
+  margin-bottom: 16px;
+}
+.appShell .field__label {
+  font-size: 12px;
+  color: #cecece;
+}
+.appShell .field__hint {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.appShell .field__check {
+  align-items: flex-start;
+}
+.appShell .btnRow {
+  gap: 9px;
+  margin: 14px 0;
+}
+.appShell .status {
+  margin-top: 22px;
+  border-color: #3d4d5e;
+  background: #1b2830;
+  color: #c3dfd4;
+  font-size: 13px;
+}
+.appShell .statusDot {
+  width: 6px;
+  height: 6px;
+  box-shadow: none;
+}
+.appShell .stats {
+  gap: 14px;
+  margin-top: 24px;
+}
+.appShell .statValue {
+  font-size: 30px;
+  font-variant-numeric: tabular-nums;
+}
+.appShell .cards {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+}
+.appShell .workspaceGrid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+}
+.appShell :is(code, pre, .workspacePath) {
+  overflow-wrap: anywhere;
+}
+.appShell code {
+  background: #1d1d1d;
+  border-color: #393939;
+  color: #dddddd;
+}
+.appShell .codeBlock {
+  background: #1d1d1d;
+  border-color: #393939;
+  line-height: 1.65;
+}
+.appShell .editorPage {
+  height: calc(100dvh - 44px);
+  min-height: 600px;
+  padding: 24px;
+}
+.appShell .editor {
+  grid-template-columns: 200px minmax(0, 1fr) 290px;
+}
+.appShell .runLayout {
+  grid-template-columns: minmax(0, 1fr) 330px;
+}
+.appShell .canvas {
+  background: #1d1d1d;
+  border-color: #393939;
+}
+.appShell .react-flow__controls-button {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 7px;
+  border-radius: 0;
+}
+.appShell .react-flow__controls-button svg {
+  width: 16px;
+  height: 16px;
+  max-width: 16px;
+  max-height: 16px;
+  fill: currentColor;
+}
+.appShell .runTable th {
+  background: #282828;
+  color: #b5b5b5;
+}
+.appShell .runTable td {
+  border-color: #353535;
+}
+.appShell .tableWrap {
+  border-color: #3c3c3c;
+}
+.appShell .badge {
+  letter-spacing: 0.03em;
+}
+.appShell .eyebrow {
+  margin-bottom: 12px;
+  font-size: 11px;
+  color: var(--app-muted);
+}
+@media (max-width: 1300px) {
+  .appShell .editor,
+  .appShell .runLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .appShell .editorPage {
+    height: auto;
+  }
+  .appShell .canvas {
+    min-height: 420px;
+    height: 55vh;
+  }
+}
+@media (max-width: 1050px) {
+  .appShell {
+    grid-template-columns: var(--sidebar-width, 288px) minmax(0, 1fr);
+  }
+  .appShell .page {
+    padding: 28px 24px 56px;
+  }
+  .appTopbar {
+    padding: 10px 20px;
+  }
+}
+@media (max-width: 760px) {
+  .appShell {
+    display: block;
+  }
+  .appSidebar {
+    display: none;
+  }
+  .appSidebar--open {
+    display: flex;
+    position: fixed;
+    top: 44px;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: min(285px, 90vw);
+    height: calc(100dvh - 44px);
+    box-shadow: 20px 10px 40px #0006;
+  }
+  .appShell .appMenu {
+    display: inline-flex;
+    min-height: 34px;
+    padding: 5px 10px;
+  }
+  .appTopbar {
+    padding: 12px 16px;
+    gap: 8px;
+  }
+  .appTopbar > div > span {
+    display: none;
+  }
+  .appShell .page {
+    padding: 26px 18px 48px;
+  }
+  .appShell .panel,
+  .appShell .card {
+    padding: 18px;
+  }
+  .appShell :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+    font-size: 16px;
+  }
+  .appShell .editorPage {
+    padding: 18px 12px;
+  }
+  .appShell .crumbs {
+    margin-bottom: 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .appShell * {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.appShell--coding .appTopbar {
+  display: none;
+}
+.appShell--coding .appStage {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+.appShell--coding .appPageContent {
+  flex: 1;
+  min-height: 0;
+}
+@media (max-width: 760px) {
+  .appShell--coding .appTopbar {
+    display: none;
+  }
+  .appShell--coding .appPageContent {
+    height: auto;
+  }
+  .appSidebar--open {
+    top: 0;
+    height: 100dvh;
+    z-index: 50;
+  }
+  .appShell .appSidebarClose {
+    display: inline-flex;
+    border: 0;
+    background: transparent;
+    min-height: 28px;
+    padding: 2px 7px;
+    font-size: 20px;
+  }
+  .appShell .appNavigationBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    background: #0009;
+    border: 0;
+    border-radius: 0;
+  }
+}
+/* Keep collections scrollable while navigation and settings remain reachable. */
+.appSidebar {
+  overflow: hidden;
+}
+.appSidebarBrandRow,
+.appPrimaryNav,
+.appSidebarProjects,
+.appSectionNavigation,
+.appSidebarFooter {
+  flex-shrink: 0;
+}
+.appSidebarProjects {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.appChatSlot {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.codingSidebarContent {
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}
+.codingSidebarContent > :not(.codingSessionList) {
+  flex-shrink: 0;
+}
+.codingSessionList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.appSidebarRecents {
+  overflow-y: auto;
+}
+.appSectionNavigation[open] {
+  max-height: 30vh;
+  overflow-y: auto;
+}
+/* Compact folder/chat navigation. Collections own scrolling; Settings stays pinned. */
+.appSidebarCollections {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 18px;
+}
+.appSidebar .appSidebarProjects,
+.appSidebar .appSidebarRecents {
+  margin: 0 0 12px;
+  max-height: none;
+  overflow: visible;
+  flex: none;
+}
+.appSidebar .appPinnedItems {
+  margin-bottom: 12px;
+}
+.appSidebar .appSidebarHeading {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 8px;
+  color: #a3a3a3;
+  font-size: 12px;
+  list-style: none;
+}
+.appSidebar summary::-webkit-details-marker {
+  display: none;
+}
+.appSidebarHeading > svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 120ms;
+}
+.appSidebar details[open] > .appSidebarHeading > svg {
+  transform: rotate(90deg);
+}
+.appSidebar details[open] > summary {
+  margin-bottom: 3px;
+}
+.appSidebar .appProjectAdd {
+  margin-left: auto;
+  display: flex;
+  opacity: 0;
+  padding: 3px;
+  color: #a3a3a3;
+}
+.appSidebarHeading:hover .appProjectAdd,
+.appSidebarHeading:focus-within .appProjectAdd {
+  opacity: 1;
+}
+.appSidebar .appBrand {
+  padding: 5px 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--app-text);
+}
+.appShell .appSidebarClose,
+.appShell .appSidebarRestore {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  width: 30px;
+  padding: 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #aaa;
+}
+.appPrimaryNav {
+  margin-top: 10px;
+}
+.appShell .appPrimaryNav :is(a, button) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font-size: 13px;
+  color: #dedede !important;
+  text-align: left;
+}
+.appShell .appPrimaryNav :is(a, button):hover {
+  background: #292929;
+}
+.appProjectFolder > summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 9px;
+  list-style: none;
+  font-weight: 400;
+  font-size: 13px;
+  border-radius: 5px;
+}
+.appProjectFolder > summary:hover {
+  background: #292929;
+}
+.appProjectFolder > summary > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.appProjectFolder[open] > summary {
+  background: #252525;
+}
+.appProjectChats {
+  padding-left: 31px;
+}
+.appProjectChats > .appSidebarHint {
+  margin: 0;
+  padding: 4px 0 6px;
+  color: #777;
+}
+.appProjectChats > .appSavedItem {
+  padding-inline: 0;
+}
+.appShell .appProjectNewChat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  width: 100%;
+  padding: 5px 9px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  color: #aaa;
+}
+.appSavedItem {
+  min-height: 32px;
+}
+.appSidebarFooter {
+  border: 0;
+  padding: 8px;
+}
+.appShell .appSidebarFooter > :is(a, button) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  min-height: 32px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+}
+.appShell .appSidebarFooter > button:hover:not(:disabled) {
+  border: 0;
+  background: transparent;
+}
+.appSidebarFooter > :is(a, button) > span {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+}
+.appStage {
+  position: relative;
+}
+.appShell .appSidebarRestore {
+  display: none;
+  position: absolute;
+  top: 9px;
+  left: 12px;
+  z-index: 5;
+}
+@media (min-width: 761px) {
+  .appShell--collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .appShell--collapsed .appSidebar {
+    display: none;
+  }
+  .appShell--collapsed .appSidebarRestore {
+    display: inline-flex;
+  }
+  .appShell--collapsed .appTopbar {
+    padding-left: 56px;
+  }
+  .appShell--collapsed .codingHeaderTitle {
+    padding-left: 36px;
+  }
+}
+@media (pointer: coarse) {
+  .appSidebar .appProjectAdd {
+    opacity: 1;
+  }
+}
+@media (max-width: 760px) {
+  .appShell .appSidebarRestore {
+    display: none;
+  }
+  .appShell--coding .appSidebarRestore {
+    display: inline-flex;
+    top: 10px;
+    left: 12px;
+  }
+  .appShell--coding .codingHeaderTitle {
+    padding-left: 38px;
+  }
+  .appSidebar .appSidebarClose {
+    font-size: 13px;
+  }
+}
+.appShell .appProjectCompose {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  width: 20px;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+}
+.appProjectFolder > summary:hover .appProjectCompose,
+.appProjectFolder > summary:focus-within .appProjectCompose {
+  opacity: 1;
+}
+/* Navigation labels behave like desktop app controls, not selectable document text. */
+.appSidebar,
+.settingsSidebar {
+  font-family: var(--app-font-sans);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.appSidebar svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #929292;
+}
+.appSidebar :is(a, button, summary):hover > svg,
+.appSidebar :is(a, button, summary):focus-visible > svg {
+  color: #fff;
+}
+.appSidebarHeading > svg {
+  width: 10px;
+  height: 10px;
+}
+.appSidebar
+  :is(
+    .appPrimaryNav a,
+    .appPrimaryNav button,
+    .appProjectFolder > summary,
+    .appSavedItem,
+    .appSidebarFooter > :is(a, button),
+    .appSidebarHint
+  ) {
+  font-size: var(--app-nav-font-size);
+  line-height: 20px;
+}
+.appSidebar .appSidebarHeading {
+  font-size: var(--app-nav-font-size);
+  font-weight: 600;
+  line-height: 20px;
+}
+
+/* Preserve meaningful cursors for links, canvas ports and resize handles. */
+.appShell {
+  cursor: default;
+}
+.appShell
+  :is(
+    input:not([type]),
+    input[type="text"],
+    input[type="search"],
+    input[type="email"],
+    input[type="password"],
+    input[type="url"],
+    input[type="tel"],
+    input[type="number"],
+    textarea
+  ):not(:disabled):not([readonly]),
+.appShell [contenteditable="true"],
+.appShell [contenteditable="plaintext-only"] {
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* Sidebar controls must override the larger general-purpose form controls. */
+.appShell
+  .appSidebar
+  :is(.appChatPin, .appChatArchive, .appChatSearchToggle, .appChatSearch button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #929292;
+}
+.appShell .appSidebar :is(.appChatSearchToggle, .appChatSearch button):hover:not(:disabled) {
+  border: 0;
+  background: #383838;
+  color: #fff;
+}
+.appShell .appSidebar :is(.appChatPin, .appChatArchive, .appChatSearchToggle):focus-visible {
+  outline: 1px solid #929292;
+  outline-offset: 1px;
+}
+.appShell .appSidebar .appChatSearchToggle {
+  margin-left: auto;
+  opacity: 0;
+}
+.appSidebarHeading:hover .appChatSearchToggle,
+.appSidebarHeading:focus-within .appChatSearchToggle,
+.appSidebar .appChatSearchToggle[aria-expanded="true"] {
+  opacity: 1;
+}
+.appSidebar .appChatSearch {
+  position: relative;
+  padding: 2px 8px 6px;
+}
+.appShell .appSidebar .appChatSearch input[type="search"] {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  margin: 0;
+  padding: 4px 27px 4px 8px;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  background: #252525;
+  color: #ededed;
+  font: 13px/20px var(--app-font-sans);
+}
+.appShell .appSidebar .appChatSearch input[type="search"]:focus-visible {
+  outline: none;
+  border-color: #777;
+}
+.appChatSearch input::-webkit-search-cancel-button {
+  display: none;
+}
+.appShell .appSidebar .appChatSearch button {
+  position: absolute;
+  right: 11px;
+  top: 5px;
+}
+.appSidebar .appChatRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: 6px;
+}
+.appSidebar .appChatRow:hover,
+.appSidebar .appChatRow:focus-within {
+  background: #292929;
+}
+.appShell .appSidebar .appChatRow > .appChatItem {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 32px 6px 9px;
+  background: transparent;
+}
+.appShell .appSidebar :is(.appChatPin, .appChatArchive) {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+}
+.appSidebar .appChatRow:hover > :is(.appChatPin, .appChatArchive),
+.appSidebar .appChatRow:focus-within > :is(.appChatPin, .appChatArchive) {
+  opacity: 1;
+}
+.appShell .appSidebar :is(.appChatPin, .appChatArchive):hover:not(:disabled) {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #fff;
+}
+.appShell .appSidebar .appChatPin:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+.appShell .appSidebar .appChatRow--archive > .appChatItem {
+  padding-right: 56px;
+}
+.appShell .appSidebar .appChatRow--archive > .appChatPin {
+  right: 28px;
+}
+.appSidebar .appProjectChats .appChatRow > .appSavedItem {
+  padding-left: 0;
+}
+.appShell .appSidebar .appProjectMenuToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  padding: 2px;
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #929292;
+  opacity: 0;
+}
+.appSidebar .appProjectFolder > summary:hover .appProjectMenuToggle,
+.appSidebar .appProjectFolder > summary:focus-within .appProjectMenuToggle,
+.appSidebar .appProjectMenuToggle[aria-expanded="true"] {
+  opacity: 1;
+}
+.appShell .appSidebar .appProjectMenuToggle:hover:not(:disabled),
+.appShell .appSidebar .appProjectCompose:hover:not(:disabled) {
+  border: 0;
+  background: transparent;
+  color: #fff;
+}
+.appShell .appSidebar .appProjectCompose {
+  margin-left: 0;
+}
+.appSidebar .appProjectFolder > summary {
+  position: relative;
+  min-height: 32px;
+}
+.appShell .appSidebar :is(.appProjectMenuToggle, .appProjectCompose) {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+}
+.appShell .appSidebar .appProjectMenuToggle {
+  right: 32px;
+}
+.appShell .appSidebar .appProjectCompose {
+  right: 8px;
+}
+.appSidebar .appProjectFolder > summary:hover > span:first-of-type,
+.appSidebar .appProjectFolder > summary:focus-within > span:first-of-type,
+.appSidebar
+  .appProjectFolder
+  > summary:has(.appProjectMenuToggle[aria-expanded="true"])
+  > span:first-of-type {
+  padding-right: 48px;
+}
+.appSidebar .appProjectFolder > summary > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+}
+.appSidebar .appProjectSectionLabel {
+  padding: 6px 9px 3px;
+  font-size: 12px;
+  color: #929292;
+}

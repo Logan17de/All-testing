@@ -18,6 +18,8 @@ import {
 } from "@zet-harness/scheduler";
 
 import { ModelTransportError } from "@zet-harness/models";
+import { ContextBudgetError } from "@zet-harness/core";
+import { ChatGPTAuthError } from "./runtime-chatgpt-auth.js";
 
 import type { RuntimeHumanApprovals, RuntimeApprovalAuthority } from "./runtime-human-approvals.js";
 import { assertRunBudget, loopEnteredAtMs, RuntimeBudgetExceededError } from "./runtime-budget.js";
@@ -218,10 +220,35 @@ const AGENT_FAILURE_CODES: ReadonlySet<string> = new Set([
  */
 function safeCause(
   error: unknown,
-): { readonly code: string; readonly status?: number } | undefined {
+): { readonly code: string; readonly status?: number; readonly stage?: string } | undefined {
   if (error instanceof ModelTransportError) {
-    return { code: error.code, ...(error.status === undefined ? {} : { status: error.status }) };
+    return {
+      code: error.code,
+      ...(error.status === undefined ? {} : { status: error.status }),
+      ...(error.stage === undefined ? {} : { stage: error.stage }),
+    };
   }
+  if (
+    error instanceof ContextBudgetError &&
+    [
+      "CONTEXT_INVALID",
+      "CONTEXT_WINDOW_UNKNOWN",
+      "CONTEXT_SECTION_OVER_CAP",
+      "CONTEXT_REQUIRED_OVER_BUDGET",
+    ].includes(error.code)
+  )
+    return { code: error.code };
+  if (
+    error instanceof ChatGPTAuthError &&
+    [
+      "CHATGPT_LOGIN_REQUIRED",
+      "CHATGPT_AUTH_INVALID",
+      "CHATGPT_AUTH_HTTP_ERROR",
+      "CHATGPT_PLAN_PERMISSION_REQUIRED",
+      "CHATGPT_AUTH_DENIED",
+    ].includes(error.code)
+  )
+    return { code: error.code };
   if (
     error instanceof Error &&
     error.name === "AgentStepError" &&
@@ -236,7 +263,7 @@ function safeCause(
 
 function safeFailure(error: unknown): {
   readonly code: "PERMISSION_DENIED" | "RUNTIME_BUDGET_EXCEEDED" | "RUNTIME_EXECUTION_FAILED";
-  readonly cause?: { readonly code: string; readonly status?: number };
+  readonly cause?: { readonly code: string; readonly status?: number; readonly stage?: string };
 } {
   const cause = safeCause(error);
   return {
@@ -344,6 +371,22 @@ export class RuntimeRunDispatcher {
     const report = this.#reports.get(runId);
     if (report === undefined) throw new RangeError("Run has not been dispatched.");
     return report;
+  }
+
+  /** Terminal database status can precede cooperative executor cleanup. */
+  isRunActive(runId: string): boolean {
+    return (
+      this.#tasks.has(runId) ||
+      this.#runs.has(runId) ||
+      (this.#runExecutors.get(runId)?.size ?? 0) > 0
+    );
+  }
+
+  forgetDeletedRuns(runIds: readonly string[]): void {
+    if (!runIds.length) return;
+    for (const runId of runIds) this.#reports.delete(runId);
+    // SQLite may reuse a removed compiled-plan integer ID for a new plan.
+    this.#verifiedPlans.clear();
   }
 
   async pauseRun(runId: string): Promise<void> {
@@ -549,6 +592,8 @@ export class RuntimeRunDispatcher {
         } finally {
           this.#executors.delete(work);
           runExecutors.delete(work);
+          if (runExecutors.size === 0 && this.#runExecutors.get(runId) === runExecutors)
+            this.#runExecutors.delete(runId);
         }
       },
       {
@@ -632,7 +677,7 @@ export class RuntimeRunDispatcher {
       return { runId, status: "failed", ...safeFailure(error) };
     } finally {
       this.#runs.delete(runId);
-      this.#runExecutors.delete(runId);
+      if ((this.#runExecutors.get(runId)?.size ?? 0) === 0) this.#runExecutors.delete(runId);
     }
   }
 

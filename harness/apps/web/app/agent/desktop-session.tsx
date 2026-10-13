@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import "../desktop/desktop-session.css";
 import { DesktopImageConsentCard } from "./desktop-image-consent";
 import {
   desktopImageConsents,
@@ -125,264 +126,311 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
   }
 
   return (
-    <section className="panel" aria-label="Desktop session">
-      <h2 className="panelTitle">Desktop session</h2>
-      <p role="status">
-        {status
-          ? `Desktop ${status.state}.`
-          : "Desktop controls are disabled until a trusted local companion is available."}
-      </p>
-      <p className="muted">
-        Desktop access starts disabled. Each session is limited to one task, a short expiry and an
-        action budget. The companion asks for host consent before each input or focus action. No
-        credentials or clipboard contents are read here.
-      </p>
-      <p className="muted">{desktopScreenshotScope(status)}</p>
-      <button
-        disabled={busy || !status || status.state === "disabled"}
-        onClick={() => {
-          void run(async () => {
-            acceptStatus(await action("inventory"));
-          });
-        }}
-      >
-        Refresh monitors and windows
-      </button>
-      <p>
-        <label>
-          Task scope{" "}
-          <input
-            disabled={busy || armed}
-            value={task}
-            onChange={(event) => setTask(event.target.value)}
-          />
-        </label>
-      </p>
-      <p>
-        <label>
-          Monitor{" "}
-          <select
-            style={{ maxWidth: "100%" }}
-            disabled={busy || armed}
-            value={monitorId}
-            onChange={(event) => {
-              setMonitorId(event.target.value);
-              setWindowId("");
+    <section className="panel desktopSession" aria-label="Desktop session">
+      <div className="desktopSession__status">
+        <h2 className="panelTitle">Session status</h2>
+        <p role="status">
+          {status ? `Desktop ${status.state}.` : "Runtime desktop access is unavailable."}
+        </p>
+        <p className="muted">
+          Sessions are limited to one task, expire automatically, and require host approval for
+          input. Credentials and clipboard contents are never read.
+        </p>
+        {status && status.state !== "disabled" ? (
+          <p className="muted">{desktopScreenshotScope(status)}</p>
+        ) : null}
+        {!status || status.state === "disabled" ? (
+          <p className="desktopSession__notice">
+            A trusted local desktop companion is required. Check this runtime’s desktop
+            configuration.
+          </p>
+        ) : !armed ? (
+          <p className="desktopSession__notice">
+            Choose a task and monitor below, then confirm the session scope before arming. Every
+            input action still requires host approval.
+          </p>
+        ) : !canAct ? (
+          <p className="desktopSession__notice">
+            This session cannot accept more actions. Stop it, then review a new task session.
+          </p>
+        ) : null}
+        <button
+          disabled={busy || !status || status.state === "disabled"}
+          onClick={() => {
+            void run(async () => {
+              acceptStatus(await action("inventory"));
+            });
+          }}
+        >
+          Refresh monitors and windows
+        </button>
+      </div>
+      <details className="desktopSession__controls" open={!!status && status.state !== "disabled"}>
+        <summary>Session setup and controls</summary>
+        <section className="desktopSession__section" aria-label="Task and display selection">
+          <h3>Task and display</h3>
+          <p className="muted">Define one task and select where it can operate.</p>
+          <div className="desktopSession__fields">
+            <p>
+              <label>
+                Task scope{" "}
+                <input
+                  disabled={busy || armed}
+                  value={task}
+                  onChange={(event) => setTask(event.target.value)}
+                />
+              </label>
+            </p>
+            <p>
+              <label>
+                Monitor{" "}
+                <select
+                  style={{ maxWidth: "100%" }}
+                  disabled={busy || armed}
+                  value={monitorId}
+                  onChange={(event) => {
+                    setMonitorId(event.target.value);
+                    setWindowId("");
+                  }}
+                >
+                  <option value="">Choose a monitor or virtual desktop</option>
+                  {status?.monitors.map((monitor) => (
+                    <option key={monitor.id} value={monitor.id}>
+                      {monitor.id}: {monitor.width}×{monitor.height}, origin ({monitor.x},{" "}
+                      {monitor.y}
+                      ), scale {monitor.scale}
+                    </option>
+                  ))}
+                </select>
+              </label>{" "}
+              <label>
+                Window{" "}
+                <select
+                  style={{ maxWidth: "100%" }}
+                  disabled={busy || armed}
+                  value={windowId}
+                  onChange={(event) => setWindowId(event.target.value)}
+                >
+                  <option value="">Entire selected monitor</option>
+                  {status?.windows
+                    .filter((window) => !window.monitorId || window.monitorId === monitorId)
+                    .map((window) => (
+                      <option key={window.id} value={window.id}>
+                        {window.title}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </p>
+          </div>
+          <p className="muted">
+            Input coordinates use physical desktop pixels, including negative monitor origins.
+            Display scaling is shown above; the local preview does not change the target
+            coordinates.
+          </p>
+          <label>
+            <input
+              type="checkbox"
+              disabled={busy || armed}
+              checked={armConsent}
+              onChange={(event) => setArmConsent(event.target.checked)}
+            />{" "}
+            I authorize this local desktop session for the displayed task and selection.
+          </label>{" "}
+          <button
+            disabled={
+              busy ||
+              armed ||
+              !status ||
+              status.state === "disabled" ||
+              !armConsent ||
+              !task.trim() ||
+              !monitorId
+            }
+            onClick={() => {
+              void run(async () => {
+                acceptStatus(
+                  await action("arm", {
+                    task,
+                    monitorId,
+                    confirm: true,
+                    ...(windowId ? { windowId } : {}),
+                  }),
+                );
+              });
             }}
           >
-            <option value="">Choose a monitor or virtual desktop</option>
-            {status?.monitors.map((monitor) => (
-              <option key={monitor.id} value={monitor.id}>
-                {monitor.id}: {monitor.width}×{monitor.height}, origin ({monitor.x}, {monitor.y}),
-                scale {monitor.scale}
-              </option>
-            ))}
-          </select>
-        </label>{" "}
-        <label>
-          Window{" "}
-          <select
-            style={{ maxWidth: "100%" }}
-            disabled={busy || armed}
-            value={windowId}
-            onChange={(event) => setWindowId(event.target.value)}
-          >
-            <option value="">Entire selected monitor</option>
-            {status?.windows
-              .filter((window) => !window.monitorId || window.monitorId === monitorId)
-              .map((window) => (
-                <option key={window.id} value={window.id}>
-                  {window.title}
-                </option>
-              ))}
-          </select>
-        </label>
-      </p>
-      <p className="muted">
-        Input coordinates use physical desktop pixels, including negative monitor origins. Display
-        scaling is shown above; the local preview does not change the target coordinates.
-      </p>
-      <label>
-        <input
-          type="checkbox"
-          disabled={busy || armed}
-          checked={armConsent}
-          onChange={(event) => setArmConsent(event.target.checked)}
-        />{" "}
-        I authorize this local desktop session for the displayed task and selection.
-      </label>{" "}
-      <button
-        disabled={
-          busy ||
-          armed ||
-          !status ||
-          status.state === "disabled" ||
-          !armConsent ||
-          !task.trim() ||
-          !monitorId
-        }
-        onClick={() => {
-          void run(async () => {
-            acceptStatus(
-              await action("arm", {
-                task,
-                monitorId,
-                confirm: true,
-                ...(windowId ? { windowId } : {}),
-              }),
-            );
-          });
-        }}
-      >
-        Arm task session
-      </button>{" "}
-      <button
-        disabled={!armed}
-        onClick={() => {
-          void run(async () => {
-            acceptStatus(await action("stop"));
-            setCapture(null);
-          });
-        }}
-      >
-        Stop desktop session
-      </button>
-      {status?.state === "armed" ? (
-        <p>
-          Task: <code>{status.task}</code>. Expires:{" "}
-          {status.expiresAt ? new Date(status.expiresAt).toLocaleString() : "Unknown"}. Actions
-          remaining: {status.actionsRemaining}.
-        </p>
-      ) : null}
-      <p>
-        <button
-          disabled={busy || !canAct}
-          onClick={() => {
-            void run(async () => {
-              const result = object(await action("capture", { generation: status?.generation }));
-              if (
-                typeof result.artifactId !== "string" ||
-                typeof result.width !== "number" ||
-                typeof result.height !== "number" ||
-                result.width <= 0 ||
-                result.height <= 0
-              )
-                throw new Error("The companion returned an invalid local capture.");
-              setCapture({
-                artifactId: result.artifactId,
-                width: result.width,
-                height: result.height,
-                generation: status!.generation,
+            Arm task session
+          </button>{" "}
+          <button
+            disabled={!armed}
+            onClick={() => {
+              void run(async () => {
+                acceptStatus(await action("stop"));
+                setCapture(null);
               });
-            });
-          }}
-        >
-          Capture local preview
-        </button>
-      </p>
-      {capture && armed ? (
-        <div>
-          <Image
-            src={`/api/editor/desktop/artifacts/${encodeURIComponent(capture.artifactId)}?generation=${capture.generation}`}
-            alt="Local desktop screenshot preview"
-            width={capture.width}
-            height={capture.height}
-            unoptimized
-            style={{ width: "100%", height: "auto" }}
-          />
-          <p className="muted">
-            This preview stays between your browser and the local runtime. It is not attached to a
-            model request automatically.
-          </p>
-          <button disabled>Manual screenshot transfer is unavailable</button>
+            }}
+          >
+            Stop desktop session
+          </button>
+          {status?.state === "armed" ? (
+            <p>
+              Task: <code>{status.task}</code>. Expires:{" "}
+              {status.expiresAt ? new Date(status.expiresAt).toLocaleString() : "Unknown"}. Actions
+              remaining: {status.actionsRemaining}.
+            </p>
+          ) : null}
+        </section>
+        <section className="desktopSession__section" aria-label="Local preview">
+          <h3>Local preview</h3>
+          {!canAct ? (
+            <p className="muted">
+              Arm an available session to capture a preview. Capturing does not share it with a
+              model.
+            </p>
+          ) : null}
           <p>
-            To share an exact screenshot, enable desktop tools for a coding task and review its
-            destination-bound screenshot request here. This page never sends the preview
-            automatically.
-          </p>
-        </div>
-      ) : null}
-      <fieldset disabled={busy || !canAct}>
-        <legend>Request one desktop input action</legend>
-        <label>
-          Action{" "}
-          <select value={kind} onChange={(event) => setKind(event.target.value)}>
-            <option value="move">Move pointer</option>
-            <option value="click">Click</option>
-            <option value="key">Press key</option>
-            <option value="text">Type text</option>
-            <option value="focus">Focus selected window</option>
-          </select>
-        </label>{" "}
-        {kind === "move" || kind === "click" ? (
-          <>
-            <label>
-              X{" "}
-              <input
-                type="number"
-                step={1}
-                value={x}
-                onChange={(event) => setX(event.target.value)}
-              />
-            </label>{" "}
-            <label>
-              Y{" "}
-              <input
-                type="number"
-                step={1}
-                value={y}
-                onChange={(event) => setY(event.target.value)}
-              />
-            </label>
-          </>
-        ) : kind === "key" ? (
-          <label>
-            Key <input value={key} onChange={(event) => setKey(event.target.value)} />
-          </label>
-        ) : kind === "text" ? (
-          <label>
-            Text (do not enter credentials){" "}
-            <input
-              autoComplete="off"
-              value={typedText}
-              onChange={(event) => setTypedText(event.target.value)}
-            />
-          </label>
-        ) : (
-          <p>The selected window must be approved by the host.</p>
-        )}
-        <button
-          onClick={() => {
-            void run(async () => {
-              const params: Value = { kind };
-              if (kind === "move" || kind === "click") {
-                const monitor = status?.monitors.find(
-                  (item) => item.id === status.selection?.monitorId,
-                );
-                if (!x || !y || !monitorContains(monitor, Number(x), Number(y)))
-                  throw new Error("Choose integer coordinates inside the selected monitor.");
-                params.x = Number(x);
-                params.y = Number(y);
-              } else if (kind === "key") params.key = key;
-              else if (kind === "text") params.text = typedText;
-              else {
-                if (!status?.selection?.windowId)
-                  throw new Error(
-                    "Select a window when arming the session before requesting focus.",
+            <button
+              disabled={busy || !canAct}
+              onClick={() => {
+                void run(async () => {
+                  const result = object(
+                    await action("capture", { generation: status?.generation }),
                   );
-                params.windowId = status.selection.windowId;
-              }
-              await action("act", { generation: status?.generation, action: params });
-              setTypedText("");
-              setMessage(
-                "One desktop action was requested. The host remains responsible for consent.",
-              );
-            });
-          }}
-        >
-          Request host-approved action
-        </button>
-      </fieldset>
+                  if (
+                    typeof result.artifactId !== "string" ||
+                    typeof result.width !== "number" ||
+                    typeof result.height !== "number" ||
+                    result.width <= 0 ||
+                    result.height <= 0
+                  )
+                    throw new Error("The companion returned an invalid local capture.");
+                  setCapture({
+                    artifactId: result.artifactId,
+                    width: result.width,
+                    height: result.height,
+                    generation: status!.generation,
+                  });
+                });
+              }}
+            >
+              Capture local preview
+            </button>
+          </p>
+          {capture && armed ? (
+            <div>
+              <Image
+                src={`/api/editor/desktop/artifacts/${encodeURIComponent(capture.artifactId)}?generation=${capture.generation}`}
+                alt="Local desktop screenshot preview"
+                width={capture.width}
+                height={capture.height}
+                unoptimized
+                style={{ width: "100%", height: "auto" }}
+              />
+              <p className="muted">
+                This preview stays between your browser and the local runtime. It is not attached to
+                a model request automatically.
+              </p>
+              <button disabled>Manual screenshot transfer is unavailable</button>
+              <p>
+                To share an exact screenshot, enable desktop tools for a coding task and review its
+                destination-bound screenshot request here. This page never sends the preview
+                automatically.
+              </p>
+            </div>
+          ) : null}
+        </section>
+        <section className="desktopSession__section" aria-label="Desktop actions">
+          <h3>Request an action</h3>
+          {!canAct ? (
+            <p className="muted">
+              Action controls become available after a task session is armed and has actions
+              remaining.
+            </p>
+          ) : null}
+          <fieldset disabled={busy || !canAct}>
+            <legend>Request one desktop input action</legend>
+            <label>
+              Action{" "}
+              <select value={kind} onChange={(event) => setKind(event.target.value)}>
+                <option value="move">Move pointer</option>
+                <option value="click">Click</option>
+                <option value="key">Press key</option>
+                <option value="text">Type text</option>
+                <option value="focus">Focus selected window</option>
+              </select>
+            </label>{" "}
+            {kind === "move" || kind === "click" ? (
+              <>
+                <label>
+                  X{" "}
+                  <input
+                    type="number"
+                    step={1}
+                    value={x}
+                    onChange={(event) => setX(event.target.value)}
+                  />
+                </label>{" "}
+                <label>
+                  Y{" "}
+                  <input
+                    type="number"
+                    step={1}
+                    value={y}
+                    onChange={(event) => setY(event.target.value)}
+                  />
+                </label>
+              </>
+            ) : kind === "key" ? (
+              <label>
+                Key <input value={key} onChange={(event) => setKey(event.target.value)} />
+              </label>
+            ) : kind === "text" ? (
+              <label>
+                Text (do not enter credentials){" "}
+                <input
+                  autoComplete="off"
+                  value={typedText}
+                  onChange={(event) => setTypedText(event.target.value)}
+                />
+              </label>
+            ) : (
+              <p>The selected window must be approved by the host.</p>
+            )}
+            <button
+              onClick={() => {
+                void run(async () => {
+                  const params: Value = { kind };
+                  if (kind === "move" || kind === "click") {
+                    const monitor = status?.monitors.find(
+                      (item) => item.id === status.selection?.monitorId,
+                    );
+                    if (!x || !y || !monitorContains(monitor, Number(x), Number(y)))
+                      throw new Error("Choose integer coordinates inside the selected monitor.");
+                    params.x = Number(x);
+                    params.y = Number(y);
+                  } else if (kind === "key") params.key = key;
+                  else if (kind === "text") params.text = typedText;
+                  else {
+                    if (!status?.selection?.windowId)
+                      throw new Error(
+                        "Select a window when arming the session before requesting focus.",
+                      );
+                    params.windowId = status.selection.windowId;
+                  }
+                  await action("act", { generation: status?.generation, action: params });
+                  setTypedText("");
+                  setMessage(
+                    "One desktop action was requested. The host remains responsible for consent.",
+                  );
+                });
+              }}
+            >
+              Request host-approved action
+            </button>
+          </fieldset>
+        </section>
+      </details>
       {desktopConsents(pendingConsents, status)
         .filter((request) => request.purpose === "input")
         .map((request) => (

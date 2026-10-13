@@ -1,5 +1,6 @@
 /**
- * Start the runtime daemon and the web UI together.
+ * Start the runtime daemon and the web UI together. Development is the default;
+ * --production serves an existing build without compiling or enabling HMR.
  *
  * Deliberately dependency-free rather than pulling in a process-runner package:
  * a "start the app" script that itself needs an install step is a worse
@@ -20,7 +21,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   listeningProcessId,
@@ -36,16 +37,33 @@ const runtimeRoot = join(harnessRoot, "apps", "runtime");
 const webRoot = join(harnessRoot, "apps", "web");
 const isWindows = process.platform === "win32";
 const restart = process.argv.includes("--restart");
+const production = process.argv.includes("--production");
+const usage =
+  "Usage: node scripts/start-harness.mjs [--production | --dev] [--restart]\n" +
+  "  Default / --dev: build the runtime and start the live development UI.\n" +
+  "  --production: serve the existing runtime and UI builds. Run `npm run build` first.";
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  console.log(usage);
+  process.exit(0);
+}
+if (
+  process.argv.slice(2).some((arg) => !["--production", "--dev", "--restart"].includes(arg)) ||
+  (production && process.argv.includes("--dev"))
+) {
+  console.error(usage);
+  process.exit(1);
+}
 
-/** npm's CLI entry, resolved from the Node installation running this script. */
+/** Honour the npm that launched us, including portable installations. */
 function npmCliPath() {
   const nodeDirectory = dirname(process.execPath);
   const candidates = [
+    process.env.npm_execpath,
     join(nodeDirectory, "node_modules", "npm", "bin", "npm-cli.js"),
     join(nodeDirectory, "lib", "node_modules", "npm", "bin", "npm-cli.js"),
   ];
   for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
+    if (candidate !== undefined && existsSync(candidate)) return candidate;
   }
   return undefined;
 }
@@ -81,16 +99,40 @@ function runtimePort() {
 
 const npmCli = npmCliPath();
 const nextBin = nextBinPath();
-if (npmCli === undefined || nextBin === undefined) {
+if ((!production && npmCli === undefined) || nextBin === undefined) {
   console.error(
-    (npmCli === undefined
+    (!production && npmCli === undefined
       ? "Could not locate npm next to this Node installation.\n"
       : "Could not find Next.js; run `npm ci` in the harness folder first.\n") +
       "Start the two processes manually instead:\n" +
       "  npm run start --workspace @zet-harness/runtime\n" +
-      "  npm run dev   --workspace @zet-harness/web",
+      `  npm run ${production ? "start" : "dev"} --workspace @zet-harness/web`,
   );
   process.exit(1);
+}
+
+// Check before --restart can stop an existing harness. The config owns distDir,
+// including review builds, so never accept an unrelated .next/BUILD_ID.
+if (production) {
+  process.env.NODE_ENV = "production";
+  let distDir;
+  try {
+    const { default: config } = await import(pathToFileURL(join(webRoot, "next.config.mjs")).href);
+    distDir = config.distDir ?? ".next";
+    if (typeof distDir !== "string") throw new Error("Invalid Next.js build directory.");
+  } catch {
+    console.error("Could not read the UI build configuration; nothing was started.");
+    process.exit(1);
+  }
+  const artifacts = [join(runtimeRoot, "dist", "main.js"), join(webRoot, distDir, "BUILD_ID")];
+  if (artifacts.some((path) => !existsSync(path))) {
+    console.error(
+      "Production build is missing; nothing was started or stopped.\n" +
+        "Run `npm run build`, then `npm start -- --production`.\n" +
+        "For live development, use `npm start` or `npm start -- --dev`.",
+    );
+    process.exit(1);
+  }
 }
 
 const ports = { runtime: runtimePort(), web: portFrom(process.env.PORT) ?? 3000 };
@@ -221,6 +263,10 @@ function start(label, args, options) {
   });
   forward(label, child);
   children.push(child);
+  child.on("error", (error) => {
+    console.error(`[${label}] could not start: ${error.message}`);
+    void shutdown(1, false);
+  });
   return child;
 }
 
@@ -273,33 +319,47 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 
 await checkPorts();
 
-console.log("Starting the Zet Harness runtime and web UI. Press Ctrl+C to stop.");
+console.log(
+  `Starting Zet Harness in ${production ? "production" : "development"} mode. Press Ctrl+C to stop.`,
+);
 
 const runtimeUrl = `http://127.0.0.1:${String(ports.runtime)}`;
-const web = start("web", [nextBin, "dev", "-H", "127.0.0.1", "-p", String(ports.web)], {
-  cwd: webRoot,
-  env: {
-    ...process.env,
-    NEXT_TELEMETRY_DISABLED: process.env.NEXT_TELEMETRY_DISABLED ?? "1",
-    // The UI finds the runtime on whatever port the runtime was given.
-    HARNESS_RUNTIME_URL: process.env.HARNESS_RUNTIME_URL ?? runtimeUrl,
+const web = start(
+  "web",
+  [nextBin, production ? "start" : "dev", "-H", "127.0.0.1", "-p", String(ports.web)],
+  {
+    cwd: webRoot,
+    env: {
+      ...process.env,
+      NODE_ENV: production ? "production" : "development",
+      NEXT_TELEMETRY_DISABLED: process.env.NEXT_TELEMETRY_DISABLED ?? "1",
+      // The UI finds the runtime on whatever port the runtime was given.
+      HARNESS_RUNTIME_URL: process.env.HARNESS_RUNTIME_URL ?? runtimeUrl,
+    },
   },
-});
+);
 stopWith("web", web);
 
-// The runtime runs from its compiled output, so build it first; the web UI
-// compiles on demand and can start in the meantime.
-const build = start("runtime", [npmCli, "run", "build", "--workspace", "@zet-harness/runtime"], {
-  cwd: harnessRoot,
-});
-build.on("exit", (code) => {
-  if (shuttingDown) return;
-  if (code !== 0) {
-    console.error(`[runtime] build failed (code ${String(code)})`);
-    void shutdown(code ?? 1, false);
-    return;
-  }
+function startRuntime() {
   const runtime = start("runtime", [join("dist", "main.js")], { cwd: runtimeRoot });
   stopWith("runtime", runtime);
   console.log(`Runtime: ${runtimeUrl}   Web UI: http://127.0.0.1:${String(ports.web)}`);
-});
+}
+
+if (production) {
+  startRuntime();
+} else {
+  // In development the UI compiles on demand while the runtime builds.
+  const build = start("runtime", [npmCli, "run", "build", "--workspace", "@zet-harness/runtime"], {
+    cwd: harnessRoot,
+  });
+  build.on("exit", (code) => {
+    if (shuttingDown) return;
+    if (code !== 0) {
+      console.error(`[runtime] build failed (code ${String(code)})`);
+      void shutdown(code ?? 1, false);
+      return;
+    }
+    startRuntime();
+  });
+}

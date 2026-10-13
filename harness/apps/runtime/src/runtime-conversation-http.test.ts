@@ -1,13 +1,22 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SQLITE_MEMORY_PATH } from "@zet-harness/db";
 
 import { RuntimeDaemon } from "./runtime-daemon.js";
 
 const daemons: RuntimeDaemon[] = [];
+let workspacePath: string;
+
+beforeEach(async () => {
+  workspacePath = await realpath(await mkdtemp(join(tmpdir(), "zet-conversation-workspace-")));
+});
 
 afterEach(async () => {
   for (const daemon of daemons.splice(0)) await daemon.stop();
+  await rm(workspacePath, { recursive: true, force: true, maxRetries: 3 });
 });
 
 async function startDaemon(): Promise<string> {
@@ -59,7 +68,10 @@ describe("conversation endpoints", () => {
     const base = await startDaemon();
     const token = await sessionToken(base);
     const projectId = object(
-      await send(base, "POST", "/api/projects", { body: { name: "Chat" }, token }),
+      await send(base, "POST", "/api/projects", {
+        body: { name: "Chat", workspacePath, trusted: true },
+        token,
+      }),
       "project",
     )["projectId"] as string;
 
@@ -145,7 +157,10 @@ describe("conversation endpoints", () => {
     });
 
     const projectId = object(
-      await send(base, "POST", "/api/projects", { body: { name: "P" }, token }),
+      await send(base, "POST", "/api/projects", {
+        body: { name: "P", workspacePath, trusted: true },
+        token,
+      }),
       "project",
     )["projectId"] as string;
     expect((await send(base, "POST", `/api/projects/${projectId}/conversations`)).status).toBe(403);

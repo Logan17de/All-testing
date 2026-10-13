@@ -11,7 +11,7 @@ import { SORTABLE_ID_SOURCE as ID } from "./ids";
 const ALLOWED_PATHS: readonly RegExp[] = [
   /^projects$/u,
   new RegExp(`^projects/${ID}$`, "u"),
-  new RegExp(`^projects/${ID}/(archive|restore|conversations|goals)$`, "u"),
+  new RegExp(`^projects/${ID}/(archive|restore|archive-chats|remove|conversations|goals)$`, "u"),
   new RegExp(`^projects/${ID}/todos/(next|runnable)$`, "u"),
   new RegExp(`^conversations/${ID}$`, "u"),
   new RegExp(`^conversations/${ID}/(archive|restore|messages|reply)$`, "u"),

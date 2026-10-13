@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
 import type { AdapterInvocationContext } from "@zet-harness/plugin-api";
+import { windowCaptureScope } from "./runtime-desktop-session.js";
 import { RuntimeDesktopController } from "./runtime-desktop-http.js";
 import { RuntimeCodingImageStore } from "./runtime-coding-image-store.js";
 import { createRuntimeCodingDesktopTools } from "./runtime-coding-desktop-tools.js";
@@ -19,12 +20,28 @@ async function fixture() {
       inventory: () =>
         Promise.resolve({
           monitors: [{ id: "m", x: 0, y: 0, width: 1, height: 1, scale: 1 }],
-          windows: [{ id: "123", title: "Fixture" }],
+          windows: [
+            {
+              id: "123",
+              title: "Fixture",
+              processId: 7,
+              processStartedAt: "100",
+              windowClass: "Fixture",
+              focused: true,
+              bounds: { x: 0, y: 0, width: 1, height: 1 },
+            },
+          ],
         }),
       capture: async () => {
         const localPath = path.join(root, "synthetic.png");
         await writeFile(localPath, png);
         return { localPath, width: 1, height: 1 };
+      },
+      captureWindow: async (window, monitor) => {
+        const scope = windowCaptureScope(monitor, window);
+        const localPath = path.join(root, "synthetic-window.png");
+        await writeFile(localPath, png);
+        return { localPath, width: scope.width, height: scope.height, scope };
       },
       act: async () => {
         calls++;
@@ -112,6 +129,10 @@ it("synthetic capture is local; separate exact destination approval creates only
       width: 1,
       height: 1,
       windowId: "123",
+      windowBounds: { x: 0, y: 0, width: 1, height: 1 },
+      processId: 7,
+      processStartedAt: "100",
+      windowClass: "Fixture",
     });
     expect(f.store.partsFor(f.authority)).toEqual([]);
     await f.controller.action("approval/respond", {

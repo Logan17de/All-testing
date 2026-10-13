@@ -82,6 +82,10 @@ The visual/editor representation is source code, not runtime state. The schedule
 
 ## Setting up
 
+For chat defaults, archiving, restoration and automatic deletion, see [Chat settings and archived chats](docs/chat-settings.md).
+
+For workspace layout, keyboard shortcuts and notifications, see [General settings](docs/general-settings.md).
+
 A harness runs with no configuration at all. To settle where things live and which port it uses:
 
 ```bash
@@ -117,6 +121,7 @@ two histories really happened is not a choice a restore should make quietly.
 - [`PLUGINS.md`](./PLUGINS.md) — plugin architecture and extension direction.
 - [`RUNTIME.md`](./RUNTIME.md) — durable runtime ownership and process boundaries.
 - [`GRAPH.md`](./GRAPH.md) — visual graph/source/IR design notes.
+- [`docs/graph-guide.md`](./docs/graph-guide.md) — hands-on graph editor guide: connect, disconnect, resize, recover edits, and run workflows. Also available at `/editor/guide`.
 - [`GAPS.md`](./GAPS.md) — historical gap review and deferred decisions.
 - Research reports — reference inputs only; accepted decisions are promoted into `PLAN.md`/`TODO.md`.
 

@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { RuntimeDesktopSession } from "./runtime-desktop-session.js";
-import type { DesktopDriver, DesktopMonitor } from "./runtime-desktop-session.js";
+import { RuntimeDesktopSession, windowCaptureScope } from "./runtime-desktop-session.js";
+import type { DesktopDriver, DesktopMonitor, DesktopWindow } from "./runtime-desktop-session.js";
 function fixture() {
   const driver = {
     inventory: vi.fn(() =>
@@ -9,7 +9,17 @@ function fixture() {
           { id: "left", x: -1920, y: 0, width: 1920, height: 1080, scale: 1.5 },
           { id: "right", x: 0, y: 0, width: 2560, height: 1440, scale: 1 },
         ],
-        windows: [{ id: "123", title: "Fixture" }],
+        windows: [
+          {
+            id: "123",
+            title: "Fixture",
+            processId: 7,
+            processStartedAt: "100",
+            windowClass: "FixtureClass",
+            focused: true,
+            bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+          },
+        ],
       }),
     ),
     capture: vi.fn((monitor: DesktopMonitor) =>
@@ -19,6 +29,15 @@ function fixture() {
         height: monitor.height,
       }),
     ),
+    captureWindow: vi.fn((window: DesktopWindow, monitor: DesktopMonitor) => {
+      const scope = windowCaptureScope(monitor, window);
+      return Promise.resolve({
+        localPath: "private-fixture-path",
+        width: scope.width,
+        height: scope.height,
+        scope,
+      });
+    }),
     act: vi.fn(() => Promise.resolve()),
     removeCapture: vi.fn(() => Promise.resolve()),
   } satisfies DesktopDriver;
@@ -35,7 +54,7 @@ it("is disabled by default and never initializes OS access", async () => {
 it("captures complete selected monitor locally and requires separate one-use transmission consent", async () => {
   const { session, approve, driver } = fixture();
   await session.inventory();
-  const armed = session.arm({ task: "Inspect screen", monitorId: "left", windowId: "123" });
+  const armed = session.arm({ task: "Inspect screen", monitorId: "left" });
   try {
     const capture = await session.capture(armed.generation);
     expect(typeof capture.artifactId).toBe("string");
@@ -141,8 +160,15 @@ it("cleans a late screenshot after stop and keeps audit free of typed content", 
   const { generation } = session.arm({ task: "Review", monitorId: "left", windowId: "123" });
   await session.act(generation, { kind: "text", text: "private fixture input" });
   expect(JSON.stringify(session.status().audit)).not.toContain("private fixture input");
-  let complete: ((value: { localPath: string; width: number; height: number }) => void) | undefined;
-  driver.capture.mockImplementationOnce(
+  let complete:
+    | ((value: {
+        localPath: string;
+        width: number;
+        height: number;
+        scope: ReturnType<typeof windowCaptureScope>;
+      }) => void)
+    | undefined;
+  driver.captureWindow.mockImplementationOnce(
     () =>
       new Promise((resolve) => {
         complete = resolve;
@@ -150,14 +176,29 @@ it("cleans a late screenshot after stop and keeps audit free of typed content", 
   );
   const work = session.capture(generation);
   const rejected = expect(work).rejects.toThrow("cancelled");
+  await new Promise((resolve) => setImmediate(resolve));
   session.stop();
   await rejected;
-  complete?.({ localPath: "late-private-path", width: 1920, height: 1080 });
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(driver.removeCapture).toHaveBeenCalledWith({
+  complete?.({
     localPath: "late-private-path",
     width: 1920,
     height: 1080,
+    scope: windowCaptureScope(
+      { id: "left", x: -1920, y: 0, width: 1920, height: 1080, scale: 1.5 },
+      {
+        id: "123",
+        title: "Fixture",
+        processId: 7,
+        processStartedAt: "100",
+        windowClass: "FixtureClass",
+        focused: true,
+        bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+      },
+    ),
   });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(driver.removeCapture).toHaveBeenCalledWith(
+    expect.objectContaining({ localPath: "late-private-path", width: 1920, height: 1080 }),
+  );
 });

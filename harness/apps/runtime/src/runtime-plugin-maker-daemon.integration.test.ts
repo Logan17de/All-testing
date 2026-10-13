@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdtemp, rm, readdir } from "node:fs/promises";
+import { mkdtemp, realpath, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -10,8 +10,8 @@ import type { ModelRequest, ModelResult, AdapterInvocationContext } from "@zet-h
 import { RuntimeDaemon } from "./runtime-daemon.js";
 import { createRuntimePluginMaker } from "./runtime-plugin-maker.js";
 it("real daemon native plugin maker is quarantined, excludes assistant actors and rejects stale workspace inference", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "maker-daemon-")),
-    nextWorkspace = await mkdtemp(join(tmpdir(), "maker-next-"));
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "maker-daemon-"))),
+    nextWorkspace = await realpath(await mkdtemp(join(tmpdir(), "maker-next-")));
   const databasePath = join(directory, "runtime.sqlite");
   const daemon = new RuntimeDaemon({
     api: { port: 0 },
@@ -22,6 +22,7 @@ it("real daemon native plugin maker is quarantined, excludes assistant actors an
   await daemon.start();
   const db = new DatabaseSync(databasePath);
   writeSetting(db, "workspace.root", directory, Date.now());
+  writeSetting(db, "workspace.trusted", directory, Date.now());
   const api = daemon.snapshot().api,
     base = `http://${api.host}:${String(api.port)}`;
   let ordinary = "",

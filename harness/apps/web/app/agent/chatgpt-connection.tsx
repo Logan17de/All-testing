@@ -21,6 +21,7 @@ export function ChatGPTConnection() {
   const [login, setLogin] = useState<LoginResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [reconnecting, setReconnecting] = useState(false);
   const requestVersion = useRef(0);
   useEffect(() => {
     let disposed = false;
@@ -45,7 +46,8 @@ export function ChatGPTConnection() {
   }, []);
 
   async function start() {
-    if (!consent) return;
+    if (!consent || busy || !status || status.state === "pending") return;
+    if (status.state === "connected" && !reconnecting) return;
     requestVersion.current++;
     setBusy(true);
     setError("");
@@ -72,6 +74,8 @@ export function ChatGPTConnection() {
       }
       setLogin(result.data);
       setStatus({ state: "pending" });
+      setConsent(false);
+      setReconnecting(false);
     } catch {
       setError("The sign-in request could not be started.");
     } finally {
@@ -83,46 +87,106 @@ export function ChatGPTConnection() {
     <section className="panel" aria-label="ChatGPT connection setup">
       <h2 className="panelTitle">ChatGPT account connection</h2>
       <p role="status">
-        {status ? `Connection ${status.state}.` : "Checking account connection support…"}
+        {status?.state === "connected"
+          ? "ChatGPT connected. Choose an account model in Coding."
+          : status?.state === "pending"
+            ? "Waiting for you to complete sign-in."
+            : status?.state === "error"
+              ? "ChatGPT connection needs attention. Check the status or sign in again."
+              : status?.state === "disconnected"
+                ? "ChatGPT is not connected. Sign in to use your account models."
+                : "Checking ChatGPT connection."}
       </p>
       <p className="muted">
-        This is a separate account connection. Coding tasks continue through the harness. The
-        requested provider permissions determine what this connection can access.
+        The connection lasts for this runtime session. Restarting the runtime requires sign-in
+        again.
       </p>
-      <p className="muted">
-        Sign-in credentials are held only in runtime memory. The callback uses{" "}
-        <code>127.0.0.1</code> on the runtime host. A browser on another machine needs a supported
-        local companion or explicit loopback forwarding; this page does not replace the callback
-        with a public URL.
-      </p>
-      <label>
-        <input
-          type="checkbox"
-          checked={consent}
-          disabled={busy || status?.state === "pending"}
-          onChange={(event) => setConsent(event.target.checked)}
-        />{" "}
-        I authorize starting the official provider sign-in for this runtime session.
-      </label>{" "}
-      <button
-        disabled={busy || !consent || status?.state === "pending" || status?.state === "connected"}
-        onClick={() => {
-          void start();
-        }}
-      >
-        Start account sign-in
-      </button>
+      <div className="buttonRow">
+        <button
+          className="btn"
+          disabled={busy}
+          onClick={() => {
+            const expected = ++requestVersion.current;
+            setBusy(true);
+            setError("");
+            void workspaceRequest<ConnectionStatus>("auth/chatgpt")
+              .then((result) => {
+                if (expected !== requestVersion.current) return;
+                if (result.ok) {
+                  setStatus(result.data);
+                  if (result.data.state !== "pending") setLogin(null);
+                } else setError(result.reason);
+              })
+              .finally(() => setBusy(false));
+          }}
+        >
+          Check connection status
+        </button>
+        {status?.state === "connected" && !reconnecting ? (
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => {
+              setConsent(false);
+              setReconnecting(true);
+            }}
+          >
+            Reconnect account
+          </button>
+        ) : null}
+      </div>
+      {status && status.state !== "pending" && (status.state !== "connected" || reconnecting) ? (
+        <>
+          <p className="muted">
+            Complete sign-in in a browser on the runtime host. Remote browsers need a supported
+            local companion or explicit loopback forwarding.
+          </p>
+          <label>
+            <input
+              type="checkbox"
+              checked={consent}
+              disabled={busy}
+              onChange={(event) => setConsent(event.target.checked)}
+            />{" "}
+            I authorize starting the official provider sign-in for this runtime session.
+          </label>{" "}
+          <button
+            className="btn"
+            disabled={busy || !consent}
+            onClick={() => {
+              void start();
+            }}
+          >
+            {reconnecting ? "Start account reconnection" : "Start account sign-in"}
+          </button>
+          {reconnecting ? (
+            <button
+              className="btn"
+              disabled={busy}
+              onClick={() => {
+                setReconnecting(false);
+                setConsent(false);
+              }}
+            >
+              Keep current connection
+            </button>
+          ) : null}
+        </>
+      ) : null}
       {login ? (
         <p>
           <a href={login.authorizationUrl} target="_blank" rel="noopener noreferrer">
             Complete official sign-in and consent
           </a>{" "}
           <button
+            className="btn"
             disabled={busy}
             onClick={() => {
+              requestVersion.current++;
               setBusy(true);
               void workspaceRequest<ConnectionStatus>("auth/chatgpt/cancel", {})
                 .then((result) => {
+                  requestVersion.current++;
                   if (result.ok) {
                     setStatus(result.data);
                     setLogin(null);

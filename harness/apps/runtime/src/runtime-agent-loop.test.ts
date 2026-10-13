@@ -37,6 +37,7 @@ import type {
 } from "@zet-harness/plugin-api";
 
 import { createAgentNodeExecutor } from "./runtime-agent-nodes.js";
+import { createChatGPTPlanModelAdapter } from "./runtime-chatgpt-model.js";
 import { RUNTIME_DATABASE_MIGRATIONS } from "./runtime-daemon.js";
 import { compileEditorGraph, createRunFromCompiledGraph } from "./runtime-graphs.js";
 import { RuntimeHumanApprovals } from "./runtime-human-approvals.js";
@@ -293,7 +294,12 @@ async function setup(
 
   const run = async (
     maxIterations: number,
-    scope: { model?: readonly string[]; tools?: readonly string[] } = {},
+    scope: {
+      model?: readonly string[];
+      tools?: readonly string[];
+      modelId?: string;
+      reserveOutputTokens?: number;
+    } = {},
   ) => {
     const graph = agentGraph(conversationId, maxIterations);
     const scopedGraph = {
@@ -302,6 +308,10 @@ async function setup(
         ...node,
         config: {
           ...node.config,
+          ...(node.id === "think" && scope.modelId ? { modelId: scope.modelId } : {}),
+          ...(node.id === "think" && scope.reserveOutputTokens
+            ? { reserveOutputTokens: scope.reserveOutputTokens }
+            : {}),
           ...(node.id === "think" && scope.model !== undefined
             ? { toolAllowlist: [...scope.model] }
             : {}),
@@ -323,6 +333,82 @@ async function setup(
 }
 
 describe("the bounded agent loop", () => {
+  it.each(["sse", "json", "finalized-sse"])(
+    "runs the real ChatGPT adapter through a bounded agent model step using mocked %s transport",
+    async (transport) => {
+      const fixture = await setup([]);
+      let credentialReads = 0;
+      let networkCalls = 0;
+      const adapter = createChatGPTPlanModelAdapter({
+        id: "chatgpt.agent.fixture",
+        model: "fixture-model",
+        contextBudgetTokens: 8_192,
+        accessToken: () => {
+          credentialReads++;
+          return Promise.resolve("fixture-private-credential");
+        },
+        fetch: (_url, options) => {
+          networkCalls++;
+          if (typeof options?.body !== "string") throw new Error("Expected JSON request body.");
+          const body = JSON.parse(options.body) as { model: string };
+          expect(body.model).toBe("fixture-model");
+          const event = {
+            type: "response.completed",
+            response: {
+              status: "completed",
+              output: [
+                {
+                  type: "message",
+                  role: "assistant",
+                  content: [{ type: "output_text", text: "Connected fixture reply." }],
+                },
+              ],
+              usage: { input_tokens: 12, output_tokens: 4, total_tokens: 16 },
+            },
+          };
+          return Promise.resolve(
+            new Response(
+              transport === "json"
+                ? JSON.stringify(event.response)
+                : transport === "finalized-sse"
+                  ? "data: " +
+                    JSON.stringify({
+                      type: "response.output_item.done",
+                      output_index: 0,
+                      item: { ...event.response.output[0], id: "msg_final" },
+                    }) +
+                    "\n\n" +
+                    "data: " +
+                    JSON.stringify({ ...event, response: { ...event.response, output: [] } }) +
+                    "\n\n"
+                  : "data: " + JSON.stringify(event) + "\n\n",
+              {
+                headers: {
+                  "Content-Type": transport === "json" ? "application/json" : "text/event-stream",
+                },
+              },
+            ),
+          );
+        },
+      });
+      fixture.host.models.register(adapter);
+      const result = await fixture.run(3, {
+        model: [],
+        tools: [],
+        modelId: adapter.manifest.id,
+        reserveOutputTokens: 1_024,
+      });
+      expect(result.report.status).toBe("completed");
+      expect(credentialReads).toBe(1);
+      expect(networkCalls).toBe(1);
+      const messages = JSON.stringify(
+        readConversationMessages(fixture.database.connection(), fixture.conversationId),
+      );
+      expect(messages).toContain("Connected fixture reply.");
+      expect(messages).not.toContain("fixture-private-credential");
+      expect(adapter.manifest.features.contextWindowTokens).toBe(8_192);
+    },
+  );
   it("passes only the actual model/tools-node intersection as trusted child scope", async () => {
     const scopes: (readonly string[] | undefined)[] = [];
     const tool: ToolAdapter = {

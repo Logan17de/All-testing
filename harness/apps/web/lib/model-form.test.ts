@@ -157,7 +157,7 @@ describe("what a check found", () => {
       text: "It answered in 42 ms.",
     });
     expect(describeCheck({ ok: false, code: "MODEL_HTTP_ERROR", status: 401 }).text).toContain(
-      "refused the key",
+      "rejected authentication",
     );
     expect(describeCheck({ ok: false, code: "MODEL_HTTP_ERROR", status: 404 }).text).toContain(
       "404",

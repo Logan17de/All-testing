@@ -62,12 +62,21 @@ From `harness/`:
 
 ```sh
 npm ci
-npm start
+npm run build
+npm start -- --production
 ```
 
 That starts the runtime daemon and the web UI together. The UI is at `http://127.0.0.1:3000`; the
 daemon listens on `http://127.0.0.1:3211`. Both bind to loopback only. **Ctrl+C** stops both, and
 closing the terminal does too.
+
+Production mode serves the existing optimized UI and compiled runtime. It refuses to start if
+either build is missing, and never rebuilds files while serving. After updating source, run
+`npm run build` again before launching it. Node 24.20.x and npm 12.x are required.
+
+For development, `npm start` (or `npm start -- --dev`) retains live UI reloading and builds the
+runtime at startup. Production mode is a local serving mode; it does not establish live-provider
+or operating-system acceptance. See [testing and known limitations](TESTING.md).
 
 The first time you open the app it goes straight to **Setup**:
 
@@ -81,20 +90,22 @@ If the ports are already taken, `npm start` says by which process and whether it
 and starts nothing. When it is an earlier harness you want to replace, run:
 
 ```sh
-npm run restart
+npm run restart -- --production
 ```
 
 which stops that harness first. It only ever stops a process that answers as this harness;
-anything else on those ports is reported, and left alone.
+anything else on those ports is reported, and left alone. Production builds are checked before
+an existing harness is stopped. Use `npm run restart` for the development UI.
 
 To run them separately:
 
 ```sh
 npm run start --workspace @zet-harness/runtime
-npm run dev --workspace @zet-harness/web
+npm run start --workspace @zet-harness/web
 ```
 
 Set `HARNESS_RUNTIME_URL` if the daemon listens somewhere other than the default.
+The separate web command requires the same production build; use its `dev` command for live editing.
 
 The daemon reads plugins from `apps/runtime/plugins/`. Set `ZET_RUNTIME_PLUGINS_DIR` to use another
 folder; the Plugins page shows which directory was read. A missing folder simply means no plugins

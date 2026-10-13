@@ -22,9 +22,9 @@ export function ChildChatScope({
     <section className="panel">
       <h2 className="panelTitle">Create a bounded child chat</h2>
       <p>
-        Choose which current connections the child may inherit. Nothing is inherited by default;
-        choices cannot exceed the parent’s granted permissions. Existing disconnected chats remain
-        inaccessible.
+        The assistant can read and control the new child chat. Existing chat connections are
+        inherited only when selected. Choices cannot exceed the parent&apos;s granted permissions.
+        Existing disconnected chats remain inaccessible.
       </p>
       <p className="muted">
         Child coding runs inherit the user’s tool restrictions. Workspace file changes, process
@@ -32,15 +32,22 @@ export function ChildChatScope({
         Private runtime databases remain excluded. Plugin, MCP, browser, desktop and analysis tools
         remain disabled for these child runs.
       </p>
-      <label>
+      <label style={{ display: "block", marginBlock: 12 }}>
         Child title (optional){" "}
         <input
+          className="field"
           value={title}
           maxLength={200}
           disabled={busy}
           onChange={(event) => setTitle(event.target.value)}
         />
       </label>
+      {!grants.length ? (
+        <p className="muted">
+          No connections are available to inherit. You can still create a child with no inherited
+          chat access.
+        </p>
+      ) : null}
       {grants.map((grant) => (
         <fieldset key={grant.chatId} disabled={busy}>
           <legend style={{ overflowWrap: "anywhere" }}>{grant.chatId}</legend>
@@ -64,6 +71,8 @@ export function ChildChatScope({
         </fieldset>
       ))}
       <button
+        className="btn"
+        type="button"
         disabled={busy}
         onClick={() => {
           void create(subset, title.trim() || undefined).then(() => {

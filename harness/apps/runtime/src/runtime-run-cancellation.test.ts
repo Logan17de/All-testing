@@ -11,6 +11,7 @@ import {
   runSqliteMigrations,
 } from "@zet-harness/db";
 import { GRAPH_JSON_VERSION, type GraphJsonV1 } from "@zet-harness/graph";
+import type { NodeDefinition } from "@zet-harness/plugin-api";
 import { DURABLE_APPROVALS_MIGRATION } from "@zet-harness/db/durable-approval-records";
 import { compileEditorGraph, createRunFromCompiledGraph } from "./runtime-graphs.js";
 import { RuntimeHumanApprovals } from "./runtime-human-approvals.js";
@@ -33,7 +34,7 @@ it("cancels only the requested run and waits for actual executor settlement befo
   await host.activate({
     manifest: { id: "test.cancel", name: "Cancellation", version: "1.0.0", apiVersion: 1 },
     activate(context) {
-      context.nodes.register({
+      const waiting: NodeDefinition = {
         manifest: {
           type: "test.wait",
           version: "1",
@@ -52,6 +53,15 @@ it("cancels only the requested run and waits for actual executor settlement befo
           },
         },
         execute: () => ({ outputs: {} }),
+      };
+      context.nodes.register(waiting);
+      context.nodes.register({
+        ...waiting,
+        manifest: {
+          ...waiting.manifest,
+          type: "test.timeout",
+          behavior: { ...waiting.manifest.behavior, timeoutMs: 25 },
+        },
       });
     },
   });
@@ -94,12 +104,15 @@ it("cancels only the requested run and waits for actual executor settlement befo
   dispatcher.start();
   try {
     await expect.poll(() => signals.size).toBe(2);
+    expect(dispatcher.isRunActive(first)).toBe(true);
     await dispatcher.cancelRun(first);
     expect(signals.get(first)?.aborted).toBe(true);
     expect(signals.get(second)?.aborted).toBe(false);
     expect(reconstructExecutionFrontier(db.connection(), first).runStatus).toBe("running");
+    expect(dispatcher.isRunActive(first)).toBe(true);
     releases.get(first)!();
     expect(await dispatcher.waitForIdle(first)).toMatchObject({ status: "cancelled" });
+    expect(dispatcher.isRunActive(first)).toBe(false);
     expect(
       reconstructExecutionFrontier(db.connection(), first).preCrashRunningAttempts,
     ).toHaveLength(0);
@@ -114,6 +127,24 @@ it("cancels only the requested run and waits for actual executor settlement befo
         )
         .get(first),
     ).toMatchObject({ count: 1 });
+    const timed = await compileEditorGraph(
+      {
+        ...graph,
+        graphId: "deadline",
+        nodes: [{ id: "wait", type: "test.timeout", version: "1", config: {} }],
+      },
+      { host },
+      new CapabilityPermissionPolicy(),
+    );
+    if (!timed.valid) throw new Error("Invalid deadline test graph");
+    const timedRun = (await createRunFromCompiledGraph(db, timed.compiled)).runId;
+    dispatcher.wake(timedRun);
+    await expect.poll(() => signals.has(timedRun)).toBe(true);
+    expect(await dispatcher.waitForIdle(timedRun)).toMatchObject({ status: "failed" });
+    expect(signals.get(timedRun)?.aborted).toBe(true);
+    expect(dispatcher.isRunActive(timedRun)).toBe(true);
+    releases.get(timedRun)!();
+    await expect.poll(() => dispatcher.isRunActive(timedRun)).toBe(false);
   } finally {
     for (const release of releases.values()) release();
     await dispatcher.stop();

@@ -6,7 +6,32 @@ import type {
   ModelStreamEvent,
 } from "@zet-harness/plugin-api";
 
-import { abortable, parseJson, readModelJson } from "./model-http.js";
+import {
+  abortable,
+  parseJson,
+  readModelJson,
+  ModelTransportError,
+  type ModelResponseStage,
+} from "./model-http.js";
+it("retains only closed-set parser stages in safe transport errors", () => {
+  const known = new ModelTransportError(
+    "MODEL_RESPONSE_INVALID",
+    undefined,
+    "responses.reasoning-state",
+  );
+  expect(known.toJSON()).toEqual({
+    code: "MODEL_RESPONSE_INVALID",
+    retryable: false,
+    stage: "responses.reasoning-state",
+  });
+  const unknown = new ModelTransportError(
+    "MODEL_RESPONSE_INVALID",
+    undefined,
+    "private-provider-text" as ModelResponseStage,
+  );
+  expect(unknown.toJSON()).toEqual({ code: "MODEL_RESPONSE_INVALID", retryable: false });
+  expect(JSON.stringify(unknown)).not.toContain("private-provider-text");
+});
 import { assertModelJson } from "./model-json.js";
 import { createOpenAICompatibleModelAdapter } from "./openai-compatible-model.js";
 

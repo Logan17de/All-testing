@@ -1,9 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
+import { realpathSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { expect, it } from "vitest";
 import { saveModelConfig } from "@zet-harness/db/durable-model-records";
+import { writeSetting } from "@zet-harness/db/durable-setting-records";
 import {
   appendMessage,
   readConversationMessages,
@@ -17,7 +19,7 @@ import type {
 } from "@zet-harness/plugin-api";
 import { RuntimeDaemon } from "./runtime-daemon.js";
 it("real daemon scripted inference revocation aborts original signal and excludes disconnected source via actual context floor", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "assistant-daemon-"));
+  const directory = realpathSync.native(await mkdtemp(join(tmpdir(), "assistant-daemon-")));
   const databasePath = join(directory, "runtime.sqlite");
   const daemon = new RuntimeDaemon({
     api: { port: 0 },
@@ -27,6 +29,8 @@ it("real daemon scripted inference revocation aborts original signal and exclude
   });
   await daemon.start();
   const db = new DatabaseSync(databasePath);
+  writeSetting(db, "workspace.root", directory, Date.now());
+  writeSetting(db, "workspace.trusted", directory, Date.now());
   const api = daemon.snapshot().api,
     base = `http://${api.host}:${String(api.port)}`;
   const requests: ModelRequest[] = [];
@@ -174,8 +178,9 @@ it.skipIf(process.platform !== "linux")(
   "production delegated coding child denies chat/DB side channels and writes only after current exact human approval",
   async () => {
     const { readFile, access } = await import("node:fs/promises");
-    const { writeSetting } = await import("@zet-harness/db/durable-setting-records");
-    const directory = await mkdtemp(join(tmpdir(), "assistant-coding-daemon-"));
+    const directory = realpathSync.native(
+      await mkdtemp(join(tmpdir(), "assistant-coding-daemon-")),
+    );
     const databasePath = join(directory, "private-state.sqlite");
     const daemon = new RuntimeDaemon({
       api: { port: 0 },
@@ -186,6 +191,7 @@ it.skipIf(process.platform !== "linux")(
     await daemon.start();
     const db = new DatabaseSync(databasePath);
     writeSetting(db, "workspace.root", directory, Date.now());
+    writeSetting(db, "workspace.trusted", directory, Date.now());
     const api = daemon.snapshot().api,
       base = `http://${api.host}:${String(api.port)}`;
     let root = "",
@@ -486,8 +492,9 @@ it.skipIf(process.platform !== "linux")(
 it.each(["interrupt", "revoked"] as const)(
   "explicitly connected ordinary native chat %s requires current exact authority",
   async (controlMode) => {
-    const { writeSetting } = await import("@zet-harness/db/durable-setting-records");
-    const directory = await mkdtemp(join(tmpdir(), "assistant-control-daemon-"));
+    const directory = realpathSync.native(
+      await mkdtemp(join(tmpdir(), "assistant-control-daemon-")),
+    );
     const databasePath = join(directory, "runtime.sqlite");
     const daemon = new RuntimeDaemon({
       api: { port: 0 },
@@ -498,6 +505,7 @@ it.each(["interrupt", "revoked"] as const)(
     await daemon.start();
     const db = new DatabaseSync(databasePath);
     writeSetting(db, "workspace.root", directory, Date.now());
+    writeSetting(db, "workspace.trusted", directory, Date.now());
     const api = daemon.snapshot().api,
       base = `http://${api.host}:${String(api.port)}`;
     let root = "",
@@ -747,8 +755,9 @@ it.each(["interrupt", "revoked"] as const)(
 it.skipIf(!["linux", "win32"].includes(process.platform))(
   "actual parent tool decision grants only explicit user-delegated rights for a fresh child turn",
   async () => {
-    const { writeSetting } = await import("@zet-harness/db/durable-setting-records");
-    const directory = await mkdtemp(join(tmpdir(), "assistant-delegated-tools-")),
+    const directory = realpathSync.native(
+        await mkdtemp(join(tmpdir(), "assistant-delegated-tools-")),
+      ),
       databasePath = join(directory, "runtime.sqlite");
     const daemon = new RuntimeDaemon({
       api: { port: 0 },
@@ -759,6 +768,7 @@ it.skipIf(!["linux", "win32"].includes(process.platform))(
     await daemon.start();
     const db = new DatabaseSync(databasePath);
     writeSetting(db, "workspace.root", directory, Date.now());
+    writeSetting(db, "workspace.trusted", directory, Date.now());
     const api = daemon.snapshot().api,
       base = `http://${api.host}:${String(api.port)}`;
     let root = "",

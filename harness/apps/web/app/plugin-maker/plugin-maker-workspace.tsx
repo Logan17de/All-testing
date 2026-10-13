@@ -7,6 +7,7 @@ export function PluginMakerWorkspace() {
   const generation = useRef<number | null>(null);
   const artifactHash = useRef("");
   const [ready, setReady] = useState(false),
+    [workspaceSelected, setWorkspaceSelected] = useState(false),
     [materializedKey, setMaterializedKey] = useState(""),
     [directory, setDirectory] = useState(""),
     [confirmed, setConfirmed] = useState(false),
@@ -24,6 +25,10 @@ export function PluginMakerWorkspace() {
   async function action(action: string, params: Record<string, unknown>) {
     if (!ready) {
       setError("Wait for the scoped plugin maker runtime.");
+      return;
+    }
+    if (!workspaceSelected) {
+      setError("Select a workspace in Workspace settings before authoring plugins.");
       return;
     }
     const expected = generation.current;
@@ -63,8 +68,12 @@ export function PluginMakerWorkspace() {
   useEffect(() => {
     let disposed = false;
     async function poll() {
-      const response = await workspaceRequest<Record<string, unknown>>("plugin-maker");
+      const [response, setup] = await Promise.all([
+        workspaceRequest<Record<string, unknown>>("plugin-maker"),
+        workspaceRequest<{ setup: { workspace: { path: string } | null } }>("setup"),
+      ]);
       if (disposed) return;
+      setWorkspaceSelected(setup.ok && !!setup.data.setup.workspace?.path);
       if (!response.ok) {
         setReady(false);
         return;
@@ -125,6 +134,13 @@ export function PluginMakerWorkspace() {
   }
   return (
     <>
+      <p role="status" className="muted">
+        {busy
+          ? "Processing the selected draft action…"
+          : ready
+            ? "Plugin maker runtime connected."
+            : "Plugin maker runtime unavailable or connecting. Draft actions become available when connected."}
+      </p>
       <section className="panel">
         <h2 className="panelTitle">Create a draft</h2>
         <p>
@@ -134,18 +150,26 @@ export function PluginMakerWorkspace() {
         <p>
           <Link href="/agent">Open coding chat</Link>
         </p>
-        <label>
+        {!workspaceSelected ? (
+          <p className="muted" role="status">
+            Select a workspace in <Link href="/setup">Workspace settings</Link> before authoring
+            plugins. Draft creation is unavailable until a workspace is selected.
+          </p>
+        ) : null}
+        <label style={{ display: "block", marginBlock: 12 }}>
           Plugin ID{" "}
           <input
+            className="field"
             maxLength={120}
             value={id}
             disabled={busy}
             onChange={(event) => setId(event.target.value)}
           />
         </label>{" "}
-        <label>
+        <label style={{ display: "block", marginBlock: 12 }}>
           Name{" "}
           <input
+            className="field"
             maxLength={120}
             value={name}
             disabled={busy}
@@ -153,9 +177,10 @@ export function PluginMakerWorkspace() {
           />
         </label>
         <p>
-          <label>
+          <label style={{ display: "block", marginBlock: 12 }}>
             Description{" "}
             <textarea
+              className="field"
               style={{ width: "100%" }}
               maxLength={2000}
               value={description}
@@ -165,7 +190,9 @@ export function PluginMakerWorkspace() {
           </label>
         </p>
         <button
-          disabled={busy || !ready || !id.trim() || !name.trim()}
+          className="btn"
+          type="button"
+          disabled={busy || !ready || !workspaceSelected || !id.trim() || !name.trim()}
           onClick={() => {
             void action("scaffold", {
               id: id.trim(),
@@ -201,9 +228,10 @@ export function PluginMakerWorkspace() {
               {draft.requestedCapabilities.length ? draft.requestedCapabilities.join(", ") : "none"}
               .
             </p>
-            <label>
+            <label style={{ display: "block", marginBlock: 12 }}>
               File{" "}
               <select
+                className="field"
                 style={{ maxWidth: "100%" }}
                 value={path}
                 disabled={busy}
@@ -222,10 +250,13 @@ export function PluginMakerWorkspace() {
               </select>
             </label>
             <p>
-              <label>
+              <label style={{ display: "block", marginBlock: 12 }}>
                 Source{" "}
                 <textarea
-                  style={{ width: "100%", minHeight: 240, fontFamily: "monospace" }}
+                  className="field"
+                  style={{ width: "100%", minHeight: 240, fontFamily: "var(--app-font-sans)" }}
+                  spellCheck={false}
+                  aria-label="Plugin source code"
                   value={content}
                   disabled={busy}
                   onChange={(event) => {
@@ -242,6 +273,8 @@ export function PluginMakerWorkspace() {
             </p>
             <div className="btnRow">
               <button
+                className="btn"
+                type="button"
                 disabled={busy || !ready || !path}
                 onClick={() => {
                   void action("edit", { hash: draft.hash, path, content }).then((result) => {
@@ -252,6 +285,8 @@ export function PluginMakerWorkspace() {
                 Save new draft revision
               </button>
               <button
+                className="btn"
+                type="button"
                 disabled={busy || !ready}
                 onClick={() => {
                   void action("validate", { hash: draft.hash }).then((result) => {
@@ -284,9 +319,10 @@ export function PluginMakerWorkspace() {
               plugin each require separate explicit approval; validation alone does not execute
               code.
             </p>
-            <label>
+            <label style={{ display: "block", marginBlock: 12 }}>
               Workspace-relative plugin folder{" "}
               <input
+                className="field"
                 style={{ maxWidth: "100%" }}
                 value={directory}
                 disabled={busy}
@@ -298,7 +334,7 @@ export function PluginMakerWorkspace() {
               />
             </label>
             <p>
-              <label>
+              <label style={{ display: "block", marginBlock: 12 }}>
                 <input
                   type="checkbox"
                   checked={confirmed}
@@ -310,7 +346,7 @@ export function PluginMakerWorkspace() {
               </label>
             </p>
             <p>
-              <label>
+              <label style={{ display: "block", marginBlock: 12 }}>
                 <input
                   type="checkbox"
                   checked={executionConsent}
@@ -325,6 +361,8 @@ export function PluginMakerWorkspace() {
             <div className="btnRow">
               {["materialize", "test", "review", "enable"].map((kind) => (
                 <button
+                  className="btn"
+                  type="button"
                   key={kind}
                   disabled={
                     busy ||
@@ -367,7 +405,15 @@ export function PluginMakerWorkspace() {
             </p>
           </section>
         </>
-      ) : null}
+      ) : (
+        <section className="panel">
+          <h2 className="panelTitle">No draft selected</h2>
+          <p className="muted">
+            Create a scaffold above or ask a coding chat to propose a plugin. Its files and
+            requested capabilities will appear here for review.
+          </p>
+        </section>
+      )}
     </>
   );
 }

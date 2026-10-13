@@ -7,10 +7,16 @@ git clone --branch zet-harness-v1 https://github.com/Logan17de/All-testing.git
 cd All-testing/harness
 npm ci
 npm run build
-npm start
+npm start -- --production
 ```
 
 Use Node 24.20.x and npm 12.x. The launcher prints the runtime and web addresses; open the web address, select an ordinary project folder in Setup, and use `/agent`, `/assistant`, `/plugin-maker` and `/plugins`.
+
+`--production` runs the existing optimized Next.js build and compiled runtime on loopback without
+starting a compiler or development server. Rebuild after source changes. Missing builds fail
+before either service starts, including before a requested restart stops an existing harness.
+Use `npm run restart -- --production` to restart this mode. `npm start` and
+`npm start -- --dev` retain the development workflow with live UI reloading.
 
 Keep runtime state and installed trusted plugins outside the selected coding workspace. For example, on Linux, before launching:
 
@@ -20,7 +26,7 @@ mkdir -p "$ZET_TEST_STATE/plugins"
 export ZET_RUNTIME_DB_PATH="$ZET_TEST_STATE/runtime.sqlite"
 export ZET_RUNTIME_PLUGINS_DIR="$ZET_TEST_STATE/plugins"
 export ZET_NPM_CLI="$(readlink -f "$(command -v npm)")"
-npm start
+npm start -- --production
 ```
 
 Linux project execution and generated-plugin tests require a working bubblewrap namespace sandbox; the application refuses host execution when it is unavailable. CI installs a pinned verified bubblewrap and a narrowly scoped executable-specific Ubuntu user-namespace profile. Do not disable global kernel protections to make the application run.
@@ -32,3 +38,11 @@ The plugin maker proposes inert source. Inspect every file, materialize the exac
 Live provider login and consent are user actions. The OpenAI/ChatGPT integration has not been verified with a real registration/account here. Claude subscription OAuth is not offered as a third-party native login; using an official Claude bridge or API billing requires choosing that supported option. General third-party Grok subscription OAuth is not established by the documented Grok Build CLI flow. The harness does not extract cookies/tokens or silently substitute API billing. See [capability acceptance](CODEX-ACCEPTANCE.md) and [provider boundaries](STANDALONE-ARCHITECTURE.md).
 
 Repository tests use scripted model fixtures; passing them does not demonstrate a live paid provider or real desktop capture/input. Current Windows and MCP limitations are recorded in the acceptance checklist. Download a source archive only from the exact verified commit linked in the report; no binary release or external service is published.
+
+The launcher regression suite can be run independently with
+`npx vitest run scripts/start-harness.test.ts scripts/process-tree.test.ts`. It launches isolated
+local fixture processes to verify production/development dispatch, missing-build refusal, portable
+npm resolution, and cleanup after failure. It does not build the UI or alter a running harness.
+After a successful build, `node scripts/startup-smoke.mjs --production` checks the real production
+web server on port 3210 (override with `HARNESS_SMOKE_PORT`) and stops its temporary server. The
+existing `npm run test:startup` still checks runtime startup plus development UI startup.

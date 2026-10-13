@@ -33,10 +33,10 @@ export default async function HomePage() {
   return (
     <main className="page">
       <p className="eyebrow">{HARNESS_PRODUCT_NAME.toUpperCase()}</p>
-      <h1 className="pageTitle">A harness you can extend.</h1>
+      <h1 className="pageTitle">Workspace overview</h1>
       <p className="lede">
-        A provider-neutral, local-first runtime for models, tools, goals, memory, and agent
-        workflows. Everything it can do beyond its core is a plugin, and anyone can write one.
+        Your projects, models, and plugins in one place. Pick up a task or configure the tools for
+        your next one.
       </p>
 
       <div className="status" role="status">

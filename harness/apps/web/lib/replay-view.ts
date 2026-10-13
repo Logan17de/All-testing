@@ -58,12 +58,25 @@ export function isRunReplayView(value: unknown): value is RunReplayView {
  * Nodes that have not acted yet are simply absent, which is how the editor draws a
  * node nothing has happened to.
  */
+/** Terminal run outcomes interrupt only nodes that were still active. */
+export function terminalNodeStatus(status: string, runStatus: string): string {
+  if (
+    (runStatus === "failed" || runStatus === "cancelled") &&
+    ["running", "waiting", "waiting-approval"].includes(status)
+  )
+    return runStatus === "cancelled" ? "cancelled" : "interrupted";
+  return status;
+}
 export function replayNodeStatuses(
   steps: readonly ReplayStepView[],
   through: number,
 ): ReadonlyMap<string, string> {
   const statuses = new Map<string, string>();
   for (const step of steps.slice(0, through + 1)) {
+    if (step.kind === "run") {
+      for (const [node, status] of statuses)
+        statuses.set(node, terminalNodeStatus(status, step.outcome));
+    }
     const nodeId = step.nodeId;
     if (nodeId === null) continue;
     switch (step.kind) {

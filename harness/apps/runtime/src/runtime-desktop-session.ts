@@ -8,9 +8,20 @@ export interface DesktopMonitor {
   height: number;
   scale: number;
 }
+export type DesktopRectangle = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 export interface DesktopWindow {
   id: string;
   title: string;
+  processId?: number;
+  processStartedAt?: string;
+  windowClass?: string;
+  focused?: boolean;
+  bounds?: DesktopRectangle;
 }
 export type DesktopAction =
   | { kind: "move" | "click"; x: number; y: number }
@@ -32,10 +43,16 @@ export interface DesktopCapture {
   localPath: string;
   width: number;
   height: number;
+  scope?: DesktopCaptureScope;
 }
 export interface DesktopDriver {
   inventory(signal: AbortSignal): Promise<{ monitors: DesktopMonitor[]; windows: DesktopWindow[] }>;
   capture(monitor: DesktopMonitor, signal: AbortSignal): Promise<DesktopCapture>;
+  captureWindow?(
+    window: DesktopWindow,
+    monitor: DesktopMonitor,
+    signal: AbortSignal,
+  ): Promise<DesktopCapture>;
   act(action: DesktopAction, signal: AbortSignal): Promise<void>;
   removeCapture(capture: DesktopCapture): Promise<void>;
 }
@@ -47,14 +64,18 @@ export interface DesktopTransmissionDestination {
   readonly maxUses: number;
   readonly expiresAtMs: number;
 }
-export interface DesktopCaptureScope {
+export type DesktopCaptureScope = {
   readonly monitorId: string;
   readonly x: number;
   readonly y: number;
   readonly width: number;
   readonly height: number;
   readonly windowId?: string;
-}
+  readonly windowBounds?: DesktopRectangle;
+  readonly processId?: number;
+  readonly processStartedAt?: string;
+  readonly windowClass?: string;
+};
 export interface DesktopConsentRequest {
   task: string;
   generation: number;
@@ -63,6 +84,84 @@ export interface DesktopConsentRequest {
   artifactId?: string;
   destination?: DesktopTransmissionDestination;
   captureScope?: DesktopCaptureScope;
+}
+
+export function windowCaptureScope(
+  monitor: DesktopMonitor,
+  window: DesktopWindow,
+): DesktopCaptureScope {
+  const b = window.bounds;
+  if (
+    !b ||
+    ![b.x, b.y, b.width, b.height, monitor.x, monitor.y, monitor.width, monitor.height].every(
+      Number.isSafeInteger,
+    ) ||
+    b.width <= 0 ||
+    b.height <= 0 ||
+    b.width > 16384 ||
+    b.height > 16384 ||
+    b.width * b.height > 32_000_000 ||
+    typeof window.processId !== "number" ||
+    !Number.isSafeInteger(window.processId) ||
+    window.processId <= 0 ||
+    !window.processStartedAt ||
+    !/^\d{1,20}$/u.test(window.processStartedAt) ||
+    !window.windowClass ||
+    window.windowClass.length > 256 ||
+    !window.focused
+  )
+    throw new Error("Selected window identity, focus or bounds unavailable.");
+  const x = Math.max(monitor.x, b.x),
+    y = Math.max(monitor.y, b.y);
+  const width = Math.min(monitor.x + monitor.width, b.x + b.width) - x;
+  const height = Math.min(monitor.y + monitor.height, b.y + b.height) - y;
+  if (width <= 0 || height <= 0) throw new Error("Selected window is outside selected monitor.");
+  return {
+    monitorId: monitor.id,
+    x,
+    y,
+    width,
+    height,
+    windowId: window.id,
+    windowBounds: { ...b },
+    processId: window.processId,
+    processStartedAt: window.processStartedAt,
+    windowClass: window.windowClass,
+  };
+}
+export function sameDesktopWindow(left: DesktopWindow, right: DesktopWindow): boolean {
+  return (
+    left.id === right.id &&
+    left.title === right.title &&
+    left.processId === right.processId &&
+    left.processStartedAt === right.processStartedAt &&
+    left.windowClass === right.windowClass &&
+    left.bounds?.x === right.bounds?.x &&
+    left.bounds?.y === right.bounds?.y &&
+    left.bounds?.width === right.bounds?.width &&
+    left.bounds?.height === right.bounds?.height
+  );
+}
+function sameCaptureScope(
+  left: DesktopCaptureScope | undefined,
+  right: DesktopCaptureScope,
+): boolean {
+  return (
+    !!left &&
+    left.monitorId === right.monitorId &&
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height &&
+    left.windowId === right.windowId &&
+    left.processId === right.processId &&
+    left.processStartedAt === right.processStartedAt &&
+    left.windowClass === right.windowClass &&
+    left.windowBounds?.x === right.windowBounds?.x &&
+    left.windowBounds?.y === right.windowBounds?.y &&
+    left.windowBounds?.width === right.windowBounds?.width &&
+    left.windowBounds?.height === right.windowBounds?.height
+  );
 }
 
 /** Explicitly armed local session. A screenshot never reaches inference through this controller. */
@@ -83,6 +182,7 @@ export class RuntimeDesktopSession {
         task: string;
         monitor: DesktopMonitor;
         windowId?: string;
+        window?: DesktopWindow;
         expiresAt: number;
         remaining: number;
         controller: AbortController;
@@ -172,7 +272,12 @@ export class RuntimeDesktopSession {
     this.#armed = {
       task: params.task,
       monitor: { ...monitor },
-      ...(params.windowId ? { windowId: params.windowId } : {}),
+      ...(params.windowId
+        ? {
+            windowId: params.windowId,
+            window: structuredClone(this.#inventory.windows.find((w) => w.id === params.windowId)!),
+          }
+        : {}),
       expiresAt: this.#now() + 120_000,
       remaining: 100,
       controller: new AbortController(),
@@ -228,37 +333,66 @@ export class RuntimeDesktopSession {
     this.#busy = true;
     session.remaining--;
     try {
+      let scope: DesktopCaptureScope = {
+        monitorId: session.monitor.id,
+        x: session.monitor.x,
+        y: session.monitor.y,
+        width: session.monitor.width,
+        height: session.monitor.height,
+      };
       const capture = await this.#bounded(session.controller.signal, async () => {
-        const image = await this.options.driver!.capture(
-          session.monitor,
-          session.controller.signal,
-        );
+        const driver = this.options.driver!;
+        let image: DesktopCapture;
+        if (session.window) {
+          if (!driver.captureWindow)
+            throw new Error(
+              "Selected window capture is unavailable; monitor fallback is forbidden.",
+            );
+          const inventory = await driver.inventory(session.controller.signal);
+          const currentMonitor = inventory.monitors.find((m) => m.id === session.monitor.id);
+          const currentWindow = inventory.windows.find((w) => w.id === session.window!.id);
+          if (
+            !currentMonitor ||
+            currentMonitor.x !== session.monitor.x ||
+            currentMonitor.y !== session.monitor.y ||
+            currentMonitor.width !== session.monitor.width ||
+            currentMonitor.height !== session.monitor.height ||
+            !currentWindow ||
+            !sameDesktopWindow(session.window, currentWindow)
+          )
+            throw new Error("Selected window or monitor identity changed.");
+          scope = windowCaptureScope(session.monitor, currentWindow);
+          image = await driver.captureWindow(
+            currentWindow,
+            session.monitor,
+            session.controller.signal,
+          );
+        } else image = await driver.capture(session.monitor, session.controller.signal);
         if (session.controller.signal.aborted || generation !== this.#generation) {
-          await this.options.driver!.removeCapture(image);
+          await driver.removeCapture(image);
           throw new Error("Desktop capture cancelled.");
         }
-        if (image.width !== session.monitor.width || image.height !== session.monitor.height) {
-          await this.options.driver!.removeCapture(image);
-          throw new Error("Unexpected desktop capture dimensions.");
+        if (
+          image.width !== scope.width ||
+          image.height !== scope.height ||
+          (session.window && !sameCaptureScope(image.scope, scope))
+        ) {
+          await driver.removeCapture(image);
+          throw new Error("Unexpected desktop capture dimensions or scope.");
         }
         return image;
       });
       this.#session(generation, false);
       const artifactId = randomUUID();
       this.#artifacts.set(artifactId, capture);
-      this.#artifactScopes.set(
-        artifactId,
-        Object.freeze({
-          monitorId: session.monitor.id,
-          x: session.monitor.x,
-          y: session.monitor.y,
-          width: session.monitor.width,
-          height: session.monitor.height,
-          ...(session.windowId ? { windowId: session.windowId } : {}),
-        }),
-      );
+      this.#artifactScopes.set(artifactId, Object.freeze(structuredClone(scope)));
       this.#record("local-capture");
-      return { artifactId, width: capture.width, height: capture.height };
+      return {
+        artifactId,
+        width: capture.width,
+        height: capture.height,
+        captureScope: structuredClone(scope),
+      };
     } finally {
       this.#busy = false;
     }

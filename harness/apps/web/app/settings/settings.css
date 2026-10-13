@@ -1,0 +1,423 @@
+.settingsPage {
+  min-height: 100%;
+  background: #181818;
+  color: #ededed;
+}
+.settingsLayout {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: calc(100vh - 56px);
+}
+.settingsSidebar {
+  padding: 32px 20px;
+  background: #1d1d1d;
+  border-right: 1px solid #333;
+}
+.settingsSidebar h1 {
+  margin: 0 12px 24px;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+.settingsSearch {
+  display: block;
+  margin-bottom: 28px;
+}
+.settingsSearch input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  min-height: 40px;
+  border: 1px solid #3b3b3b;
+  border-radius: 6px;
+  background: #242424;
+  color: #eee;
+  font: inherit;
+  font-size: 13px;
+}
+.settingsGroup {
+  margin-top: 24px;
+}
+.settingsGroup > p {
+  margin: 0 12px 8px;
+  color: #929292;
+  font-size: 12px;
+}
+.settingsGroup button {
+  display: block;
+  width: 100%;
+  padding: 11px 12px;
+  margin: 3px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #c8c8c8;
+  text-align: left;
+  font: inherit;
+  font-size: var(--app-nav-font-size);
+  cursor: pointer;
+}
+.settingsGroup button:hover,
+.settingsGroup button[aria-current="page"] {
+  background: #303030;
+  color: #fff;
+}
+.settingsContent {
+  padding: 48px clamp(24px, 5vw, 80px);
+  max-width: 960px;
+  min-width: 0;
+}
+.settingsContent > header {
+  padding-bottom: 28px;
+}
+.settingsContent h2 {
+  margin: 6px 0 12px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.6px;
+}
+.settingsContent h3 {
+  margin: 0 0 12px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.settingsMuted {
+  color: #a0a0a0;
+  line-height: 1.6;
+  font-size: 14px;
+}
+.settingsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 0;
+  border-top: 1px solid #333;
+  color: #ececec;
+  text-decoration: none;
+}
+.settingsRow strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 5px;
+}
+.settingsRow .settingsMuted {
+  display: block;
+}
+.settingsRow > span:last-child {
+  color: #9d9d9d;
+}
+.settingsRow:hover strong {
+  text-decoration: underline;
+}
+.settingsOAuth,
+.settingsCapabilities {
+  border-top: 1px solid #333;
+  padding-top: 28px;
+  margin-top: 12px;
+}
+.settingsOAuth .panel {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.settingsOAuth button {
+  padding: 10px 14px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #ededed;
+  background: #292929;
+  font: inherit;
+}
+.settingsOAuth button:disabled {
+  opacity: 0.5;
+}
+.settingsOAuth label {
+  display: block;
+  line-height: 1.6;
+  margin-block: 16px;
+}
+.settingsFootnote {
+  margin-top: 28px;
+  color: #999;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.settingsCapabilities p {
+  color: #aaa;
+  line-height: 1.7;
+  margin-bottom: 28px;
+}
+.settingsPage :is(button, input, a):focus-visible {
+  outline: 2px solid #c7c7c7;
+  outline-offset: 3px;
+}
+.settingsPage :is(p, span) {
+  overflow-wrap: anywhere;
+}
+.settingsSearch .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.settingsPopup {
+  width: min(960px, calc(100vw - 80px));
+  height: min(700px, calc(100dvh - 80px));
+  min-height: 0;
+  max-height: calc(100dvh - 80px);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #3c3c3c;
+  border-radius: 18px;
+  box-shadow: 0 24px 80px #0008;
+  font: 14px/1.5 var(--app-font-sans);
+}
+.settingsPopup::backdrop {
+  background: rgb(0 0 0 / 35%);
+  backdrop-filter: blur(6px);
+}
+.settingsPopup .settingsLayout {
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: 230px minmax(0, 1fr);
+}
+.settingsPopup .settingsSidebar {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px 16px;
+  user-select: none;
+}
+.settingsPopup .settingsSidebar h1 {
+  font-size: 18px;
+  line-height: 24px;
+  letter-spacing: 0;
+  margin: 0 12px 22px;
+}
+.settingsPopup .settingsContent {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 32px 36px;
+}
+.settingsPopup .settingsContent > header h2 {
+  font-size: 24px;
+}
+.settingsPopup,
+.settingsPopup :is(button, a) {
+  cursor: default;
+}
+.settingsPopup :is(input, textarea):not(:disabled):not([readonly]) {
+  cursor: text;
+  user-select: text;
+}
+.settingsPopup .settingsPopupClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 5px;
+  border: 0;
+  background: transparent;
+  color: #929292;
+}
+.settingsPopup .settingsPopupClose:hover {
+  color: #fff;
+}
+.settingsPopup * {
+  scrollbar-width: none;
+}
+.settingsPopup *::-webkit-scrollbar {
+  display: none;
+}
+.settingsPopup .settingsSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 0 12px;
+  border-radius: 24px;
+  background: #2d2d2d;
+  color: #aaa;
+}
+.settingsPopup .settingsSearch input {
+  min-height: 36px;
+  padding: 7px 0;
+  border: 0;
+  outline-offset: 0;
+  background: transparent;
+}
+.settingsPopup .settingsGroup {
+  margin-top: 20px;
+}
+.settingsPopup .settingsGroup > p {
+  margin: 0 8px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #aaa;
+}
+.settingsPopup .settingsGroup button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  margin: 1px 0;
+  min-height: 30px;
+  color: #ddd;
+}
+.settingsIcon {
+  flex: 0 0 14px;
+  color: #aaa;
+}
+.settingsGroup button:hover .settingsIcon,
+.settingsGroup button[aria-current="page"] .settingsIcon {
+  color: #fff;
+}
+.settingsPopup .settingsContent > header {
+  padding-bottom: 20px;
+}
+.settingsPopup .settingsMuted {
+  font-size: 13px;
+}
+.settingsEmbedded {
+  min-width: 0;
+  font-size: 13px;
+}
+.settingsEmbedded :is(.panel, .card) {
+  padding: 16px;
+  margin: 0 0 16px;
+  border: 1px solid #383838;
+  border-radius: 8px;
+  background: #202020;
+  box-shadow: none;
+}
+.settingsEmbedded :is(.panelTitle, .cardTitle) {
+  font-size: 15px;
+  letter-spacing: 0;
+  margin: 0 0 12px;
+}
+.settingsEmbedded .muted {
+  color: #aaa;
+  font-size: 13px;
+}
+.settingsEmbedded :is(input, textarea, select, button) {
+  font: inherit;
+}
+.settingsEmbedded :is(.btn, .desktopSession button) {
+  min-height: 32px;
+  padding: 6px 10px;
+  background: #2c2c2c;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #ddd;
+  box-shadow: none;
+}
+.settingsEmbedded :is(.btn, .desktopSession button):hover:not(:disabled) {
+  background: #373737;
+  color: #fff;
+}
+.settingsEmbedded
+  :is(.field__input, .desktopSession input:not([type="checkbox"]), .desktopSession select) {
+  min-height: 36px;
+  padding: 8px 10px;
+  background: #181818;
+  border: 1px solid #444;
+  color: #eee;
+  border-radius: 6px;
+}
+.settingsGeneral .eyebrow {
+  display: none;
+}
+.settingsComputer .desktopSession__notice {
+  background: #242424;
+  border-color: #444;
+}
+.settingsComputer :is(.desktopSession__section, fieldset) {
+  border-color: #444;
+}
+.settingsComputer .desktopSession__section h3 {
+  font-size: 15px;
+}
+.settingsPopup
+  .settingsEmbedded
+  :is(button, a, select, summary, label, input[type="checkbox"], input[type="radio"]) {
+  cursor: default;
+}
+@media (max-width: 720px) {
+  .settingsPopup {
+    width: calc(100vw - 24px);
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
+    border-radius: 12px;
+  }
+  .settingsPopup .settingsLayout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .settingsPopup .settingsSidebar {
+    padding: 20px 16px 12px;
+    border-right: 0;
+    border-bottom: 1px solid #333;
+  }
+  .settingsPopup .settingsSidebar h1 {
+    margin: 0 8px 12px;
+  }
+  .settingsPopup .settingsSearch {
+    margin-bottom: 12px;
+  }
+  .settingsPopup .settingsSidebar nav {
+    flex-wrap: nowrap;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 3px 0;
+  }
+  .settingsPopup .settingsGroup {
+    display: contents;
+  }
+  .settingsPopup .settingsGroup > p {
+    display: none;
+  }
+  .settingsPopup .settingsGroup button {
+    width: auto;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .settingsPopup .settingsContent {
+    padding: 20px 18px;
+    max-width: none;
+  }
+  .settingsLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settingsSidebar {
+    border-right: 0;
+    border-bottom: 1px solid #333;
+    padding: 24px 20px;
+  }
+  .settingsSidebar nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+  }
+  .settingsGroup {
+    margin-top: 0;
+    flex: 1 1 150px;
+  }
+  .settingsSearch {
+    margin-bottom: 20px;
+  }
+  .settingsContent {
+    padding: 28px 24px;
+  }
+}

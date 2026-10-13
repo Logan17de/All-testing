@@ -9,6 +9,7 @@ import type {
   DesktopMonitor,
   DesktopWindow,
 } from "./runtime-desktop-session.js";
+import { sameDesktopWindow, windowCaptureScope } from "./runtime-desktop-session.js";
 
 /** Fixed native bridge; caller data is JSON on stdin, never executable code or argv. */
 export const WINDOWS_DESKTOP_SCRIPT = String.raw`
@@ -22,6 +23,7 @@ $references = @('System.dll', [System.Windows.Forms.Form].Assembly.Location, [Sy
 Add-Type -ReferencedAssemblies $references -TypeDefinition @'
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -35,6 +37,12 @@ public class ZetDesktop {
  delegate bool EnumProc(IntPtr hwnd, IntPtr data);
  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
  [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
+ [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hwnd);
+ [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+ [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
+ [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hwnd, IntPtr dc, uint flags);
+ [StructLayout(LayoutKind.Sequential)] struct RECT { public int left,top,right,bottom; }
  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
@@ -48,7 +56,33 @@ public class ZetDesktop {
  [StructLayout(LayoutKind.Sequential)] struct MOUSE { public int x,y; public uint data,flags,time; public UIntPtr extra; }
  [StructLayout(LayoutKind.Sequential)] struct KEY { public ushort key,scan; public uint flags,time; public UIntPtr extra; }
  public class Monitor { public string id; public int x,y,width,height; public double scale; }
- public class Window { public string id,title; }
+ public class Rectangle { public int x,y,width,height; }
+ public class Window { public string id,title,processStartedAt,windowClass; public uint processId; public bool focused; public Rectangle bounds; }
+ public static Window InspectWindow(string id) {
+   var hwnd=new IntPtr(Int64.Parse(id)); uint pid; RECT r;
+   if(!IsWindow(hwnd)||!IsWindowVisible(hwnd)||IsIconic(hwnd)||GetWindowThreadProcessId(hwnd,out pid)==0||pid==0||!GetWindowRect(hwnd,out r))throw new Exception();
+   var title=new StringBuilder(201); GetWindowText(hwnd,title,201); var cls=new StringBuilder(257); if(GetClassName(hwnd,cls,257)==0)throw new Exception();
+   string started; using(var process=Process.GetProcessById((int)pid)) { started=process.StartTime.ToUniversalTime().Ticks.ToString(); }
+   return new Window{id=id,title=title.ToString(),processId=pid,processStartedAt=started,windowClass=cls.ToString(),focused=GetForegroundWindow()==hwnd,bounds=new Rectangle{x=r.left,y=r.top,width=r.right-r.left,height=r.bottom-r.top}};
+ }
+ public static void CheckWindow(string id,uint pid,string started,string cls,string title,int x,int y,int width,int height) {
+   var w=InspectWindow(id); if(!w.focused||w.processId!=pid||w.processStartedAt!=started||w.windowClass!=cls||w.title!=title||w.bounds.x!=x||w.bounds.y!=y||w.bounds.width!=width||w.bounds.height!=height)throw new Exception();
+ }
+ public static void CheckMonitor(string id,int x,int y,int width,int height) {
+   foreach(var m in Monitors()) { if(m.id==id&&m.x==x&&m.y==y&&m.width==width&&m.height==height)return; } throw new Exception();
+ }
+ public static string CaptureWindow(string id,uint pid,string started,string cls,string title,int x,int y,int width,int height,int clipX,int clipY,int clipWidth,int clipHeight,string monitorId,int mx,int my,int mw,int mh) {
+   if(width<=0||height<=0||width>16384||height>16384||(long)width*height>32000000||clipWidth<=0||clipHeight<=0||clipX<x||clipY<y||(long)clipX+clipWidth>(long)x+width||(long)clipY+clipHeight>(long)y+height)throw new Exception();
+   CheckMonitor(monitorId,mx,my,mw,mh);
+   if(clipX<mx||clipY<my||(long)clipX+clipWidth>(long)mx+mw||(long)clipY+clipHeight>(long)my+mh)throw new Exception();
+   CheckWindow(id,pid,started,cls,title,x,y,width,height);
+   using(var image=new Bitmap(width,height,PixelFormat.Format32bppArgb)) {
+     using(var g=Graphics.FromImage(image)) { g.Clear(Color.Transparent); var dc=g.GetHdc(); try { if(!PrintWindow(new IntPtr(Int64.Parse(id)),dc,2))throw new Exception(); } finally {g.ReleaseHdc(dc);} }
+     CheckWindow(id,pid,started,cls,title,x,y,width,height);
+     CheckMonitor(monitorId,mx,my,mw,mh);
+     using(var clipped=image.Clone(new System.Drawing.Rectangle(clipX-x,clipY-y,clipWidth,clipHeight),PixelFormat.Format32bppArgb)) using(var stream=new MemoryStream()) { clipped.Save(stream,ImageFormat.Png); if(stream.Length>18000000)throw new Exception(); return Convert.ToBase64String(stream.ToArray()); }
+   }
+ }
  public static void Initialize() { try { if(SetProcessDpiAwarenessContext(new IntPtr(-4))) return; } catch {} SetProcessDPIAware(); }
  public static Monitor[] Monitors() {
    var result = new List<Monitor>(); var v=SystemInformation.VirtualScreen;
@@ -58,7 +92,7 @@ public class ZetDesktop {
      result.Add(new Monitor{id="monitor-"+(index++),x=b.X,y=b.Y,width=b.Width,height=b.Height,scale=scale}); }
    return result.ToArray();
  }
- public static Window[] Windows() { var list=new List<Window>(); EnumWindows((hwnd,data)=>{ if(list.Count>=200)return false; if(!IsWindowVisible(hwnd))return true; var text=new StringBuilder(201); GetWindowText(hwnd,text,201); if(text.Length>0)list.Add(new Window{id=hwnd.ToInt64().ToString(),title=text.ToString()}); return true;},IntPtr.Zero); return list.ToArray(); }
+ public static Window[] Windows() { var list=new List<Window>(); EnumWindows((hwnd,data)=>{ if(list.Count>=200)return false; if(!IsWindowVisible(hwnd))return true; try {var window=InspectWindow(hwnd.ToInt64().ToString()); if(window.title.Length>0)list.Add(window);} catch {} return true;},IntPtr.Zero); return list.ToArray(); }
  public static string Capture(int x,int y,int width,int height) {
    if(width<=0||height<=0||width>16384||height>16384||(long)width*height>32000000) throw new Exception();
    var v=SystemInformation.VirtualScreen; if(x<v.X||y<v.Y||(long)x+width>(long)v.X+v.Width||(long)y+height>(long)v.Y+v.Height)throw new Exception();
@@ -78,6 +112,7 @@ if ($data.operation -eq 'validate') { '{"ok":true}'; exit 0 }
 switch ($data.operation) {
  'inventory' { @{monitors=@([ZetDesktop]::Monitors());windows=@([ZetDesktop]::Windows())} | ConvertTo-Json -Depth 5 -Compress }
  'capture' { @{png=[ZetDesktop]::Capture([int]$data.x,[int]$data.y,[int]$data.width,[int]$data.height)} | ConvertTo-Json -Compress }
+ 'capture-window' { $w=$data.window; $b=$w.bounds; $m=$data.monitor; $png=[ZetDesktop]::CaptureWindow([string]$w.id,[uint32]$w.processId,[string]$w.processStartedAt,[string]$w.windowClass,[string]$w.title,[int]$b.x,[int]$b.y,[int]$b.width,[int]$b.height,[int]$data.x,[int]$data.y,[int]$data.width,[int]$data.height,[string]$m.id,[int]$m.x,[int]$m.y,[int]$m.width,[int]$m.height); @{png=$png;window=[ZetDesktop]::InspectWindow([string]$w.id)} | ConvertTo-Json -Depth 5 -Compress }
  'act' { if($data.kind -ne 'focus') { [ZetDesktop]::CheckFocus([string]$data.selectedWindow) }; switch($data.kind) {
    'focus' { [ZetDesktop]::Focus([string]$data.windowId) }
    'move' { [ZetDesktop]::Mouse([int]$data.x,[int]$data.y,$false) }
@@ -264,6 +299,15 @@ export class RuntimeWindowsDesktopDriver implements DesktopDriver {
       },
       signal,
     );
+    return this.#storeCapture(result, monitor.width, monitor.height, signal);
+  }
+  async #storeCapture(
+    result: Record<string, unknown>,
+    width: number,
+    height: number,
+    signal: AbortSignal,
+    scope?: DesktopCapture["scope"],
+  ): Promise<DesktopCapture> {
     if (
       typeof result.png !== "string" ||
       result.png.length > 24_000_000 ||
@@ -274,8 +318,8 @@ export class RuntimeWindowsDesktopDriver implements DesktopDriver {
     if (
       bytes.length < 24 ||
       bytes.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a" ||
-      bytes.readUInt32BE(16) !== monitor.width ||
-      bytes.readUInt32BE(20) !== monitor.height
+      bytes.readUInt32BE(16) !== width ||
+      bytes.readUInt32BE(20) !== height
     )
       throw failure();
     const directory = await mkdtemp(path.join(tmpdir(), "zet-desktop-"));
@@ -285,12 +329,34 @@ export class RuntimeWindowsDesktopDriver implements DesktopDriver {
       await writeFile(localPath, bytes, { mode: 0o600, flag: "wx" });
       signal.throwIfAborted();
       this.#captures.set(localPath, directory);
-      return { localPath, width: monitor.width, height: monitor.height };
+      return { localPath, width, height, ...(scope ? { scope } : {}) };
     } catch {
       await rm(directory, { recursive: true, force: true });
       signal.throwIfAborted();
       throw failure();
     }
+  }
+  async captureWindow(
+    window: DesktopWindow,
+    monitor: DesktopMonitor,
+    signal: AbortSignal,
+  ): Promise<DesktopCapture> {
+    const scope = windowCaptureScope(monitor, window);
+    const result = await this.#invoke(
+      {
+        operation: "capture-window",
+        window: structuredClone(window),
+        monitor: structuredClone(monitor),
+        x: scope.x,
+        y: scope.y,
+        width: scope.width,
+        height: scope.height,
+      },
+      signal,
+    );
+    const returned = result.window as DesktopWindow | undefined;
+    if (!returned || !returned.focused || !sameDesktopWindow(window, returned)) throw failure();
+    return this.#storeCapture(result, scope.width, scope.height, signal, scope);
   }
   async act(action: DesktopAction, signal: AbortSignal): Promise<void> {
     if (action.kind === "move" || action.kind === "click") {

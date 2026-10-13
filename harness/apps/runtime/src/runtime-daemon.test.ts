@@ -62,6 +62,7 @@ describe("RuntimeDaemon", () => {
       { version: 25, name: "durable-assistant-access" },
       { version: 26, name: "durable-native-chat-run-provenance" },
       { version: 27, name: "durable-assistant-tool-access" },
+      { version: 28, name: "scoped-archived-chat-deletion" },
     ]);
   });
 
@@ -113,10 +114,10 @@ describe("RuntimeDaemon", () => {
           query: "ok",
           migrations: {
             status: "ok",
-            appliedCount: 27,
-            expectedCount: 27,
-            appliedVersion: 27,
-            expectedVersion: 27,
+            appliedCount: 28,
+            expectedCount: 28,
+            appliedVersion: 28,
+            expectedVersion: 28,
           },
         },
       },

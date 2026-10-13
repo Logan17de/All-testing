@@ -17,6 +17,7 @@ const object = (value: unknown): Value =>
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssistantId?: string }) {
   const [assistants, setAssistants] = useState<Assistant[]>([]),
+    [metadataReady, setMetadataReady] = useState(false),
     [chats, setChats] = useState<Chat[]>([]),
     [assistantId, setAssistantId] = useState(initialAssistantId),
     [access, setAccess] = useState<AssistantAccess | null>(null),
@@ -58,6 +59,7 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
       setNotice("");
     }
     generation.current = next;
+    setMetadataReady(true);
     setAssistants(
       data.assistants
         .map((raw) => {
@@ -190,11 +192,22 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
   ];
   return (
     <>
+      {busy ? (
+        <p role="status" className="muted">
+          Updating assistant connections…
+        </p>
+      ) : null}
       <section className="panel">
         <h2 className="panelTitle">Assistant</h2>
-        <label>
+        {!metadataReady && !error ? (
+          <p role="status" className="muted">
+            Loading saved assistants…
+          </p>
+        ) : null}
+        <label style={{ display: "block", marginBlock: 12 }}>
           Saved assistant{" "}
           <select
+            className="field"
             style={{ maxWidth: "100%" }}
             disabled={busy}
             value={assistantId}
@@ -217,6 +230,8 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
           </select>
         </label>{" "}
         <button
+          className="btn"
+          type="button"
           disabled={busy}
           onClick={() => {
             void run(async () => {
@@ -230,8 +245,11 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
             });
           }}
         >
-          Create assistant with its own chat
+          {busy ? "Working…" : "Create assistant with its own chat"}
         </button>
+        {metadataReady && !assistants.length && !error ? (
+          <p className="muted">No saved assistants are available yet. Create one to begin.</p>
+        ) : null}
         <p className="muted">
           The list contains chat metadata only. Listing a chat does not authorize this assistant to
           read messages or control it.
@@ -293,6 +311,8 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
                         </p>
                       ) : null}
                       <button
+                        className="btn"
+                        type="button"
                         disabled={busy}
                         onClick={() => {
                           void run(() => disconnect(grant.chatId));
@@ -316,9 +336,10 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
           </section>
           <section className="panel">
             <h2 className="panelTitle">Connect an existing chat</h2>
-            <label>
+            <label style={{ display: "block", marginBlock: 12 }}>
               Chat metadata{" "}
               <select
+                className="field"
                 style={{ maxWidth: "100%" }}
                 value={candidate}
                 disabled={busy}
@@ -342,7 +363,7 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
               </select>
             </label>
             <p>
-              <label>
+              <label style={{ display: "block", marginBlock: 12 }}>
                 <input
                   type="checkbox"
                   checked={read}
@@ -354,7 +375,7 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
                 />{" "}
                 Read this chat’s messages
               </label>{" "}
-              <label>
+              <label style={{ display: "block", marginBlock: 12 }}>
                 <input
                   type="checkbox"
                   checked={control}
@@ -367,7 +388,7 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
                 Control this chat’s tasks within its granted permissions
               </label>
             </p>
-            <label>
+            <label style={{ display: "block", marginBlock: 12 }}>
               <input
                 type="checkbox"
                 checked={confirmed}
@@ -377,6 +398,8 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
               I authorize this exact assistant/chat connection and the selected permissions.
             </label>{" "}
             <button
+              className="btn"
+              type="button"
               disabled={busy || !candidate || !permissions.length || !confirmed}
               onClick={() => {
                 void run(async () => {
@@ -416,10 +439,12 @@ export function AssistantWorkspace({ initialAssistantId = "" }: { initialAssista
         </>
       ) : (
         <section className="panel">
-          <p>
-            {assistantId
-              ? "Loading verified assistant permissions…"
-              : "Create or select an assistant to manage its connections."}
+          <p role="status">
+            {error && assistantId
+              ? "Assistant permissions could not be loaded. Check the runtime connection or choose another assistant."
+              : assistantId
+                ? "Loading verified assistant permissions…"
+                : "Create or select an assistant to manage its connections."}
           </p>
         </section>
       )}

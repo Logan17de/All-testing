@@ -1,0 +1,400 @@
+/* Scoped workbench styles preserve the shared chat and run surfaces. */
+.appShell .editorPage {
+  min-height: 640px;
+  height: calc(100dvh - 44px);
+  padding: 20px;
+}
+.editorWorkbench {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  min-width: 0;
+  container-type: inline-size;
+}
+.editorToolbar,
+.editorToolbar__actions,
+.connectionComposer__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.editorToolbar {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.editorToolbar__summary h1 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.025em;
+}
+.editorToolbar__summary p {
+  margin: 5px 0 0;
+}
+.editorToolbar__actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+.editorPage .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.editorPage .btn svg {
+  flex-shrink: 0;
+}
+.editorPage .editorIconButton {
+  width: 34px;
+  padding: 7px;
+}
+.editorNotice {
+  margin: 0;
+}
+.appShell .editorPage .editor {
+  display: grid;
+  grid-template-columns:
+    minmax(168px, min(var(--editor-palette-width), 25%)) 10px minmax(240px, 1fr)
+    10px minmax(240px, min(var(--editor-inspector-width), 34%));
+  gap: 0;
+  min-height: 0;
+}
+.editorPage .editorResize {
+  align-self: stretch;
+  min-height: 100%;
+}
+.editorPage .editorPanel {
+  padding: 17px;
+  min-width: 0;
+  background: var(--app-panel, #202020);
+  border-color: var(--app-border, #353535);
+}
+.editorPage .editorPanel .field {
+  margin-bottom: 14px;
+}
+.editorPage .editorPanel .field__input {
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.6;
+}
+.editorPage .editorPanel .field__hint {
+  display: block;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+.editorPage .inspectorNavigation {
+  margin: 0 0 18px;
+}
+.editorSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--app-border, #353535);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  color: var(--app-muted, #999);
+}
+.editorSearch:focus-within {
+  outline: 2px solid var(--app-accent, #b4c3dd);
+  outline-offset: 2px;
+}
+.editorSearch input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+.editorSearch svg {
+  flex-shrink: 0;
+}
+.editorPage .paletteItem {
+  padding: 11px 12px;
+  gap: 5px;
+  background: transparent;
+}
+.editorPage .paletteItem:hover {
+  background: var(--app-hover, #2b2b2b);
+}
+.editorPage .paletteItem__title {
+  font-size: 13px;
+  font-weight: 550;
+}
+.editorPage .paletteItem__meta {
+  font-family: inherit;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.editorPage .transferBox {
+  min-height: 250px;
+  margin-bottom: 16px;
+  font-family: var(--app-font-sans, sans-serif);
+  resize: vertical;
+}
+.editorPage .editorPanel code {
+  font-family: inherit;
+  overflow-wrap: anywhere;
+}
+.appShell .editorPage .canvas {
+  height: auto;
+  min-height: 420px;
+  background: var(--app-canvas, #191919);
+}
+.editorPage .hnode .react-flow__handle.hnode__handle {
+  width: 15px;
+  height: 15px;
+  border-width: 3px;
+  cursor: crosshair;
+  transition:
+    box-shadow 120ms ease,
+    background 120ms ease;
+}
+.editorPage .hnode .react-flow__handle.hnode__handle::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+}
+.editorPage .hnode .react-flow__handle.hnode__handle:hover,
+.editorPage .hnode .react-flow__handle.hnode__handle.connectingto {
+  box-shadow: 0 0 0 5px rgb(151 190 247 / 18%);
+  background: #bfd6f5;
+}
+.editorPage .hnode .react-flow__handle.hnode__handle.valid {
+  box-shadow: 0 0 0 5px rgb(135 210 173 / 25%);
+  background: #9bd3b1;
+}
+.editorPage .hnode__port {
+  min-height: 27px;
+}
+.editorPage .hnode__ctlport {
+  min-width: 30px;
+}
+.editorPage .react-flow__edge-path {
+  stroke-width: 2;
+}
+.editorPage .react-flow__edge.selected .react-flow__edge-path {
+  stroke: #bdd4f2;
+  stroke-width: 3;
+}
+.editorPage .react-flow__edge-interaction {
+  cursor: pointer;
+}
+.editorPage .react-flow__minimap {
+  width: 120px;
+  height: 80px;
+  bottom: 58px;
+  border-radius: 8px;
+  overflow: hidden;
+  opacity: 0.75;
+}
+.editorCanvasHint {
+  position: absolute;
+  z-index: 5;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  padding: 8px 11px;
+  border: 1px solid var(--app-border, #353535);
+  border-radius: 8px;
+  background: var(--app-panel, #202020);
+  color: var(--app-muted, #aaa);
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.editorEmptyCanvas {
+  position: absolute;
+  top: 36%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(310px, 80%);
+  text-align: center;
+  pointer-events: none;
+  color: var(--app-muted, #aaa);
+}
+.editorEmptyCanvas > svg {
+  margin: 0 auto 14px;
+  opacity: 0.65;
+}
+.editorEmptyCanvas h2 {
+  font-size: 16px;
+  color: var(--app-text, #ececec);
+  margin: 0 0 8px;
+}
+.editorEmptyCanvas p {
+  font-size: 12px;
+  line-height: 1.7;
+}
+.editorEmptyCanvas a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  pointer-events: auto;
+  font-size: 12px;
+}
+.connectionComposer {
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--app-border, #353535);
+}
+.connectionComposer__heading h2 {
+  margin: 0;
+}
+.connectionBuilder {
+  min-width: 0;
+}
+.connectionBuilder .field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.connectionBuilder .field__label {
+  font-size: 12px;
+}
+.connectionBuilder .field__input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 12px;
+}
+.connectionList {
+  margin-top: 24px;
+  padding-top: 6px;
+  border-top: 1px solid var(--app-border, #353535);
+}
+.connectionList ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.connectionList li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--app-border, #353535);
+  padding: 10px 0;
+}
+.connectionList__name {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 2px 0;
+  text-align: left;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.connectionList__kind {
+  display: block;
+  color: var(--app-muted, #aaa);
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+.editorPage .connectionList__remove {
+  padding: 7px;
+  min-width: 32px;
+  flex-shrink: 0;
+}
+.editorPage .connectionList__remove:hover {
+  color: #f3a5a5;
+  border-color: #8c5656;
+}
+@container (max-width: 820px) {
+  .appShell .editorPage .editor {
+    grid-template-columns: minmax(168px, min(var(--editor-palette-width), 35%)) 10px minmax(0, 1fr);
+    overflow-y: auto;
+  }
+  .editorPage .editorInspector {
+    grid-column: 1 / -1;
+    margin-top: 12px;
+    max-height: 480px;
+  }
+  .editorPage .editorResize + .editorInspector {
+    grid-row: 2;
+  }
+  .editorPage .canvas + .editorResize {
+    display: none;
+  }
+  .editorPage .editorPalette {
+    max-height: 540px;
+  }
+  .appShell .editorPage .canvas {
+    min-height: 540px;
+  }
+}
+@container (max-width: 580px) {
+  .appShell .editorPage .editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .editorPage .editorResize {
+    display: none;
+  }
+  .editorPage .editorPanel {
+    flex-shrink: 0;
+  }
+  .editorPage .editorPalette {
+    max-height: 240px;
+  }
+  .editorPage .editorInspector {
+    max-height: none;
+    margin-top: 0;
+  }
+  .appShell .editorPage .canvas {
+    flex-shrink: 0;
+    height: 55dvh;
+    min-height: 420px;
+  }
+}
+@media (max-width: 760px) {
+  .appShell .editorPage {
+    padding: 16px;
+    height: auto;
+    min-height: 0;
+  }
+  .editorWorkbench {
+    overflow: visible;
+  }
+  .appShell .editorPage .editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: visible;
+  }
+  .editorPage .editorResize {
+    display: none;
+  }
+  .editorPage .editorPalette {
+    max-height: 260px;
+  }
+  .editorPage .editorInspector {
+    max-height: none;
+    margin-top: 0;
+  }
+  .appShell .editorPage .canvas {
+    height: 60vh;
+    min-height: 420px;
+  }
+  .editorPage .react-flow__minimap {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .editorPage .hnode .react-flow__handle.hnode__handle {
+    transition: none;
+  }
+}

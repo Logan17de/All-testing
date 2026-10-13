@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -17,8 +17,8 @@ import { RuntimeHumanApprovals } from "./runtime-human-approvals.js";
 import { RuntimeRedactionRegistry } from "./runtime-redaction.js";
 
 it("serializes turns, binds call consent, rejects stale/duplicate answers, and expires waits", async () => {
-  const root = await mkdtemp(join(tmpdir(), "zet-approval-security-"));
-  const other = await mkdtemp(join(tmpdir(), "zet-approval-other-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "zet-approval-security-")));
+  const other = await realpath(await mkdtemp(join(tmpdir(), "zet-approval-other-")));
   const db = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
   db.open();
   runSqliteMigrations(db.connection(), RUNTIME_DATABASE_MIGRATIONS);

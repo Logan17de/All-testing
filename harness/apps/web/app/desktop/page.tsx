@@ -11,9 +11,9 @@ export default async function DesktopPage({
   const params = await searchParams;
   return (
     <main className="page">
-      <nav className="crumbs">
+      <nav className="crumbs" aria-label="Breadcrumb">
         <Link href="/agent">Coding workspace</Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <span>Desktop session</span>
       </nav>
       <h1 className="pageTitle">Desktop session</h1>

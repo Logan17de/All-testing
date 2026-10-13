@@ -1,8 +1,10 @@
 import { attestNativeChatRun } from "./runtime-native-chat-runs.js";
 import { resolve } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { readSetting, writeSetting } from "@zet-harness/db/durable-setting-records";
 import type { AdapterInvocationContext, JsonObject } from "@zet-harness/plugin-api";
 import { createSortableId, SORTABLE_ID_PATTERN } from "@zet-harness/db/sortable-id";
-import { createProject, listProjects } from "@zet-harness/db/durable-project-records";
+import { createProject, listProjects, readProject } from "@zet-harness/db/durable-project-records";
 import {
   appendMessage,
   archiveConversation,
@@ -10,6 +12,7 @@ import {
   listConversations,
   readConversation,
   readConversationMessages,
+  readMessagePath,
   restoreConversation,
   type DurableConversationRecord,
 } from "@zet-harness/db/durable-conversation-records";
@@ -28,6 +31,20 @@ import {
   saveNativeChatToolScopes,
 } from "./runtime-coding-plugin-scopes.js";
 import { readWorkspaceInstructions } from "./runtime-workspace-instructions.js";
+import { RuntimeCodingPreflightError } from "./runtime-coding-preflight.js";
+import {
+  exportSessionTranscript,
+  readSessionPinned,
+  writeSessionPinned,
+} from "./runtime-session-preferences.js";
+import {
+  ArchivedChatError,
+  archivedRetentionCutoff,
+  deleteArchivedChat,
+  readArchivedRetentionDays,
+  validateArchivedRetentionDays,
+  writeArchivedRetentionDays,
+} from "./runtime-archived-chats.js";
 
 export interface NativeAgentToolCatalogEntry {
   readonly id: string;
@@ -37,10 +54,13 @@ export interface NativeAgentToolCatalogEntry {
 }
 
 export interface RuntimeCodingServices extends RuntimeGraphHttpServices {
-  workspace(): string;
+  workspace(): string | undefined;
+  workspaceTrusted?: () => boolean;
   toolCatalog?: () => readonly NativeAgentToolCatalogEntry[];
   approvals: RuntimeHumanApprovals;
   cancel(runId: string): Promise<void>;
+  isRunActive?: (runId: string) => boolean;
+  forgetDeletedRuns?: (runIds: readonly string[]) => void;
   modelCatalog?: () => Promise<
     readonly { id: string; displayName: string; provider: string; model: string }[]
   >;
@@ -61,6 +81,8 @@ export interface RuntimeCodingServices extends RuntimeGraphHttpServices {
 }
 /** Coding sessions are durable conversations; turns are ordinary recoverable graph runs. */
 export class RuntimeCodingService {
+  #archiveMaintenanceTimer: ReturnType<typeof setInterval> | undefined;
+  #archiveMaintenanceTask: Promise<{ deletedCount: number }> | undefined;
   #scope = "";
   #scopeGeneration = 0;
   #turnStarts = new Map<string, Promise<unknown>>();
@@ -112,6 +134,66 @@ export class RuntimeCodingService {
   async drainCancellations(): Promise<void> {
     await Promise.all(this.#cancellations.values());
   }
+  async startArchiveMaintenance(): Promise<void> {
+    if (this.#archiveMaintenanceTimer) return;
+    await this.purgeArchivedSessions();
+    this.#archiveMaintenanceTimer = setInterval(() => {
+      void this.purgeArchivedSessions().catch(() => undefined);
+    }, 60_000);
+    this.#archiveMaintenanceTimer.unref();
+  }
+  stopArchiveMaintenance(): void {
+    clearInterval(this.#archiveMaintenanceTimer);
+    this.#archiveMaintenanceTimer = undefined;
+  }
+  /** Eligibility is re-read inside the same FIFO transaction as permanent deletion. */
+  purgeArchivedSessions(): Promise<{ deletedCount: number }> {
+    if (this.#archiveMaintenanceTask) return this.#archiveMaintenanceTask;
+    const task = this.services.database
+      .commit((db) => {
+        const cutoff = archivedRetentionCutoff(readArchivedRetentionDays(db), Date.now());
+        if (cutoff === undefined) return { deletedCount: 0, runIds: [] as string[] };
+        const sessions = db
+          .prepare(
+            "SELECT conversation_id FROM conversations WHERE status='archived' AND archived_at_ms<=? ORDER BY archived_at_ms,conversation_id",
+          )
+          .all(cutoff);
+        const runIds: string[] = [];
+        let deletedCount = 0;
+        for (const row of sessions) {
+          const id = String(row.conversation_id);
+          if (this.#turnStarts.has(id)) continue;
+          try {
+            const removed = deleteArchivedChat(db, id, this.services.isRunActive);
+            runIds.push(...removed.runIds);
+            deletedCount++;
+          } catch (error) {
+            if (
+              !(error instanceof ArchivedChatError) ||
+              !["SESSION_BUSY", "SESSION_SHARED_ACTIVITY"].includes(error.code)
+            )
+              throw error;
+          }
+          if (deletedCount >= 100) break;
+        }
+        return { deletedCount, runIds };
+      })
+      .then(({ deletedCount, runIds }) => {
+        this.services.forgetDeletedRuns?.(runIds);
+        for (const runId of runIds) {
+          this.services.revokeRun?.(runId);
+          this.#grants.delete(runId);
+        }
+        return { deletedCount };
+      });
+    this.#archiveMaintenanceTask = task;
+    void task
+      .finally(() => {
+        if (this.#archiveMaintenanceTask === task) this.#archiveMaintenanceTask = undefined;
+      })
+      .catch(() => undefined);
+    return task;
+  }
   close(): void {
     for (const runId of this.#grants.keys()) {
       this.services.revokeRun?.(runId);
@@ -125,6 +207,12 @@ export class RuntimeCodingService {
     this.#root();
     const grant = this.#grants.get(runId);
     if (grant) {
+      if (!this.#grantRootValid(grant)) {
+        this.services.revokeRun?.(runId);
+        this.#grants.delete(runId);
+        this.#queueCancellation(runId);
+        return undefined;
+      }
       const run = this.services.database
         .connection()
         .prepare("SELECT status FROM runs WHERE run_id=?")
@@ -145,7 +233,7 @@ export class RuntimeCodingService {
     const grant = this.#grants.get(context.runId);
     if (
       !grant?.mutationConsent ||
-      grant.root !== this.#scope ||
+      !this.#grantRootValid(grant) ||
       grant.generation !== this.#requestGeneration ||
       context.signal.aborted ||
       this.#toolApprovals.size >= 100
@@ -165,7 +253,7 @@ export class RuntimeCodingService {
         resolveApproval(
           value &&
             generation === this.#requestGeneration &&
-            grant.root === this.#scope &&
+            this.#grantRootValid(grant) &&
             !context.signal.aborted,
         );
       };
@@ -188,7 +276,8 @@ export class RuntimeCodingService {
   }
   constructor(readonly services: RuntimeCodingServices) {}
   #root() {
-    const root = resolve(this.services.workspace());
+    const selected = this.services.workspace();
+    const root = selected ? resolve(selected) : "";
     if (this.#scope && root !== this.#scope) {
       for (const run of this.#runs(this.#scope))
         if (!["completed", "failed", "cancelled"].includes(run.status))
@@ -200,16 +289,54 @@ export class RuntimeCodingService {
     this.#scope = root;
     return root;
   }
-  #projects(root = this.#root()) {
-    return listProjects(this.services.database.connection(), { limit: 1000 }).filter(
-      (p) => p.workspacePath !== null && resolve(p.workspacePath) === root,
+  #projects(root?: string) {
+    return listProjects(this.services.database.connection(), { limit: 1000, status: "all" }).filter(
+      (p) => root === undefined || (p.workspacePath !== null && resolve(p.workspacePath) === root),
     );
+  }
+  #sessionRoot(session: DurableConversationRecord): string {
+    const project = readProject(this.services.database.connection(), session.projectId);
+    const selected = this.#root();
+    if (!project?.workspacePath || project.status !== "active")
+      throw new RuntimeCodingPreflightError(
+        "PROJECT_FOLDER_UNTRUSTED",
+        "Select and trust this project's folder before starting a turn.",
+      );
+    const root = resolve(project.workspacePath);
+    try {
+      if (!statSync(root).isDirectory() || realpathSync.native(root) !== root)
+        throw new Error("changed");
+    } catch {
+      throw new RuntimeCodingPreflightError(
+        "PROJECT_FOLDER_UNAVAILABLE",
+        "The trusted project folder changed or is unavailable; select and trust it again.",
+      );
+    }
+    const trusted =
+      readSetting(this.services.database.connection(), `project.trusted.${project.projectId}`)
+        ?.value === project.workspacePath;
+    if (!trusted && !(root === selected && (this.services.workspaceTrusted?.() ?? true)))
+      throw new RuntimeCodingPreflightError(
+        "PROJECT_FOLDER_UNTRUSTED",
+        "Confirm trust for this exact project folder before starting a turn.",
+      );
+    return root;
+  }
+  #grantRootValid(grant: { root: string; sessionId: string; generation: number }): boolean {
+    try {
+      return (
+        grant.generation === this.#requestGeneration &&
+        this.#sessionRoot(this.#session(grant.sessionId)) === grant.root
+      );
+    } catch {
+      return false;
+    }
   }
   #session(id: unknown): DurableConversationRecord {
     if (typeof id !== "string" || !SORTABLE_ID_PATTERN.test(id))
       throw new Error("Invalid session.");
     const session = readConversation(this.services.database.connection(), id);
-    if (!session || !this.#projects().some((p) => p.projectId === session.projectId))
+    if (!session || !readProject(this.services.database.connection(), session.projectId))
       throw new Error("Session is outside the current workspace.");
     return session;
   }
@@ -220,6 +347,9 @@ export class RuntimeCodingService {
       preview: session.title,
       projectId: session.projectId,
       status: session.status,
+      pinned: readSessionPinned(this.services.database.connection(), session.conversationId),
+      updatedAt: session.updatedAtMs,
+      archivedAt: session.archivedAtMs,
       graphId: linked?.graphId ?? null,
     };
   }
@@ -410,6 +540,7 @@ export class RuntimeCodingService {
     }
     return {
       available: true,
+      sessionFeatures: { pin: true, export: true },
       engine: "native",
       scopeGeneration: this.#scopeGeneration,
       requestGeneration: this.#requestGeneration,
@@ -502,18 +633,23 @@ export class RuntimeCodingService {
     },
   ) {
     const connection = this.services.database.connection();
-    const root = this.#root();
+    let root = this.#root();
     const fields: Record<string, string[]> = {
       "model/list": [],
-      "session/list": ["archived"],
+      "session/list": ["archived", "projectId"],
       "session/start": ["title", "projectId"],
       "session/read": ["sessionId"],
+      "session/pin": ["sessionId", "pinned"],
+      "session/export": ["sessionId"],
       "session/graph": ["sessionId"],
       "session/plugins": ["sessionId"],
       "session/plugin-scope": ["sessionId", "model", "tools"],
       "session/resume": ["sessionId"],
       "session/archive": ["sessionId"],
       "session/restore": ["sessionId"],
+      "session/delete": ["sessionId"],
+      "session/retention/read": [],
+      "session/retention/update": ["days"],
       "turn/read": ["sessionId", "turnId"],
       "turn/interrupt": ["sessionId", "turnId"],
       "turn/start": [
@@ -570,25 +706,76 @@ export class RuntimeCodingService {
               model: m.model,
             })),
       };
+    if (action === "session/retention/read")
+      return { retention: { days: readArchivedRetentionDays(connection) } };
+    if (action === "session/retention/update") {
+      const days = validateArchivedRetentionDays(params.days);
+      await this.services.database.commit((db) => writeArchivedRetentionDays(db, days));
+      const { deletedCount } = await this.purgeArchivedSessions();
+      return { retention: { days }, deletedCount };
+    }
     if (action === "session/list") {
       if (params.archived !== undefined && typeof params.archived !== "boolean")
         throw new Error("Invalid archived filter.");
+      if (
+        params.projectId !== undefined &&
+        (typeof params.projectId !== "string" || !readProject(connection, params.projectId))
+      )
+        throw new Error("Project is unavailable.");
+      if (params.archived === true) {
+        const sessions = connection
+          .prepare(
+            "SELECT conversation_id FROM conversations WHERE status='archived' AND (? IS NULL OR project_id=?)",
+          )
+          .all(params.projectId ?? null, params.projectId ?? null);
+        return {
+          data: sessions
+            .map((row) => this.#view(readConversation(connection, String(row.conversation_id))!))
+            .sort(
+              (a, b) =>
+                Number(b.pinned) - Number(a.pinned) ||
+                b.updatedAt - a.updatedAt ||
+                b.id.localeCompare(a.id),
+            ),
+        };
+      }
       return {
-        data: this.#projects().flatMap((p) =>
-          listConversations(connection, p.projectId, {
-            status: params.archived === true ? "archived" : "active",
-            limit: 200,
-          }).map((s) => this.#view(s)),
-        ),
+        data: this.#projects()
+          .filter((p) => params.projectId === undefined || p.projectId === params.projectId)
+          .flatMap((p) => {
+            const status = params.archived === true ? "archived" : "active";
+            const recent = listConversations(connection, p.projectId, { status, limit: 200 });
+            const pinned = connection
+              .prepare(
+                "SELECT c.conversation_id FROM conversations c JOIN app_settings s ON s.key = 'session.pinned.' || c.conversation_id WHERE c.project_id=? AND c.status=? AND s.value_json='true'",
+              )
+              .all(p.projectId, status) as { conversation_id: string }[];
+            const sessions = new Map(recent.map((s) => [s.conversationId, s]));
+            for (const row of pinned) {
+              const saved = readConversation(connection, row.conversation_id);
+              if (saved) sessions.set(saved.conversationId, saved);
+            }
+            return [...sessions.values()].map((s) => this.#view(s));
+          })
+          .sort(
+            (a, b) =>
+              Number(b.pinned) - Number(a.pinned) ||
+              b.updatedAt - a.updatedAt ||
+              b.id.localeCompare(a.id),
+          ),
       };
     }
     if (action === "session/start") {
       const title = text("title", 200, false) ?? "Coding session";
-      let project = this.#projects().find(
-        (p) => params.projectId === undefined || p.projectId === params.projectId,
-      );
-      if (!project && params.projectId !== undefined)
-        throw new Error("Project is outside the current workspace.");
+      let project =
+        params.projectId === undefined
+          ? this.#projects(root).find((p) => p.status === "active" && p.name === "Coding workspace")
+          : this.#projects().find((p) => p.status === "active" && p.projectId === params.projectId);
+      if (params.projectId !== undefined) {
+        if (!project) throw new Error("Project is unavailable.");
+        this.#sessionRoot({ projectId: project.projectId } as DurableConversationRecord);
+      } else if (!root || !(this.services.workspaceTrusted?.() ?? true))
+        throw new RuntimeCodingPreflightError("DEFAULT_FOLDER_UNTRUSTED");
       const session = await this.services.database.commit((db) => {
         project ??= createProject(db, {
           projectId: createSortableId(),
@@ -596,6 +783,8 @@ export class RuntimeCodingService {
           workspacePath: root,
           nowMs: Date.now(),
         });
+        if (params.projectId === undefined)
+          writeSetting(db, `project.trusted.${project.projectId}`, root, Date.now());
         return createConversation(db, {
           conversationId: createSortableId(),
           projectId: project.projectId,
@@ -606,6 +795,41 @@ export class RuntimeCodingService {
       return { session: this.#view(session) };
     }
     const session = this.#session(params.sessionId);
+    if (action === "session/delete") {
+      const removed = await this.services.database.commit((db) => {
+        if (this.#turnStarts.has(session.conversationId))
+          throw new ArchivedChatError(
+            "SESSION_BUSY",
+            "This chat has a turn starting. Wait for it to finish before deleting it permanently.",
+          );
+        return deleteArchivedChat(db, session.conversationId, this.services.isRunActive);
+      });
+      this.services.forgetDeletedRuns?.(removed.runIds);
+      for (const runId of removed.runIds) {
+        this.services.revokeRun?.(runId);
+        this.#grants.delete(runId);
+      }
+      return { deleted: true, sessionId: removed.sessionId };
+    }
+    if (action === "session/pin") {
+      if (typeof params.pinned !== "boolean") throw new Error("Invalid pin state.");
+      const pinned = params.pinned;
+      await this.services.database.commit((db) =>
+        writeSessionPinned(db, session.conversationId, pinned),
+      );
+      return { session: this.#view(session) };
+    }
+    if (action === "session/export") {
+      const latest = connection
+        .prepare(
+          "SELECT message_id FROM messages WHERE conversation_id=? ORDER BY message_id DESC LIMIT 1",
+        )
+        .get(session.conversationId) as { message_id: string } | undefined;
+      const messages = latest ? readMessagePath(connection, latest.message_id) : [];
+      if (messages.some((message) => message.conversationId !== session.conversationId))
+        throw new Error("Transcript branch is outside this session.");
+      return { export: exportSessionTranscript(session, messages, this.services.redact) };
+    }
     if (action === "session/plugins")
       return {
         available: this.#toolCatalog(),
@@ -630,7 +854,7 @@ export class RuntimeCodingService {
           Date.now(),
         ),
       );
-      if (this.#root() !== root) throw new Error("Workspace changed while saving plugin scope.");
+
       return { sessionId: session.conversationId, restrictions, appliesTo: "next-turn" };
     }
     if (action === "session/graph") {
@@ -676,6 +900,8 @@ export class RuntimeCodingService {
       return { turn: readRunView(this.services.database, turnId, this.services.redact) };
     }
     if (action !== "turn/start") throw new Error("Unsupported native agent action.");
+    root = this.#sessionRoot(session);
+    const folderGeneration = this.#requestGeneration;
     if (session.status !== "active") throw new Error("Restore this archived session first.");
     if (
       this.#runs().some(
@@ -700,7 +926,10 @@ export class RuntimeCodingService {
       this.services.isModelConfigured?.(modelId) ??
       listModelConfigs(connection).some((m) => m.modelId === modelId)
     ))
-      throw new Error("Select a configured inference model.");
+      throw new RuntimeCodingPreflightError(
+        "MODEL_NOT_CONFIGURED",
+        "Select a configured inference model.",
+      );
     authority ??= this.services.prepareTurn?.(session.conversationId);
     authority?.check();
     const ownScopes = readNativeChatToolScopes(connection, session.conversationId);
@@ -735,7 +964,8 @@ export class RuntimeCodingService {
         ? {}
         : { skillNames: [...(params.skillNames as string[])] }),
     });
-    if (this.#root() !== root) throw new Error("Workspace changed while preparing this turn.");
+    if (this.#sessionRoot(session) !== root || folderGeneration !== this.#requestGeneration)
+      throw new Error("Workspace changed while preparing this turn.");
     authority?.check();
     const custom = text("instructions", 12_000, false) ?? "";
     const workflow = buildWorkflow("chat", session.conversationId, {
@@ -763,10 +993,12 @@ export class RuntimeCodingService {
       this.services.capabilityAuthority(),
     );
     if (!compiled.valid) throw new Error("Native agent graph could not be prepared.");
-    if (this.#root() !== root) throw new Error("Workspace changed while preparing this turn.");
+    if (this.#sessionRoot(session) !== root || folderGeneration !== this.#requestGeneration)
+      throw new Error("Workspace changed while preparing this turn.");
     await this.services.database.commit((db) => {
       authority?.check();
-      if (this.#root() !== root) throw new Error("Workspace changed before prompt commit.");
+      if (this.#sessionRoot(session) !== root || folderGeneration !== this.#requestGeneration)
+        throw new Error("Workspace changed before prompt commit.");
       return appendMessage(db, {
         messageId: createSortableId(),
         conversationId: session.conversationId,
@@ -782,11 +1014,12 @@ export class RuntimeCodingService {
       Date.now(),
       () => {
         authority?.check();
-        if (this.#root() !== root) throw new Error("Workspace changed before run commit.");
+        if (this.#sessionRoot(session) !== root || folderGeneration !== this.#requestGeneration)
+          throw new Error("Workspace changed before run commit.");
       },
       (db, runId) => attestNativeChatRun(db, runId, session.conversationId),
     );
-    if (this.#root() !== root) {
+    if (this.#sessionRoot(session) !== root || folderGeneration !== this.#requestGeneration) {
       await this.services.cancel(created.runId);
       throw new Error("Workspace changed before dispatch.");
     }

@@ -102,7 +102,7 @@ export function createRuntimeCodingDesktopTools(options: {
                 windows: state.windows
                   .filter((window) => window.id === state.selection?.windowId)
                   .map((window) => ({ ...window })),
-                captureScope: "selected-monitor",
+                captureScope: state.selection?.windowId ? "selected-window" : "selected-monitor",
                 keyboardScope: state.selection?.windowId ?? null,
               },
             };

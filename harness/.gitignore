@@ -3,6 +3,10 @@ node_modules/
 
 # Next.js / build output
 .next/
+.next-review/
+.next-sessions/
+.next-sidebar/
+*review-dist/
 out/
 dist/
 build/
@@ -48,6 +52,7 @@ pnpm-debug.log*
 # Local editor / OS metadata
 .DS_Store
 Thumbs.db
+Microsoft/Windows/PowerShell/ModuleAnalysisCache
 .vscode/
 .idea/
 

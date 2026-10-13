@@ -120,7 +120,7 @@ describe.runIf(process.platform === "linux")(
           root,
           approve: async () => {
             await writeFile(join(root, "script.sh"), "concurrent edit");
-            return true;
+            return Promise.resolve(true);
           },
         })[0]!;
         await expect(patch.invoke(request, context())).rejects.toThrow("rejected");
@@ -148,7 +148,7 @@ describe.runIf(process.platform === "linux")(
           approve: async () => {
             await rename(join(root, "parent"), join(root, "old-parent"));
             await symlink(external, join(root, "parent"), "dir");
-            return true;
+            return Promise.resolve(true);
           },
         })[0]!;
         await expect(
@@ -339,4 +339,53 @@ it.skipIf(process.platform !== "linux")(
       await rm(root, { recursive: true, force: true });
     }
   },
+);
+
+it.skipIf(process.platform !== "win32")(
+  "executes actual Windows apply_patch with exact consent and preserves bytes on stale source or denial",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "zet-win-patch-"));
+    const file = join(root, "source.ts");
+    const input: JsonObject = {
+      path: "source.ts",
+      expectedContent: "alpha\nbeta\n",
+      edits: [{ oldText: "beta", newText: "gamma" }],
+    };
+    const approve = vi.fn((approval: { readonly tool: string; readonly args: JsonObject }) => {
+      expect(approval).toEqual({ tool: "harness.fs.apply_patch", args: input });
+      return Promise.resolve(true);
+    });
+    try {
+      await writeFile(file, input.expectedContent as string);
+      const patch = createRuntimeCodingFileTools({ root, approve }).find(
+        (tool) => tool.manifest.id === "harness.fs.apply_patch",
+      )!;
+      await patch.invoke(input, context(AbortSignal.timeout(70_000)));
+      expect(await readFile(file, "utf8")).toBe("alpha\ngamma\n");
+      expect(approve).toHaveBeenCalledTimes(1);
+      await expect(patch.invoke(input, context(AbortSignal.timeout(70_000)))).rejects.toThrow(
+        "rejected",
+      );
+      expect(await readFile(file, "utf8")).toBe("alpha\ngamma\n");
+      const denied = createRuntimeCodingFileTools({
+        root,
+        approve: () => Promise.resolve(false),
+      })[0]!;
+      await expect(
+        denied.invoke(
+          {
+            ...input,
+            expectedContent: "alpha\ngamma\n",
+            edits: [{ oldText: "gamma", newText: "denied" }],
+          },
+          context(),
+        ),
+      ).rejects.toThrow("rejected");
+      expect(await readFile(file, "utf8")).toBe("alpha\ngamma\n");
+      expect(await readdir(root)).toEqual(["source.ts"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  75_000,
 );

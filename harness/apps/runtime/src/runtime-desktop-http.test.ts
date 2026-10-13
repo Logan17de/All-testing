@@ -2,6 +2,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { windowCaptureScope } from "./runtime-desktop-session.js";
 import { RuntimeDesktopController } from "./runtime-desktop-http.js";
 import type { DesktopAction, DesktopDriver } from "./runtime-desktop-session.js";
 
@@ -12,12 +13,28 @@ async function fixture() {
     inventory: () =>
       Promise.resolve({
         monitors: [{ id: "left", x: -100, y: 0, width: 100, height: 100, scale: 1 }],
-        windows: [{ id: "123", title: "Fixture" }],
+        windows: [
+          {
+            id: "123",
+            title: "Fixture",
+            processId: 7,
+            processStartedAt: "100",
+            windowClass: "FixtureClass",
+            focused: true,
+            bounds: { x: -100, y: 0, width: 100, height: 100 },
+          },
+        ],
       }),
     capture: async () => {
       const localPath = path.join(root, "fixture.png");
       await writeFile(localPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]));
       return { localPath, width: 100, height: 100 };
+    },
+    captureWindow: async (window, monitor) => {
+      const scope = windowCaptureScope(monitor, window);
+      const localPath = path.join(root, "fixture-window.png");
+      await writeFile(localPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]));
+      return { localPath, width: scope.width, height: scope.height, scope };
     },
     act: async (action) => {
       calls.push(structuredClone(action));

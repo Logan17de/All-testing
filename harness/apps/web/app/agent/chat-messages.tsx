@@ -18,6 +18,12 @@ export function ChatMessages({ transcript }: { transcript: unknown }) {
                   ? "Assistant"
                   : message.role}
             </strong>
+            {message.role === "assistant" &&
+            !message.parts.some((part) =>
+              part.kind === "text" || part.kind === "reasoning" ? part.text.trim() : true,
+            ) ? (
+              <p className="chatText">No response text was returned.</p>
+            ) : null}
             {message.parts.map((part, index) =>
               part.kind === "text" ? (
                 <p key={index} className="chatText" style={{ whiteSpace: "pre-wrap" }}>
@@ -43,10 +49,14 @@ export function ChatMessages({ transcript }: { transcript: unknown }) {
           </article>
         ))
       ) : (
-        <p className="muted">
-          Start a chat and send a task. Its graph appears here when connected; you can keep chatting
-          with the graph collapsed.
-        </p>
+        <div className="codingEmpty">
+          <div className="codingEmptyMark" aria-hidden="true">
+            Z
+          </div>
+          <h2>What are we building?</h2>
+          <p>Explore your code. Work through an idea. Build something new.</p>
+          <span>Choose a model. Start a chat. Make it yours.</span>
+        </div>
       )}
     </div>
   );

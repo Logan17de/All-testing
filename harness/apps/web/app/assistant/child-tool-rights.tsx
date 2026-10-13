@@ -81,9 +81,10 @@ export function ChildToolRights({ assistantId }: { assistantId: string }) {
       {error ? <p role="alert">{error}</p> : null}
       {rights ? (
         <>
-          <label>
+          <label style={{ display: "block", marginBlock: 12 }}>
             Agent{" "}
             <select
+              className="field"
               style={{ maxWidth: "100%" }}
               value={actorId}
               disabled={busy}
@@ -153,7 +154,7 @@ export function ChildToolRights({ assistantId }: { assistantId: string }) {
                   </fieldset>
                 ))}
               </div>
-              <label>
+              <label style={{ display: "block", marginBlock: 12 }}>
                 <input
                   type="checkbox"
                   checked={confirmed}
@@ -164,6 +165,8 @@ export function ChildToolRights({ assistantId }: { assistantId: string }) {
               </label>
               <div className="btnRow">
                 <button
+                  className="btn"
+                  type="button"
                   disabled={busy || !confirmed}
                   onClick={() => {
                     void perform("tools/authority", {
@@ -177,6 +180,8 @@ export function ChildToolRights({ assistantId }: { assistantId: string }) {
                 </button>
                 {actor.parentChatId ? (
                   <button
+                    className="btn"
+                    type="button"
                     disabled={busy || !confirmed}
                     onClick={() => {
                       void perform("child/tools", {
@@ -259,7 +264,7 @@ function RequestDecision({
   const [confirmed, setConfirmed] = useState(false);
   return (
     <>
-      <label>
+      <label style={{ display: "block", marginBlock: 12 }}>
         <input
           type="checkbox"
           checked={confirmed}
@@ -270,6 +275,8 @@ function RequestDecision({
       </label>
       <div className="btnRow">
         <button
+          className="btn"
+          type="button"
           disabled={busy || !confirmed}
           onClick={() => {
             void decide("grant");
@@ -278,6 +285,8 @@ function RequestDecision({
           Grant requested tools
         </button>
         <button
+          className="btn"
+          type="button"
           disabled={busy}
           onClick={() => {
             void decide("deny");

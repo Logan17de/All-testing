@@ -79,7 +79,7 @@ it("native run attestation is atomic, immutable and never inferred from a generi
     ).toThrow("immutable");
     expect(() =>
       db.connection().prepare("DELETE FROM native_chat_runs WHERE run_id=?").run(native.runId),
-    ).toThrow("immutable");
+    ).toThrow("Archived chat deletion transaction required");
     await expect(
       createRunFromCompiledGraph(
         db,
