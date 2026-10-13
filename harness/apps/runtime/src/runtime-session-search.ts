@@ -39,6 +39,8 @@ export function createSessionSearchTool(
       },
     },
     async invoke(input, context) {
+      // Recheck cancellation at the asynchronous tool boundary before touching SQLite.
+      await Promise.resolve();
       context.signal.throwIfAborted();
       if (
         Object.keys(input).some((key) => !["query", "limit"].includes(key)) ||
