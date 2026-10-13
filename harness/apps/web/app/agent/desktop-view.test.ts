@@ -5,6 +5,7 @@ import {
   desktopSessionActive,
   desktopStatus,
   monitorContains,
+  previewPointToDesktop,
 } from "./desktop-view";
 
 describe("desktop session consent view", () => {
@@ -65,4 +66,16 @@ it("shows only consent requests for the current task and generation", () => {
     ),
   ).toEqual([valid]);
   expect(desktopConsents([valid], { ...status, state: "idle" })).toEqual([]);
+});
+
+it("maps local screenshot points to physical monitor pixels without losing negative origins", () => {
+  const scope = { x: -1920, y: 100, width: 1920, height: 1080 };
+  expect(previewPointToDesktop(scope, 1920, 1080, 960, 540, 100, 50)).toEqual({
+    x: -1720,
+    y: 200,
+  });
+  expect(previewPointToDesktop(scope, 1920, 1080, 960, 540, -1, 10)).toBeUndefined();
+  expect(previewPointToDesktop(scope, 1920, 1080, 960, 540, 960, 10)).toBeUndefined();
+  expect(previewPointToDesktop(scope, 1919, 1080, 960, 540, 10, 10)).toBeUndefined();
+  expect(previewPointToDesktop(scope, 1920, 1080, 0, 540, 10, 10)).toBeUndefined();
 });
