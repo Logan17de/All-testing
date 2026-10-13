@@ -254,14 +254,14 @@ it("refuses an observed click when the window identity changed during consent", 
   const armed = session.arm({ task: "Observe window identity", monitorId: "left", windowId: "123" });
   try {
     const frame = await session.capture(armed.generation);
-    approve.mockImplementationOnce(async () => {
+    approve.mockImplementationOnce(() => {
       driver.inventory.mockResolvedValueOnce({
         monitors: [{ id: "left", x: -1920, y: 0, width: 1920, height: 1080, scale: 1.5 }],
         windows: [{ id: "123", title: "Replaced", processId: 99, processStartedAt: "200",
           windowClass: "FixtureClass", focused: true,
           bounds: { x: -1920, y: 0, width: 1920, height: 1080 } }],
       });
-      return true;
+      return Promise.resolve(true);
     });
     await expect(
       session.act(armed.generation, {
