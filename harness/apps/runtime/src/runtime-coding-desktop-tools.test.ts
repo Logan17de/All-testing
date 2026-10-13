@@ -156,13 +156,13 @@ it("node scope absence and authority revoked during input consent cannot execute
     const tool = f.tools.find((t) => t.manifest.id.endsWith(".input"))!;
     await expect(
       tool.invoke(
-        { action: { kind: "click", x: 0, y: 0 } },
+        { action: { kind: "text", text: "fixture" } },
         { ...f.context(tool.manifest.id), toolScope: [] },
       ),
     ).rejects.toThrow();
     expect(f.controller.snapshot().pendingConsents).toEqual([]);
     const pending = tool.invoke(
-      { action: { kind: "click", x: 0, y: 0 } },
+      { action: { kind: "text", text: "fixture" } },
       f.context(tool.manifest.id),
     );
     const rejection = expect(pending).rejects.toThrow();
@@ -186,7 +186,7 @@ it("cancellation aborts pending human input and closes task with no fallback", a
     const tool = f.tools.find((t) => t.manifest.id.endsWith(".input"))!;
     const abort = new AbortController();
     const pending = tool.invoke(
-      { action: { kind: "click", x: 0, y: 0 } },
+      { action: { kind: "text", text: "fixture" } },
       f.context(tool.manifest.id, abort.signal),
     );
     const rejection = expect(pending).rejects.toThrow();
@@ -202,6 +202,43 @@ it("cancellation aborts pending human input and closes task with no fallback", a
         imageStore: f.store,
       }),
     ).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+it("model clicks must cite an observed screenshot; raw coordinates are refused", async () => {
+  const f = await fixture();
+  try {
+    const tool = f.tools.find((item) => item.manifest.id.endsWith(".input"))!;
+    await expect(
+      tool.invoke({ action: { kind: "click", x: 0, y: 0 } }, f.context(tool.manifest.id)),
+    ).rejects.toThrow("refused");
+    expect(f.controller.snapshot().pendingConsents).toEqual([]);
+    const observed = await f.controller.session.capture(f.authority.desktopGeneration);
+    const request = tool.invoke(
+      { action: { kind: "observed-click", artifactId: observed.artifactId, x: 0, y: 0 } },
+      f.context(tool.manifest.id),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    const consent = f.controller.snapshot().pendingConsents[0]!;
+    expect(consent.action).toMatchObject({
+      kind: "observed-click",
+      artifactId: observed.artifactId,
+    });
+    await f.controller.action("approval/respond", {
+      id: consent.id,
+      generation: consent.generation,
+      decision: "approved",
+    });
+    await request;
+    expect(f.calls()).toBe(1);
+    await expect(
+      tool.invoke(
+        { action: { kind: "observed-click", artifactId: observed.artifactId, x: 0, y: 0 } },
+        f.context(tool.manifest.id),
+      ),
+    ).rejects.toThrow("refused");
   } finally {
     await f.close();
   }
