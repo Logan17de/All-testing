@@ -12,7 +12,7 @@ export default async function ProjectPage({
   const { id } = await params;
   return (
     <main className="page">
-      <nav className="crumbs">
+      <nav className="crumbs" aria-label="Breadcrumb">
         <Link href="/">Overview</Link>
         <span aria-hidden="true">/</span>
         <Link href="/projects">Projects</Link>

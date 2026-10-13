@@ -45,7 +45,17 @@ export interface DurableToolResultPart {
   readonly value: unknown;
   readonly isError?: boolean;
 }
+/** Opaque encrypted provider state only, never plaintext reasoning or execution authority. */
+export interface DurableProviderStatePart {
+  readonly kind: "provider-state";
+  readonly provider: "openai-responses";
+  readonly model: string;
+  readonly scope: string;
+  readonly id: string;
+  readonly encryptedContent: string;
+}
 export type DurableMessagePart =
+  | DurableProviderStatePart
   | DurableTextPart
   | DurableReasoningPart
   | DurableImagePart
@@ -304,6 +314,35 @@ function checkPart(value: unknown, index: number, role: DurableMessageRole): Dur
       const text = value["text"];
       if (typeof text !== "string") invalid(`${field}.text`, "A text part needs text.");
       return { kind: "text", text };
+    }
+    case "provider-state": {
+      checkKeys(value, ["kind", "provider", "model", "scope", "id", "encryptedContent"], field);
+      if (role !== "assistant" || value["provider"] !== "openai-responses")
+        invalid(field, "Only assistant messages carry supported opaque provider state.");
+      const model = boundedString(value["model"], `${field}.model`, 128);
+      const id = boundedString(value["id"], `${field}.id`, 200);
+      const scope = boundedString(value["scope"], `${field}.scope`, 64);
+      const encryptedContent = boundedString(
+        value["encryptedContent"],
+        `${field}.encryptedContent`,
+        65_536,
+      );
+      if (
+        !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u.test(model) ||
+        !/^[A-Za-z0-9_.:-]{1,200}$/u.test(id) ||
+        !/^[a-f0-9]{64}$/u.test(scope) ||
+        /[\x00-\x20\x7f]/u.test(encryptedContent) ||
+        Buffer.byteLength(encryptedContent) > 65_536
+      )
+        invalid(field, "Opaque provider state is invalid or exceeds its bound.");
+      return {
+        kind: "provider-state",
+        provider: "openai-responses",
+        model,
+        scope,
+        id,
+        encryptedContent,
+      };
     }
     case "reasoning": {
       checkKeys(value, ["kind", "text"], field);

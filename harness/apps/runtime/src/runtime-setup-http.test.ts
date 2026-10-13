@@ -59,13 +59,16 @@ describe("first-run setup", () => {
       complete: false,
     });
 
-    const chosen = await first.send("POST", "/api/setup/workspace", { path: project });
+    const chosen = await first.send("POST", "/api/setup/workspace", {
+      path: project,
+      trusted: true,
+    });
     expect(chosen).toMatchObject({
       status: 200,
-      body: { workspace: { path: project, exists: true } },
+      body: { workspace: { path: project, exists: true, trusted: true } },
     });
     expect((await first.send("GET", "/api/setup")).body["setup"]).toMatchObject({
-      workspace: { path: project, exists: true },
+      workspace: { path: project, exists: true, trusted: true },
       complete: true,
     });
 
@@ -73,7 +76,7 @@ describe("first-run setup", () => {
     daemons.splice(0);
     const second = await startDaemon();
     expect((await second.send("GET", "/api/setup/workspace")).body).toEqual({
-      workspace: { path: project, exists: true },
+      workspace: { path: project, exists: true, trusted: true },
     });
   });
 
@@ -85,14 +88,19 @@ describe("first-run setup", () => {
     const { send } = await startDaemon();
 
     const before = await send("POST", "/api/projects", { name: "Before" });
-    expect(before.body["project"]).toMatchObject({ workspacePath: null });
+    expect(before.status).toBe(400);
 
-    await send("POST", "/api/setup/workspace", { path: project });
-    const inWorkspace = await send("POST", "/api/projects", { name: "Inside" });
+    await send("POST", "/api/setup/workspace", { path: project, trusted: true });
+    const inWorkspace = await send("POST", "/api/projects", {
+      name: "Inside",
+      workspacePath: project,
+      trusted: true,
+    });
     expect(inWorkspace.body["project"]).toMatchObject({ workspacePath: project });
     const ownFolder = await send("POST", "/api/projects", {
       name: "Own",
       workspacePath: elsewhere,
+      trusted: true,
     });
     expect(ownFolder.body["project"]).toMatchObject({ workspacePath: elsewhere });
   });
@@ -106,15 +114,15 @@ describe("first-run setup", () => {
 
     expect((await send("GET", "/api/setup/workspaces")).body["workspaces"]).toEqual([]);
 
-    await send("POST", "/api/setup/workspace", { path: alpha });
-    const both = await send("POST", "/api/setup/workspace", { path: beta });
+    await send("POST", "/api/setup/workspace", { path: alpha, trusted: true });
+    const both = await send("POST", "/api/setup/workspace", { path: beta, trusted: true });
     expect(both.body["workspaces"]).toEqual([
       expect.objectContaining({ path: beta, exists: true, current: true }),
       expect.objectContaining({ path: alpha, exists: true, current: false }),
     ]);
 
     // Opening the first one again brings it back to the front.
-    await send("POST", "/api/setup/workspace", { path: alpha });
+    await send("POST", "/api/setup/workspace", { path: alpha, trusted: true });
     const listed = (await send("GET", "/api/setup/workspaces")).body["workspaces"] as {
       readonly path: string;
       readonly current: boolean;
@@ -123,15 +131,22 @@ describe("first-run setup", () => {
     expect(listed[0]?.current).toBe(true);
 
     // The folder being worked in cannot be forgotten; another can.
-    const refused = await send("POST", "/api/setup/workspaces/forget", { path: alpha });
+    const refused = await send("POST", "/api/setup/workspaces/forget", {
+      path: alpha,
+      trusted: true,
+    });
     expect(refused).toMatchObject({ status: 409, body: { error: { code: "WORKSPACE_IN_USE" } } });
-    const forgotten = await send("POST", "/api/setup/workspaces/forget", { path: beta });
+    const forgotten = await send("POST", "/api/setup/workspaces/forget", {
+      path: beta,
+      trusted: true,
+    });
     expect(forgotten.body["workspaces"]).toEqual([
       expect.objectContaining({ path: alpha, current: true }),
     ]);
     expect((await send("GET", "/api/setup/workspace")).body["workspace"]).toEqual({
       path: alpha,
       exists: true,
+      trusted: true,
     });
   });
 
@@ -142,7 +157,7 @@ describe("first-run setup", () => {
 
     const refusal = async (path: unknown) =>
       (
-        (await send("POST", "/api/setup/workspace", { path })).body["error"] as {
+        (await send("POST", "/api/setup/workspace", { path, trusted: true })).body["error"] as {
           readonly code: string;
         }
       ).code;
@@ -184,4 +199,10 @@ describe("first-run setup", () => {
     ).toBe(404);
     expect((await send("GET", "/api/setup/folders?path=relative")).status).toBe(400);
   });
+});
+
+it("requires explicit trust before saving the default folder", async () => {
+  const { send } = await startDaemon();
+  expect((await send("POST", "/api/setup/workspace", { path: root })).status).toBe(400);
+  expect((await send("GET", "/api/setup/workspace")).body).toEqual({ workspace: null });
 });

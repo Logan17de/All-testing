@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   CapabilityPermissionPolicy,
+  ContextBudgetError,
   PluginHost,
   createHumanApprovalPlugin,
 } from "@zet-harness/core";
@@ -20,6 +21,105 @@ import { createPluginNodeExecutor } from "./runtime-plugin-executor.js";
 import { reconstructExecutionFrontier } from "./runtime-recovery.js";
 import { RuntimeRedactionRegistry } from "./runtime-redaction.js";
 import { RuntimeRunDispatcher } from "./runtime-run-dispatcher.js";
+import { ChatGPTAuthError } from "./runtime-chatgpt-auth.js";
+import { ModelTransportError } from "@zet-harness/models";
+it("journals a constructed parser stage without private exception text", async () => {
+  const db = database();
+  const host = await flowHost();
+  const runId = await createRun(db, host, routedGraph("left"));
+  const authority = new CapabilityPermissionPolicy();
+  const redaction = new RuntimeRedactionRegistry();
+  const approvals = new RuntimeHumanApprovals(db, { redaction, authority });
+  const dispatcher = new RuntimeRunDispatcher(
+    db,
+    approvals,
+    {
+      execute: () => {
+        throw new ModelTransportError(
+          "MODEL_RESPONSE_INVALID",
+          undefined,
+          "responses.reasoning-state",
+        );
+      },
+    },
+    redaction,
+    authority,
+  );
+  dispatchers.push(dispatcher);
+  dispatcher.start();
+  expect((await dispatcher.dispatch(runId)).status).toBe("failed");
+  const row = db
+    .connection()
+    .prepare("SELECT error_json FROM node_attempts WHERE run_id = ? AND status = 'failed'")
+    .get(runId) as { error_json: string };
+  expect(JSON.parse(row.error_json)).toMatchObject({
+    cause: { code: "MODEL_RESPONSE_INVALID", stage: "responses.reasoning-state" },
+  });
+});
+
+it("journals a context-window setup failure without private exception text", async () => {
+  const db = database();
+  const host = await flowHost();
+  const runId = await createRun(db, host, routedGraph("left"));
+  const authority = new CapabilityPermissionPolicy();
+  const redaction = new RuntimeRedactionRegistry();
+  const approvals = new RuntimeHumanApprovals(db, { redaction, authority });
+  const dispatcher = new RuntimeRunDispatcher(
+    db,
+    approvals,
+    {
+      execute: () => {
+        throw new ContextBudgetError("CONTEXT_WINDOW_UNKNOWN", "private-context-text");
+      },
+    },
+    redaction,
+    authority,
+  );
+  dispatchers.push(dispatcher);
+  dispatcher.start();
+  expect((await dispatcher.dispatch(runId)).status).toBe("failed");
+  const row = db
+    .connection()
+    .prepare("SELECT error_json FROM node_attempts WHERE run_id = ? AND status = 'failed'")
+    .get(runId) as { error_json: string };
+  expect(JSON.parse(row.error_json)).toMatchObject({ cause: { code: "CONTEXT_WINDOW_UNKNOWN" } });
+  expect(row.error_json).not.toContain("private-context-text");
+});
+
+it.each(["CHATGPT_LOGIN_REQUIRED", "CHATGPT_AUTH_HTTP_ERROR", "private-token-text"])(
+  "journals only allowlisted auth cause codes: %s",
+  async (code) => {
+    const db = database();
+    const host = await flowHost();
+    const runId = await createRun(db, host, routedGraph("left"));
+    const authority = new CapabilityPermissionPolicy();
+    const redaction = new RuntimeRedactionRegistry();
+    const approvals = new RuntimeHumanApprovals(db, { redaction, authority });
+    const dispatcher = new RuntimeRunDispatcher(
+      db,
+      approvals,
+      {
+        execute: () => {
+          const error = new ChatGPTAuthError(code);
+          error.message = "private-token-text";
+          throw error;
+        },
+      },
+      redaction,
+      authority,
+    );
+    dispatchers.push(dispatcher);
+    dispatcher.start();
+    expect((await dispatcher.dispatch(runId)).status).toBe("failed");
+    const row = db
+      .connection()
+      .prepare("SELECT error_json FROM node_attempts WHERE run_id = ? AND status = 'failed'")
+      .get(runId) as { error_json: string };
+    const failure = JSON.parse(row.error_json) as { cause?: { code: string } };
+    expect(failure.cause).toEqual(code === "private-token-text" ? undefined : { code });
+    expect(row.error_json).not.toContain("private-token-text");
+  },
+);
 
 const databases: SqliteDatabase[] = [];
 const dispatchers: RuntimeRunDispatcher[] = [];

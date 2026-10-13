@@ -187,7 +187,7 @@
 }
 
 .paletteItem__meta {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-font-sans);
   font-size: 0.7rem;
   color: #8f8f8f;
   word-break: break-all;
@@ -198,17 +198,18 @@
 .hnode {
   min-width: 190px;
   max-width: 260px;
-  padding: 10px 12px;
-  background: #161616;
-  border: 1px solid #333;
+  padding: 14px 12px;
+  background: var(--app-panel, #20252d);
+  border: 1px solid var(--app-border, #343c48);
   border-radius: 10px;
-  color: #eaeaea;
-  font-size: 0.8rem;
+  color: var(--app-text, #eef2f7);
+  font-size: 14px;
+  line-height: 1.5;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
 .hnode--selected {
-  border-color: #e5e5e5;
+  border-color: var(--app-accent, #b6cdeb);
 }
 
 .hnode--invalid {
@@ -248,7 +249,7 @@
 }
 
 .hnode__title {
-  font-size: 0.9rem;
+  font-size: 15px;
   font-weight: 700;
 }
 
@@ -257,26 +258,26 @@
   border: 1px solid #14416b;
   border-radius: 999px;
   color: #7cc4fa;
-  font-size: 0.62rem;
+  font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .hnode__type {
   margin: 4px 0 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.68rem;
-  color: #8f8f8f;
+  font-family: var(--app-font-sans);
+  font-size: 13px;
+  color: var(--app-muted, #a4afbf);
   word-break: break-all;
 }
 
 .hnode__status {
   margin: 8px 0 0;
-  font-size: 0.7rem;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #9a9a9a;
+  color: var(--app-muted, #a4afbf);
 }
 
 .hnode__status--completed {
@@ -317,16 +318,16 @@
 
 .hnode__port {
   position: relative;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.7rem;
-  color: #bdbdbd;
+  font-family: var(--app-font-sans);
+  font-size: 13px;
+  color: var(--app-text, #eef2f7);
 }
 
 .hnode .react-flow__handle.hnode__handle {
   width: 10px;
   height: 10px;
-  background: #0a0a0a;
-  border: 2px solid #9a9a9a;
+  background: var(--app-bg, #171a20);
+  border: 2px solid var(--app-muted, #a4afbf);
 }
 
 .hnode__port--in .react-flow__handle.hnode__handle {
@@ -340,7 +341,7 @@
 .hnode__diag {
   margin: 10px 0 0;
   color: #fca5a5;
-  font-size: 0.72rem;
+  font-size: 13px;
 }
 
 /* A box's own content: typed text in a Text box, what arrived in an Output box. */
@@ -351,14 +352,14 @@
   min-width: 14rem;
   max-height: 14rem;
   margin: 10px 0 0;
-  padding: 0.5rem 0.6rem;
-  background: #0d0d0d;
-  border: 1px solid rgba(127, 127, 127, 0.35);
+  padding: 10px 12px;
+  background: var(--app-bg, #171a20);
+  border: 1px solid var(--app-border, #343c48);
   border-radius: 0.4rem;
   color: inherit;
   font: inherit;
-  font-size: 0.82rem;
-  line-height: 1.4;
+  font-size: 14px;
+  line-height: 1.6;
   overflow: auto;
   resize: vertical;
   cursor: text;
@@ -371,11 +372,11 @@
 }
 
 .hnode__box--empty {
-  color: #8a8a8a;
+  color: var(--app-muted, #a4afbf);
   font-style: italic;
 }
 
-/* Control flow: handles above and below a node, drawn as dashed violet edges. */
+/* Control flow: handles above and below a node, drawn as dashed accent edges. */
 .hnode__ctl {
   display: flex;
   justify-content: center;
@@ -396,16 +397,16 @@
 .hnode__ctlport {
   position: relative;
   min-width: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.62rem;
-  color: #c4b5fd;
+  font-family: var(--app-font-sans);
+  font-size: 13px;
+  color: var(--app-accent, #b6cdeb);
   text-align: center;
 }
 
 .hnode .react-flow__handle.hnode__handle--control {
   width: 10px;
   height: 10px;
-  border-color: #a78bfa;
+  border-color: var(--app-accent, #b6cdeb);
   border-radius: 2px;
 }
 
@@ -419,7 +420,7 @@
 }
 
 .react-flow__edge.hedge--control .react-flow__edge-path {
-  stroke: #a78bfa;
+  stroke: var(--app-accent, #b6cdeb);
   stroke-dasharray: 6 4;
 }
 
@@ -465,7 +466,7 @@
 textarea.field__input {
   min-height: 74px;
   resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-font-sans);
 }
 
 .transferBox {
@@ -554,7 +555,7 @@ button.diagItem:disabled {
   border: 1px solid #2e2e2e;
   border-radius: 6px;
   color: #cfcfcf;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-font-sans);
   font-size: 0.72rem;
 }
 
@@ -567,7 +568,7 @@ button.diagItem:disabled {
   border: 1px solid #262626;
   border-radius: 8px;
   color: #d4d4d4;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-font-sans);
   font-size: 0.74rem;
   white-space: pre-wrap;
   word-break: break-word;
@@ -743,12 +744,12 @@ button.timeline__row:focus-visible {
 
 .timeline__time {
   color: #8f8f8f;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-font-sans);
 }
 
 .timeline__type {
   color: #d4d4d4;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-font-sans);
   word-break: break-all;
 }
 
@@ -1045,4 +1046,32 @@ button.timeline__row:focus-visible {
 
 .setupTyped {
   margin-top: 0.75rem;
+}
+
+/* Normal chat remains visible while its optional graph preview is open. */
+.chatWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 380px);
+  gap: 1rem;
+  align-items: start;
+}
+.chatWorkspaceMain,
+.chatGraphPanel {
+  min-width: 0;
+}
+.chatGraphPanel {
+  position: sticky;
+  top: 1rem;
+}
+.chatGraphPanel--expanded {
+  grid-column: 1 / -1;
+  position: static;
+}
+@media (max-width: 850px) {
+  .chatWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chatGraphPanel {
+    position: static;
+  }
 }

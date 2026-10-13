@@ -87,6 +87,8 @@ export function estimateTokens(text: string): number {
 
 function partText(part: ModelMessagePart): string {
   switch (part.kind) {
+    case "provider-state":
+      return part.encryptedContent; // Budget accounting only; never rendered as model text.
     case "text":
       return part.text;
     case "image":

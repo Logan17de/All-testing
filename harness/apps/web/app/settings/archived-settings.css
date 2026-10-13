@@ -1,0 +1,222 @@
+.archivedSettings {
+  min-width: 0;
+  container-type: inline-size;
+  font-family: var(--app-font-sans);
+  font-size: 13px;
+  color: #dedede;
+}
+.archivedSettingsSearchLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.archivedSettingsSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #383838;
+  border-radius: 6px;
+  background: #242424;
+  padding: 9px 11px;
+  margin-bottom: 16px;
+}
+.archivedSettingsSearch svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  stroke: #989898;
+  stroke-width: 1.3;
+}
+.archivedSettingsSearch:focus-within {
+  border-color: #777;
+}
+.archivedSettingsSearch:focus-within svg {
+  stroke: #fff;
+}
+.archivedSettingsSearch input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: #eee;
+  font: inherit;
+  cursor: text;
+}
+.archivedSettingsSearch input::placeholder {
+  color: #929292;
+}
+.archivedSettingsList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.archivedSettingsList li {
+  border-bottom: 1px solid #303030;
+}
+.archivedSettingsRow {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 66px;
+  padding: 10px 0;
+}
+.archivedSettingsChatInfo {
+  min-width: 0;
+}
+.archivedSettingsDate {
+  display: block;
+  color: #a3a3a3;
+  font-size: 12px;
+  margin-top: 5px;
+}
+.archivedSettingsActions,
+.archivedConfirmationActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.archivedSettingsChatIcon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  stroke: #999;
+  stroke-width: 1.2;
+}
+.archivedSettingsList li:hover .archivedSettingsChatIcon {
+  stroke: #fff;
+}
+.archivedSettingsTitle {
+  display: block;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.archivedSettings button {
+  flex: none;
+  padding: 6px 10px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #292929;
+  color: #ddd;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.archivedSettings button:hover:not(:disabled) {
+  background: #363636;
+  color: #fff;
+}
+.archivedSettings button:focus-visible {
+  outline: 2px solid #b0b0b0;
+  outline-offset: 2px;
+}
+.archivedSettings button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.archivedSettings button.archivedSettingsDanger {
+  color: #f1b0aa;
+  border-color: #684743;
+  background: #322523;
+}
+.archivedSettings button.archivedSettingsDanger:hover:not(:disabled) {
+  color: #ffd8d4;
+  background: #45302c;
+}
+.archivedRetention {
+  padding-bottom: 24px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid #383838;
+}
+.archivedRetention h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.archivedRetention > p,
+.archivedConfirmation p {
+  color: #b4b4b4;
+  line-height: 1.6;
+  margin: 8px 0 16px;
+}
+.archivedRetention label {
+  display: block;
+  margin-bottom: 8px;
+}
+.archivedRetentionControls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.archivedRetentionControls input {
+  width: 100px;
+  min-width: 0;
+  background: #242424;
+  color: #eee;
+  border: 1px solid #484848;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+}
+.archivedRetentionControls input[aria-invalid="true"] {
+  border-color: #e9aaa5;
+}
+.archivedConfirmation {
+  background: #272321;
+  border: 1px solid #684743;
+  border-radius: 8px;
+  padding: 14px;
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.archivedConfirmation p:first-child {
+  margin-top: 0;
+  color: #eee;
+}
+.archivedConfirmationActions button {
+  white-space: normal;
+  max-width: 100%;
+  min-height: 34px;
+}
+@container (max-width: 480px) {
+  .archivedSettingsRow {
+    grid-template-columns: 14px minmax(0, 1fr);
+  }
+  .archivedSettingsActions {
+    grid-column: 2;
+  }
+  .archivedSettingsActions button {
+    min-height: 36px;
+  }
+}
+.archivedSettingsMessage {
+  color: #aaa;
+  margin: 16px 0;
+  line-height: 1.5;
+}
+.archivedSettingsError {
+  color: #e9aaa5;
+  margin: 16px 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.archivedSettingsError p {
+  margin: 0 0 8px;
+}
+.archivedSettingsFootnote {
+  color: #929292;
+  margin: 20px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}

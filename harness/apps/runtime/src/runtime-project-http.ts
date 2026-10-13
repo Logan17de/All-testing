@@ -16,7 +16,15 @@ import { SORTABLE_ID_PATTERN, createSortableId } from "@zet-harness/db/sortable-
 
 import { RuntimeApiSecurityError, type RuntimeApiSecurity } from "./runtime-api-security.js";
 import { writeRuntimeJson } from "./runtime-approval-http.js";
-import { readWorkspace } from "./runtime-setup-http.js";
+import { checkWorkspace, SetupRequestError } from "./runtime-setup-http.js";
+import { writeSetting } from "@zet-harness/db/durable-setting-records";
+import {
+  PROJECT_FEATURES,
+  projectWithMetadata,
+  readProjectMetadata,
+  writeProjectMetadata,
+} from "./runtime-project-metadata.js";
+import { archiveConversation } from "@zet-harness/db/durable-conversation-records";
 
 /** Services the project endpoints need; supplied by the daemon. */
 export interface RuntimeProjectHttpServices {
@@ -28,7 +36,15 @@ export interface RuntimeProjectHttpServices {
 }
 
 const MAX_PROJECT_BODY_BYTES = 65_536;
-const PROJECT_FIELDS: ReadonlySet<string> = new Set(["name", "description", "workspacePath"]);
+const PROJECT_FIELDS: ReadonlySet<string> = new Set([
+  "name",
+  "description",
+  "workspacePath",
+  "trusted",
+  "sourceFolders",
+  "pinned",
+  "section",
+]);
 
 class RuntimeProjectRequestError extends Error {
   readonly code: string;
@@ -110,6 +126,27 @@ function projectFields(body: Record<string, unknown>): ProjectFields {
     if (!PROJECT_FIELDS.has(field))
       throw invalidRequest(`Unknown project field '${field}'.`, field);
   }
+  if (body.trusted !== undefined && body.trusted !== true)
+    throw invalidRequest("Confirm trust for this exact folder.", "trusted");
+  if (body.pinned !== undefined && typeof body.pinned !== "boolean")
+    throw invalidRequest("pinned must be a boolean.", "pinned");
+  if (
+    body.section !== undefined &&
+    body.section !== null &&
+    (typeof body.section !== "string" ||
+      body.section.trim().length === 0 ||
+      body.section.length > 80 ||
+      /[\x00-\x1f\x7f]/u.test(body.section))
+  )
+    throw invalidRequest("section must be null or a name of 1–80 characters.", "section");
+  if (
+    body.sourceFolders !== undefined &&
+    (!Array.isArray(body.sourceFolders) ||
+      body.sourceFolders.length < 1 ||
+      body.sourceFolders.length > 20 ||
+      body.sourceFolders.some((value: unknown) => typeof value !== "string"))
+  )
+    throw invalidRequest("Choose between 1 and 20 source folders.", "sourceFolders");
   const name = optionalString(body, "name");
   const description = optionalString(body, "description");
   const workspacePath =
@@ -147,15 +184,19 @@ function found(project: DurableProjectRecord | undefined): DurableProjectRecord 
  * Project endpoints.
  *
  *   GET  /api/projects?status=active|archived|all
- *   POST /api/projects                    { name, description?, workspacePath? }
+ *   POST /api/projects                    { name, trusted:true, workspacePath? | sourceFolders, pinned?, section? }
  *   GET  /api/projects/:id
- *   POST /api/projects/:id                { name?, description?, workspacePath? }
+ *   POST /api/projects/:id                { name?, description?, workspacePath?, sourceFolders?, trusted?, pinned?, section? }
  *   POST /api/projects/:id/archive
  *   POST /api/projects/:id/restore
+ *   POST /api/projects/:id/archive-chats  {}
+ *   POST /api/projects/:id/remove         {} (soft archive, never disk deletion)
  *
  * Projects are archived and restored, never deleted. Every POST passes the same
  * CSRF check as the editor and approval endpoints, and every write is one
  * serialized SQLite commit.
+ * Source folders after the first are metadata only; existing tool/terminal
+ * authority continues to resolve the primary workspacePath.
  */
 export async function handleProjectHttp(
   request: IncomingMessage,
@@ -166,45 +207,83 @@ export async function handleProjectHttp(
 ): Promise<void> {
   const now = services.now ?? (() => Date.now());
   const createId = services.createId ?? createSortableId;
+  const enrich = (project: DurableProjectRecord) =>
+    projectWithMetadata(services.database.connection(), project);
   try {
     if (url.pathname === "/api/projects") {
       if (request.method === "GET") {
         writeRuntimeJson(response, 200, {
-          projects: listProjects(services.database.connection(), { status: listStatus(url) }),
+          projects: listProjects(services.database.connection(), { status: listStatus(url) }).map(
+            enrich,
+          ),
+          projectFeatures: PROJECT_FEATURES,
         });
         return;
       }
       if (request.method !== "POST") return methodNotAllowed(response, ["GET", "POST"]);
       security.checkMutation(request);
-      const fields = projectFields(await readProjectBody(request));
+      const body = await readProjectBody(request);
+      const fields = projectFields(body);
       const name = fields.name;
       if (name === undefined) throw invalidRequest("A project needs a name.", "name");
-      // A project with no folder of its own works in the harness's workspace.
-      const workspacePath =
-        fields.workspacePath === undefined
-          ? (readWorkspace(services.database)?.path ?? null)
-          : fields.workspacePath;
-      const project = await services.database.commit((connection) =>
-        createProject(connection, {
+      if (fields.workspacePath == null && body.sourceFolders === undefined)
+        throw invalidRequest("Choose a project folder.", "workspacePath");
+      if (body.trusted !== true)
+        throw invalidRequest("Confirm trust for this exact folder.", "trusted");
+      const folders =
+        body.sourceFolders === undefined
+          ? [await checkWorkspace(fields.workspacePath)]
+          : await Promise.all((body.sourceFolders as string[]).map(checkWorkspace));
+      if (new Set(folders).size !== folders.length)
+        throw invalidRequest("Source folders must be unique.", "sourceFolders");
+      const workspacePath = folders[0]!;
+      if (
+        fields.workspacePath !== undefined &&
+        (await checkWorkspace(fields.workspacePath)) !== workspacePath
+      )
+        throw invalidRequest(
+          "The primary folder must be the first source folder.",
+          "workspacePath",
+        );
+      const project = await services.database.commit((connection) => {
+        const created = createProject(connection, {
           ...fields,
           workspacePath,
           name,
           projectId: createId(),
           nowMs: now(),
-        }),
-      );
-      writeRuntimeJson(response, 201, { project });
+        });
+        writeSetting(connection, `project.trusted.${created.projectId}`, workspacePath, now());
+        writeProjectMetadata(
+          connection,
+          created.projectId,
+          {
+            pinned: body.pinned === true,
+            section: typeof body.section === "string" ? body.section.trim() : null,
+            sourceFolders: folders,
+          },
+          now(),
+        );
+        return created;
+      });
+      writeRuntimeJson(response, 201, {
+        project: enrich(project),
+        projectFeatures: PROJECT_FEATURES,
+      });
       return;
     }
 
-    const match = /^\/api\/projects\/([^/]+)(?:\/(archive|restore))?$/u.exec(url.pathname);
+    const match = /^\/api\/projects\/([^/]+)(?:\/(archive|restore|archive-chats|remove))?$/u.exec(
+      url.pathname,
+    );
     if (match === null) throw notFound();
     const projectId = projectIdFrom(match[1] ?? "");
     const action = match[2];
 
     if (action === undefined && request.method === "GET") {
       writeRuntimeJson(response, 200, {
-        project: found(readProject(services.database.connection(), projectId)),
+        project: enrich(found(readProject(services.database.connection(), projectId))),
+        projectFeatures: PROJECT_FEATURES,
       });
       return;
     }
@@ -215,24 +294,116 @@ export async function handleProjectHttp(
     const body = await readProjectBody(request);
 
     let project: DurableProjectRecord | undefined;
+    let archivedChats: number | undefined;
     if (action === undefined) {
       const fields = projectFields(body);
-      project = await services.database.commit((connection) =>
-        updateProject(connection, projectId, { ...fields, nowMs: now() }),
-      );
+      const prior = found(readProject(services.database.connection(), projectId));
+      const priorMetadata = readProjectMetadata(services.database.connection(), prior);
+      let folders =
+        body.sourceFolders === undefined
+          ? undefined
+          : await Promise.all((body.sourceFolders as string[]).map(checkWorkspace));
+      if (folders && new Set(folders).size !== folders.length)
+        throw invalidRequest("Source folders must be unique.", "sourceFolders");
+      let workspacePath = fields.workspacePath;
+      if (workspacePath !== undefined) {
+        if (workspacePath === null || body.trusted !== true)
+          throw invalidRequest("Confirm trust for the selected folder.", "trusted");
+        workspacePath = await checkWorkspace(workspacePath);
+      }
+      if (folders) {
+        if (workspacePath !== undefined && workspacePath !== folders[0])
+          throw invalidRequest(
+            "The primary folder must be the first source folder.",
+            "workspacePath",
+          );
+        if (
+          body.trusted !== true &&
+          (folders[0] !== prior.workspacePath ||
+            folders.some((folder) => !priorMetadata.sourceFolders.includes(folder)))
+        )
+          throw invalidRequest(
+            "Confirm trust for newly added or primary source folders.",
+            "trusted",
+          );
+        workspacePath = folders[0]!;
+      } else if (workspacePath !== undefined) {
+        folders = [
+          workspacePath,
+          ...priorMetadata.sourceFolders.slice(1).filter((folder) => folder !== workspacePath),
+        ];
+      }
+      project = await services.database.commit((connection) => {
+        const current = found(readProject(connection, projectId));
+        const metadata = readProjectMetadata(connection, current);
+        if (
+          folders &&
+          (current.workspacePath !== prior.workspacePath ||
+            JSON.stringify(metadata.sourceFolders) !== JSON.stringify(priorMetadata.sourceFolders))
+        )
+          throw invalidRequest("Project folders changed. Review them again.", "sourceFolders");
+        const updated = updateProject(connection, projectId, {
+          ...fields,
+          ...(workspacePath === undefined ? {} : { workspacePath }),
+          nowMs: now(),
+        });
+        if (updated && workspacePath !== undefined && body.trusted === true)
+          writeSetting(connection, `project.trusted.${projectId}`, workspacePath, now());
+        if (updated)
+          writeProjectMetadata(
+            connection,
+            projectId,
+            {
+              pinned: typeof body.pinned === "boolean" ? body.pinned : metadata.pinned,
+              section:
+                body.section === null
+                  ? null
+                  : typeof body.section === "string"
+                    ? body.section.trim()
+                    : metadata.section,
+              sourceFolders: folders ?? metadata.sourceFolders,
+            },
+            now(),
+          );
+        return updated;
+      });
     } else {
       if (Object.keys(body).length > 0) throw invalidRequest(`${action} takes no fields.`);
-      project = await services.database.commit((connection) =>
-        action === "archive"
-          ? archiveProject(connection, projectId, now())
-          : restoreProject(connection, projectId, now()),
-      );
+      project = await services.database.commit((connection) => {
+        const current = found(readProject(connection, projectId));
+        if (action === "archive-chats") {
+          if (current.status !== "active")
+            throw new DurableProjectError(
+              "PROJECT_ARCHIVED",
+              "Restore this project before archiving its chats.",
+            );
+          const rows = connection
+            .prepare(
+              "SELECT conversation_id FROM conversations WHERE project_id=? AND status='active'",
+            )
+            .all(projectId) as { conversation_id: string }[];
+          for (const row of rows) archiveConversation(connection, row.conversation_id, now());
+          archivedChats = rows.length;
+          return current;
+        }
+        return action === "restore"
+          ? restoreProject(connection, projectId, now())
+          : archiveProject(connection, projectId, now());
+      });
     }
-    writeRuntimeJson(response, 200, { project: found(project) });
+    writeRuntimeJson(response, 200, {
+      project: enrich(found(project)),
+      projectFeatures: PROJECT_FEATURES,
+      ...(archivedChats === undefined ? {} : { archivedChats }),
+    });
   } catch (error: unknown) {
-    if (error instanceof RuntimeProjectRequestError || error instanceof DurableProjectError) {
+    if (
+      error instanceof RuntimeProjectRequestError ||
+      error instanceof DurableProjectError ||
+      error instanceof SetupRequestError
+    ) {
       const statusCode =
-        error instanceof RuntimeProjectRequestError
+        error instanceof RuntimeProjectRequestError || error instanceof SetupRequestError
           ? error.statusCode
           : error.code === "PROJECT_ARCHIVED"
             ? 409
@@ -241,7 +412,7 @@ export async function handleProjectHttp(
         error: {
           code: error.code,
           reason: error.message,
-          ...(error.field === undefined ? {} : { field: error.field }),
+          ...("field" in error && error.field !== undefined ? { field: error.field } : {}),
         },
       });
       return;

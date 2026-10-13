@@ -4,6 +4,7 @@ import {
   describeReplayStep,
   isRunReplayView,
   replayNodeStatuses,
+  terminalNodeStatus,
   type ReplayStepView,
 } from "./replay-view";
 
@@ -101,3 +102,29 @@ describe("a replay answer from the runtime", () => {
     expect(isRunReplayView("replay")).toBe(false);
   });
 });
+
+it.each(["failed", "cancelled"])(
+  "interrupts active live and replay nodes only once the run is %s",
+  (outcome) => {
+    const expected = outcome === "failed" ? "interrupted" : "cancelled";
+    expect(terminalNodeStatus("running", "running")).toBe("running");
+    expect(terminalNodeStatus("running", outcome)).toBe(expected);
+    expect(terminalNodeStatus("waiting", outcome)).toBe(expected);
+    expect(terminalNodeStatus("failed", outcome)).toBe("failed");
+    expect(terminalNodeStatus("completed", outcome)).toBe("completed");
+    expect(terminalNodeStatus("pending", outcome)).toBe("pending");
+    const steps = [
+      step({ kind: "loop", nodeId: "loop", outcome: "entered" }),
+      step({ kind: "approval", nodeId: "approval", outcome: "requested" }),
+      step({ kind: "attempt", nodeId: "model", outcome: "failed" }),
+      step({ kind: "run", nodeId: null, outcome }),
+    ];
+    expect(replayNodeStatuses(steps, 2).get("loop")).toBe("running");
+    expect(replayNodeStatuses(steps, 2).get("approval")).toBe("waiting");
+    const statuses = replayNodeStatuses(steps, 3);
+    expect(statuses.get("loop")).toBe(expected);
+    expect(statuses.get("approval")).toBe(expected);
+    expect(statuses.get("model")).toBe("failed");
+    expect(statuses.has("unstarted-tool")).toBe(false);
+  },
+);

@@ -1,0 +1,166 @@
+.settingsModelPanel {
+  min-width: 0;
+  color: #dedede;
+  font-family: var(--app-font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.settingsModelPanel :is(button, a, select, label, input[type="checkbox"], input[type="radio"]) {
+  cursor: default;
+}
+.settingsModelPanel
+  :is(input:not([type="checkbox"]):not([type="radio"]), textarea):not(:disabled):not([readonly]) {
+  cursor: text;
+}
+.settingsModelPanel :is(button, input, select, textarea) {
+  font: inherit;
+}
+.settingsModelPanel :is(.panel, .card, .settingsModelNotice) {
+  margin: 0 0 14px;
+  padding: 16px;
+  border: 1px solid #353535;
+  border-radius: 8px;
+  background: #202020;
+  box-shadow: none;
+  min-width: 0;
+}
+.settingsModelPanel .cards {
+  gap: 0;
+}
+.settingsModelPanel :is(.panelTitle, .cardTitle) {
+  margin: 0 0 8px;
+  color: #ededed;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.settingsModelPanel :is(.cardMeta, .cardNodes, .muted, .field__hint, .settingsModelStatus) {
+  color: #9d9d9d;
+}
+.settingsModelPanel :is(.cardMeta, .field__hint, .small, .badge) {
+  font-size: 12px;
+}
+.settingsModelPanel :is(.cardMeta, .cardNodes, code) {
+  overflow-wrap: anywhere;
+}
+.settingsModelPanel :is(.btnRow, .buttonRow) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+.settingsModelPanel .btn {
+  padding: 6px 10px;
+  min-height: 30px;
+  border: 1px solid #414141;
+  border-radius: 6px;
+  background: #2b2b2b;
+  color: #cecece;
+  box-shadow: none;
+}
+.settingsModelPanel .btn:hover:not(:disabled) {
+  background: #373737;
+  color: #fff;
+  border-color: #555;
+}
+.settingsModelPanel .btn--primary {
+  background: #363636;
+  color: #eee;
+  border-color: #555;
+}
+.settingsModelPanel .btn--danger {
+  color: #e4aaaa;
+}
+.settingsModelPanel .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.settingsModelPanel :is(button, input, select, textarea, a):focus-visible {
+  outline: 2px solid #b6b6b6;
+  outline-offset: 2px;
+}
+.settingsModelPanel .field {
+  display: grid;
+  gap: 5px;
+  margin: 14px 0;
+}
+.settingsModelPanel .field__label {
+  color: #d6d6d6;
+  font-size: 13px;
+  font-weight: 500;
+}
+.settingsModelPanel .field__input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 6px 9px;
+  background: #181818;
+  color: #ededed;
+  border: 1px solid #414141;
+  border-radius: 5px;
+}
+.settingsModelPanel .field__input:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.settingsModelPanel .field__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.settingsModelPanel .field__check input {
+  flex: 0 0 auto;
+  margin: 0;
+}
+.settingsModelPanel input:is([type="checkbox"], [type="radio"]) {
+  accent-color: #adadad;
+}
+.settingsModelPanel .modelKey {
+  padding: 12px;
+  border: 1px solid #353535;
+  border-radius: 6px;
+}
+.settingsModelPanel .badge {
+  background: #292929;
+  color: #bcbcbc;
+  border-color: #414141;
+}
+.settingsModelPanel :is(.warn, .field__error, [role="alert"]) {
+  color: #e4aaaa;
+}
+.settingsModelPanel .modelCheck--ok {
+  color: #bad0bb;
+}
+.settingsModelPanel svg {
+  width: 14px;
+  height: 14px;
+  color: #999;
+}
+.settingsModelPanel :is(button, a):hover svg {
+  color: #fff;
+}
+.settingsAccountPanel p {
+  margin: 0 0 12px;
+}
+.settingsAccountPanel .buttonRow {
+  margin-bottom: 14px;
+}
+.settingsAccountPanel .panel > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.settingsAccountPanel .panel > label input {
+  flex: 0 0 auto;
+  margin: 3px 0 0;
+}
+.settingsAccountPanel .panel > .btn + .btn {
+  margin-left: 8px;
+}
+.settingsAccountPanel a {
+  color: #dedede;
+  text-underline-offset: 3px;
+}

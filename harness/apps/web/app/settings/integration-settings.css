@@ -1,0 +1,128 @@
+.integrationSettings {
+  min-width: 0;
+  font-family: var(--app-font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.integrationStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.integrationStatus p {
+  margin: 0;
+  color: #a0a0a0;
+}
+.integrationSettings button,
+.integrationSettings .btn {
+  cursor: default;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid #414141;
+  border-radius: 5px;
+  background: #292929;
+  color: #ededed;
+  font: inherit;
+  font-size: 12px;
+}
+.integrationSettings button:hover:not(:disabled) {
+  background: #353535;
+}
+.integrationSettings button:disabled {
+  opacity: 0.5;
+}
+.integrationSettings button:focus-visible,
+.integrationSettings input:focus-visible,
+.integrationSettings select:focus-visible {
+  outline: 2px solid #929292;
+  outline-offset: 2px;
+}
+.integrationMuted {
+  color: #a0a0a0;
+  font-size: 12px;
+  margin: 8px 0 16px;
+}
+.integrationEmpty {
+  padding: 20px 0;
+  color: #aaa;
+}
+.integrationCard {
+  padding: 16px 0;
+  border-top: 1px solid #333;
+}
+.integrationHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.integrationBadge {
+  border: 1px solid #414141;
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: #bcbcbc;
+  font-size: 11px;
+}
+.integrationDetails {
+  margin: 12px 0;
+}
+.integrationDetails > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 10px 0;
+  border-top: 1px solid #333;
+}
+.integrationDetails dt {
+  color: #bcbcbc;
+  flex-shrink: 0;
+}
+.integrationDetails dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.integrationSettings .panel {
+  padding: 16px 0;
+  border: 0;
+  border-top: 1px solid #333;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.integrationSettings .panelTitle {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+.integrationSettings .muted,
+.integrationSettings .small {
+  font-size: 12px;
+  color: #a0a0a0;
+}
+.integrationSettings .field__input,
+.integrationSettings select {
+  max-width: 100%;
+  background: #242424;
+  color: #eee;
+  border: 1px solid #414141;
+  border-radius: 5px;
+  padding: 7px 9px;
+  font: inherit;
+}
+.integrationSettings .btnRow {
+  gap: 8px;
+  margin: 12px 0;
+}
+.integrationSettings ul {
+  padding-left: 20px;
+  overflow-wrap: anywhere;
+}
+.integrationSettings code {
+  overflow-wrap: anywhere;
+}
+.integrationConnections label {
+  line-height: 1.7;
+}

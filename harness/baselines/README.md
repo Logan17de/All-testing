@@ -31,3 +31,28 @@ The dependency comparison still fails for any additional/removed dependency, and
 startup multiplier still detects future regressions relative to the current implementation.
 Do not regenerate this reference automatically on every build or use CI failures as approval
 to bypass a guard. Benchmark artifacts retain five startup samples and measurement reports.
+
+## Standalone executor dependency
+
+The standalone architecture directly imports `@zet-harness/tools` in the runtime for
+workspace paths, file tools and bounded processes. It is now declared explicitly in
+`apps/runtime/package.json` and built before runtime compilation. The exact dependency
+snapshot is therefore nine workspace packages, zero external packages. The provider
+CLI dependency at the harness root is removed. This structural dependency update does
+not change any numeric reference or guard threshold.
+
+The scoped native browser adapter adds pinned `playwright-core` 1.63.0 as one external runtime dependency. The exact dependency snapshot is now 10 total (9 workspace, 1 external); measured numeric baselines and regression thresholds are unchanged. Chromium installation and OS sandbox availability remain host prerequisites.
+
+## Host-configured PTY dependency (October 13, 2026)
+
+Human-only terminal integration introduced the pinned `node-pty` 1.1.0 direct runtime
+package. The normal launcher does **not** enable this capability: a verified host adapter,
+explicit allowed folder roots and per-chat human authorization are still required.
+The Ubuntu [workflow run 38329584540](https://github.com/Logan17de/All-testing/actions/runs/38329584540)
+on commit `68658334` independently recorded 11 total direct dependencies
+(9 workspace, 2 external), including `node-pty` and `playwright-core`.
+The exact dependency references for both CI platforms now reflect the declared
+`apps/runtime/package.json` dependency set. This is **not** a waiver: the exact
+comparison is retained, and no startup, RSS, compiler, scheduler or SQLite
+numeric references or threshold policies were changed. Windows CI validation
+is still required for release.

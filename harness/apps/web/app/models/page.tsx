@@ -3,6 +3,7 @@ import Link from "next/link";
 import { isModelView } from "../../lib/model-form";
 import { fetchModels, runtimeOrigin } from "../../lib/runtime-client";
 import { ModelsWorkspace } from "./models-workspace";
+import { ChatGPTConnection } from "../agent/chatgpt-connection";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export default async function ModelsPage({
 
   return (
     <main className="page">
-      <nav className="crumbs">
+      <nav className="crumbs" aria-label="Breadcrumb">
         <Link href="/">Overview</Link>
         <span aria-hidden="true">/</span>
         <span>Models</span>
@@ -29,13 +30,11 @@ export default async function ModelsPage({
       </div>
 
       <p className="lede">
-        Connect OpenAI with an API key, or use a local model. For Codex subscription access and its
-        native coding agent, run the official CLI bridge:
-        <code>npm run codex -- help</code>, or open <Link href="/codex">Codex agent</Link>. Codex
-        owns its login, tools, approvals and sessions. Claude and Grok subscription OAuth are
-        unavailable here. Separately billed Claude/xAI API integration is inactive pending your
-        decision.
+        Connect your ChatGPT account, add an API model, or use a local model. Then open the{" "}
+        <Link href="/agent">Coding workspace</Link> to choose a model and start a task.
       </p>
+
+      <ChatGPTConnection />
 
       {!result.ok ? (
         <div className="panel">

@@ -268,3 +268,76 @@ setTimeout(() => {}, 60000);
     expect(existsSync(marker)).toBe(false);
   }, 20_000);
 });
+
+describe.runIf(process.platform === "linux")("host-only inherited descriptor boundary", () => {
+  it("pins renamed directories through child FD3 while ordinary requests inherit no selected handles", async () => {
+    const { open, mkdir, rename, readFile } = await import("node:fs/promises");
+    const { constants } = await import("node:fs");
+    const { runBoundedProcessWithDescriptors } = await import("./process-runner.js");
+    const original = join(workdir, "fd-original");
+    const moved = join(workdir, "fd-moved");
+    await mkdir(original);
+    await writeFile(join(original, "marker.txt"), "anchored original");
+    const handle = await open(
+      original,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+    try {
+      await rename(original, moved);
+      await mkdir(original);
+      await writeFile(join(original, "marker.txt"), "substituted");
+      const request = {
+        command: NODE,
+        args: [
+          "-e",
+          "const fs=require('node:fs');try { process.stdout.write(fs.readFileSync('/proc/self/fd/3/marker.txt','utf8')); } catch { process.stdout.write('unavailable'); }",
+        ],
+        cwd: workdir,
+        env: {},
+      };
+      const selected = await runBoundedProcessWithDescriptors(request, [handle.fd]);
+      expect(selected.exitCode).toBe(0);
+      expect(selected.stdout).toBe("anchored original");
+      expect((await handle.stat()).isDirectory()).toBe(true);
+      expect(await readFile(join(original, "marker.txt"), "utf8")).toBe("substituted");
+      const ordinary = await runBoundedProcess({
+        ...request,
+        hostFDs: [handle.fd],
+      } as typeof request);
+      expect(ordinary.stdout).toBe("unavailable");
+    } finally {
+      await handle.close();
+    }
+  });
+  it("refuses standard, duplicate, closed and oversized descriptor selections", async () => {
+    const { open } = await import("node:fs/promises");
+    const { runBoundedProcessWithDescriptors } = await import("./process-runner.js");
+    const file = join(workdir, "fd-validation.txt");
+    await writeFile(file, "fixture");
+    const handle = await open(file, "r");
+    const request = { command: NODE, args: ["--version"], cwd: workdir, env: {} };
+    try {
+      for (const fds of [
+        [0],
+        [-1],
+        [1.5],
+        [handle.fd, handle.fd],
+        Array<number>(129).fill(handle.fd),
+      ])
+        await expect(runBoundedProcessWithDescriptors(request, fds)).rejects.toThrow();
+      const aborted = new AbortController();
+      aborted.abort();
+      expect(
+        (
+          await runBoundedProcessWithDescriptors({ ...request, signal: aborted.signal }, [
+            handle.fd,
+          ])
+        ).outcome,
+      ).toBe("cancelled");
+    } finally {
+      const fd = handle.fd;
+      await handle.close();
+      await expect(runBoundedProcessWithDescriptors(request, [fd])).rejects.toThrow();
+    }
+  });
+});

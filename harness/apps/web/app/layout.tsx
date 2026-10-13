@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 
 import "./globals.css";
 import "./workbench.css";
+import "./app-shell.css";
+import { AppShell } from "./app-shell";
 
 export const metadata: Metadata = {
   title: "Zet Harness",
@@ -12,7 +14,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AppShell>{children}</AppShell>
+      </body>
     </html>
   );
 }

@@ -2,7 +2,6 @@ import type {
   AdapterInvocationContext,
   HarnessPlugin,
   JsonObject,
-  JsonSchema,
   NodeBehavior,
   PluginContext,
   ToolAdapter,
@@ -10,7 +9,15 @@ import type {
 } from "@zet-harness/plugin-api";
 import { PLUGIN_API_VERSION } from "@zet-harness/plugin-api";
 
-import { McpStdioClient, type McpServerConfig, type McpToolDescriptor } from "./mcp-client.js";
+import {
+  McpError,
+  McpStdioClient,
+  type McpCallResult,
+  type McpServerConfig,
+  type McpToolDescriptor,
+} from "./mcp-client.js";
+
+import { createMcpInputValidator } from "./mcp-input-schema.js";
 
 /**
  * Capability demanded by every MCP tool.
@@ -69,12 +76,6 @@ function mcpToolBehavior(
   });
 }
 
-function sanitizeSchema(schema: Record<string, unknown>): JsonSchema {
-  // The schema is server-supplied and only used for description and
-  // validation, never executed. Copying it drops any prototype tricks.
-  return JSON.parse(JSON.stringify(schema)) as JsonSchema;
-}
-
 /**
  * Translate one MCP tool descriptor into an ordinary tool adapter.
  *
@@ -88,6 +89,8 @@ export function createMcpToolAdapter(
   descriptor: McpToolDescriptor,
 ): ToolAdapter {
   const maxCharacters = registration.maxResultCharacters ?? DEFAULT_MAX_RESULT_CHARACTERS;
+  const validator = createMcpInputValidator(descriptor.inputSchema);
+  const toolName = descriptor.name;
 
   return Object.freeze({
     manifest: Object.freeze({
@@ -95,7 +98,7 @@ export function createMcpToolAdapter(
       version: "1",
       title: descriptor.annotations?.title ?? descriptor.name,
       ...(descriptor.description === undefined ? {} : { description: descriptor.description }),
-      inputSchema: sanitizeSchema(descriptor.inputSchema),
+      inputSchema: validator.schema,
       // The protocol does not describe tool output shapes, so the harness
       // declares what it actually returns rather than inventing a schema.
       outputSchema: Object.freeze({
@@ -117,7 +120,18 @@ export function createMcpToolAdapter(
     async invoke(input: JsonObject, context: AdapterInvocationContext): Promise<ToolResult> {
       context.signal.throwIfAborted();
 
-      const result = await client.callTool(descriptor.name, { ...input });
+      const validatedInput = validator.validate(input);
+      let result: McpCallResult;
+      try {
+        result = await client.callTool(toolName, validatedInput, context.signal);
+      } catch (error) {
+        context.signal.throwIfAborted();
+        // Remote diagnostic text can contain credentials. Keep it outside the
+        // adapter boundary, where the agent persists and repeats Error.message.
+        if (error instanceof McpError) throw new McpError(error.code, "MCP tool request failed.");
+        throw new Error("MCP tool request failed.");
+      }
+      context.signal.throwIfAborted();
       const joined = result.content
         .map((block) => block.text ?? "")
         .filter((text) => text.length > 0)
@@ -135,7 +149,20 @@ export function createMcpToolAdapter(
   });
 }
 
+export interface McpConnectionDiagnostic {
+  readonly toolName?: string;
+  readonly toolIndex?: number;
+  readonly reason:
+    | "invalid-descriptor"
+    | "missing-input-schema"
+    | "invalid-tool-name"
+    | "duplicate-tool-name"
+    | "unsupported-input-schema";
+}
+
 export interface McpConnection {
+  /** Sanitized quarantine reasons; never remote descriptions or schema contents. */
+  readonly diagnostics: readonly McpConnectionDiagnostic[];
   readonly client: McpStdioClient;
   readonly adapters: readonly ToolAdapter[];
   readonly close: () => Promise<void>;
@@ -162,19 +189,35 @@ export async function connectMcpServer(
     const descriptors = await client.listTools();
 
     const adapters: ToolAdapter[] = [];
+    const diagnostics: McpConnectionDiagnostic[] = [...client.descriptorDiagnostics];
     const seen = new Set<string>();
     for (const descriptor of descriptors) {
       // A hostile or buggy server must not be able to shadow another tool or
       // smuggle separators into a harness-visible identifier.
-      if (!TOOL_NAME_PATTERN.test(descriptor.name)) continue;
-      if (seen.has(descriptor.name)) continue;
+      if (!TOOL_NAME_PATTERN.test(descriptor.name)) {
+        diagnostics.push(Object.freeze({ reason: "invalid-tool-name" }));
+        continue;
+      }
+      if (seen.has(descriptor.name)) {
+        diagnostics.push(
+          Object.freeze({ toolName: descriptor.name, reason: "duplicate-tool-name" }),
+        );
+        continue;
+      }
       seen.add(descriptor.name);
-      adapters.push(createMcpToolAdapter(client, registration, descriptor));
+      try {
+        adapters.push(createMcpToolAdapter(client, registration, descriptor));
+      } catch {
+        diagnostics.push(
+          Object.freeze({ toolName: descriptor.name, reason: "unsupported-input-schema" }),
+        );
+      }
     }
 
     return Object.freeze({
       client,
       adapters: Object.freeze(adapters),
+      diagnostics: Object.freeze(diagnostics),
       close: () => client.close(),
     });
   } catch (error: unknown) {

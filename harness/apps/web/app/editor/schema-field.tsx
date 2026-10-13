@@ -157,6 +157,7 @@ export function SchemaField({
 
   return (
     <JsonField
+      key={JSON.stringify(value) ?? "unset"}
       id={id}
       label={`${labelText} (JSON)`}
       value={value}

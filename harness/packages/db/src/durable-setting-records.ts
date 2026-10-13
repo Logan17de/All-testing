@@ -3,8 +3,8 @@ import type { SqliteMigration } from "./migrations.js";
 export const APP_SETTINGS_TABLE = "app_settings" as const;
 
 /** The settings a person chooses in the app, by key. */
-export const SETTING_KEYS = ["workspace.root"] as const;
-export type SettingKey = (typeof SETTING_KEYS)[number];
+export const SETTING_KEYS = ["workspace.root", "workspace.trusted"] as const;
+export type SettingKey = (typeof SETTING_KEYS)[number] | `project.trusted.${string}`;
 
 /**
  * Choices a person makes in the app rather than in a config file.
@@ -41,7 +41,12 @@ export interface SettingStatementRunner {
 }
 
 function checkKey(key: string): SettingKey {
-  if (!(SETTING_KEYS as readonly string[]).includes(key)) {
+  if (
+    !(SETTING_KEYS as readonly string[]).includes(key) &&
+    !/^project\.trusted\.[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      key,
+    )
+  ) {
     throw new TypeError(`'${key}' is not a setting.`);
   }
   return key as SettingKey;

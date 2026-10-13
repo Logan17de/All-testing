@@ -26,7 +26,7 @@ export default async function ProjectsPage({
 
   return (
     <main className="page">
-      <nav className="crumbs">
+      <nav className="crumbs" aria-label="Breadcrumb">
         <Link href="/">Overview</Link>
         <span aria-hidden="true">/</span>
         <span>Projects</span>
@@ -47,7 +47,7 @@ export default async function ProjectsPage({
             </>
           ) : (
             <>
-              In <code>{workspace}</code>
+              Default chat folder: <code>{workspace}</code>
               {elsewhere > 0 ? (
                 <>
                   {" · "}
@@ -107,7 +107,7 @@ export default async function ProjectsPage({
               </table>
             </div>
           )}
-          <NewProjectForm />
+          <NewProjectForm defaultFolder={workspace ?? ""} />
         </>
       )}
     </main>

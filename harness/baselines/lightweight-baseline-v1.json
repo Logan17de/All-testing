@@ -15,6 +15,22 @@
         "commitSha": "455482b7d4a00caf31d125886342eaa0daf3b89e",
         "metrics": ["startupMedianMs", "directRuntimeDependencies"]
       }
+    },
+    "standaloneDependencyChange": {
+      "source": "apps/runtime/package.json",
+      "package": "@zet-harness/tools",
+      "reason": "Native coding executor directly imports workspace path, filesystem and bounded process adapters; provider CLI dependency removed. Numeric references and policies unchanged."
+    },
+    "terminalDependencyChange": {
+      "source": "apps/runtime/package.json",
+      "package": "node-pty",
+      "reason": "Optional host-configured human PTY support adds an explicit external runtime dependency; default launcher still disables human terminal. Keep all numeric references and guard thresholds unchanged.",
+      "verifiedBy": {
+        "workflowRunId": 38329584540,
+        "commitSha": "68658334cf7a0b8674093bae899643a16a29dae9",
+        "platform": "ubuntu-latest",
+        "metric": "directRuntimeDependencies"
+      }
     }
   },
   "policy": {
@@ -47,9 +63,9 @@
       "schedulerMedianMs": 0.243554,
       "sqliteMedianMs": 0.299057,
       "directRuntimeDependencies": {
-        "total": 8,
-        "workspace": 8,
-        "external": 0,
+        "total": 11,
+        "workspace": 9,
+        "external": 2,
         "names": [
           "@zet-harness/core",
           "@zet-harness/db",
@@ -58,7 +74,10 @@
           "@zet-harness/models",
           "@zet-harness/plugin-api",
           "@zet-harness/plugin-loader",
-          "@zet-harness/scheduler"
+          "@zet-harness/scheduler",
+          "@zet-harness/tools",
+          "node-pty",
+          "playwright-core"
         ]
       }
     },
@@ -69,9 +88,9 @@
       "schedulerMedianMs": 0.23525,
       "sqliteMedianMs": 2.70405,
       "directRuntimeDependencies": {
-        "total": 8,
-        "workspace": 8,
-        "external": 0,
+        "total": 11,
+        "workspace": 9,
+        "external": 2,
         "names": [
           "@zet-harness/core",
           "@zet-harness/db",
@@ -80,7 +99,10 @@
           "@zet-harness/models",
           "@zet-harness/plugin-api",
           "@zet-harness/plugin-loader",
-          "@zet-harness/scheduler"
+          "@zet-harness/scheduler",
+          "@zet-harness/tools",
+          "node-pty",
+          "playwright-core"
         ]
       }
     }

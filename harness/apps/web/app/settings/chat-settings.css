@@ -1,0 +1,64 @@
+.settingsChat {
+  font: 13px/1.5 var(--app-font-sans);
+  color: #dedede;
+}
+.settingsChatIntro {
+  margin: 0 0 20px;
+}
+.settingsChatInstructions {
+  display: grid;
+  gap: 8px;
+  font-weight: 500;
+}
+.settingsChatInstructions textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 96px;
+  padding: 10px 12px;
+  border: 1px solid #414141;
+  border-radius: 6px;
+  background: #181818;
+  color: #ededed;
+  font: inherit;
+  font-weight: 400;
+}
+.settingsChatTools {
+  margin-top: 28px;
+}
+.settingsChatTools > .settingsMuted {
+  margin: 0 0 12px;
+}
+.settingsChatOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 0;
+  border-top: 1px solid #333;
+}
+.settingsChatOption strong {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+.settingsChatOption .settingsMuted {
+  display: block;
+}
+.settingsChatOption input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #adadad;
+}
+.settingsChat :is(label, input[type="checkbox"]) {
+  cursor: default;
+}
+.settingsChat textarea:focus-visible {
+  outline: 2px solid #b6b6b6;
+  outline-offset: 2px;
+}
+.settingsChatSaveError {
+  color: #e4aaaa;
+}

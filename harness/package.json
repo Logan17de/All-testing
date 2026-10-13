@@ -25,8 +25,11 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "codex": "node scripts/codex-bridge.mjs",
-    "test:codex": "node scripts/codex-app-server-smoke.mjs"
+    "agent": "node scripts/agent-cli.mjs",
+    "browser": "node scripts/browser-cli.mjs",
+    "inventory:refresh": "node scripts/refresh-model-message-inventory.mjs",
+    "inventory:check": "node scripts/refresh-model-message-inventory.mjs --check",
+    "test:native-linux": "node scripts/native-linux-acceptance.mjs"
   },
   "devDependencies": {
     "@eslint/js": "~9.39.5",
@@ -42,8 +45,5 @@
   "engines": {
     "node": ">=24.20.0 <25",
     "npm": ">=12.0.2 <13"
-  },
-  "dependencies": {
-    "@openai/codex": "0.160.0"
   }
 }

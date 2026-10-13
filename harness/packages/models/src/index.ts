@@ -7,6 +7,7 @@ export {
 export {
   ModelTransportError,
   type ModelTransportErrorCode,
+  type ModelResponseStage,
   type ModelHttpOptions,
 } from "./model-http.js";
 export {
@@ -18,3 +19,12 @@ export {
   openAIEndpointProfile,
   type EndpointProfileInput,
 } from "./endpoint-profiles.js";
+// Shared bounded transport primitives used by the standalone Responses adapter.
+export {
+  abortable,
+  readModelJson,
+  readModelSse,
+  parseJson,
+  record,
+  immutable,
+} from "./model-http.js";

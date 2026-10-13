@@ -18,6 +18,8 @@ import { writeRuntimeJson } from "./runtime-approval-http.js";
 
 export interface RuntimeSetupHttpServices {
   readonly database: SqliteDatabase;
+  /** Synchronous host revocation boundary for every explicit workspace selection. */
+  readonly onWorkspaceSelection?: () => void;
   /** UTC epoch milliseconds. Defaults to the system clock. */
   readonly now?: () => number;
   /** Where the folder browser starts. Defaults to the person's home folder. */
@@ -34,7 +36,7 @@ const FORGET_PATH = "/api/setup/workspaces/forget";
 const MAX_BODY_BYTES = 8_192;
 const MAX_FOLDERS = 500;
 
-class SetupRequestError extends Error {
+export class SetupRequestError extends Error {
   readonly code: string;
   readonly statusCode: number;
 
@@ -60,6 +62,7 @@ export interface WorkspaceView {
   readonly path: string;
   /** False when the folder was chosen once and has since gone. */
   readonly exists: boolean;
+  readonly trusted?: boolean;
 }
 
 /** One folder this harness knows, and whether it is the one open now. */
@@ -92,7 +95,11 @@ export function readWorkspace(database: SqliteDatabase): WorkspaceView | undefin
   const setting = readSetting(database.connection(), "workspace.root");
   const path = setting?.value;
   if (typeof path !== "string") return undefined;
-  return { path, exists: existsSync(path) };
+  return {
+    path,
+    exists: existsSync(path),
+    trusted: readSetting(database.connection(), "workspace.trusted")?.value === path,
+  };
 }
 
 function methodNotAllowed(response: ServerResponse, allowed: readonly string[]): void {
@@ -133,7 +140,7 @@ function isRoot(path: string): boolean {
  * A whole drive is refused: a workspace is where agent steps may read and change
  * files, and that should be a project folder, not everything on a disk.
  */
-async function checkWorkspace(value: unknown): Promise<string> {
+export async function checkWorkspace(value: unknown): Promise<string> {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new SetupRequestError("WORKSPACE_INVALID", "Choose a folder.", 400);
   }
@@ -227,7 +234,7 @@ export async function handleSetupHttp(
           modelsConfigured: models,
           // A harness can run before a model is connected; it cannot sensibly run
           // before it knows where to work.
-          complete: workspace !== undefined && workspace.exists,
+          complete: workspace !== undefined && workspace.exists && workspace.trusted === true,
         },
       });
       return;
@@ -280,14 +287,22 @@ export async function handleSetupHttp(
     if (request.method !== "POST") return methodNotAllowed(response, ["GET", "POST"]);
     security.checkMutation(request);
     const body = await readBody(request);
+    if (body["trusted"] !== true)
+      throw new SetupRequestError(
+        "WORKSPACE_TRUST_REQUIRED",
+        "Confirm that you trust this exact folder.",
+        400,
+      );
     const path = await checkWorkspace(body["path"]);
     // Opening a folder both points the harness at it and keeps it in the list.
     await services.database.commit((connection) => {
       writeSetting(connection, "workspace.root", path, now());
+      writeSetting(connection, "workspace.trusted", path, now());
       rememberWorkspace(connection, path, now());
+      services.onWorkspaceSelection?.();
     });
     writeRuntimeJson(response, 200, {
-      workspace: { path, exists: true },
+      workspace: { path, exists: true, trusted: true },
       workspaces: readWorkspaces(services.database),
     });
   } catch (error: unknown) {

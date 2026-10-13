@@ -1,0 +1,235 @@
+.dialog.dialog.dialog {
+  width: 515px;
+  max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 50px);
+  overflow: auto;
+  margin: auto;
+  padding: 24px;
+  border: 1px solid #424242;
+  border-radius: 20px;
+  background: #242424;
+  color: #eee;
+  font: 14px/1.5 var(--app-font-sans);
+  user-select: none;
+  cursor: default;
+}
+.dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+.dialog.dialog.dialog button {
+  min-height: 0;
+  border: 0;
+  font: inherit;
+  cursor: default;
+  color: #ddd;
+  background: #363636;
+  padding: 8px 14px;
+  border-radius: 8px;
+}
+.dialog.dialog.dialog button:disabled {
+  opacity: 0.45;
+}
+.dialog.dialog.dialog button:focus-visible,
+.dialog.dialog.dialog input:focus-visible {
+  outline: 2px solid #bcbcbc;
+  outline-offset: 3px;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 22px;
+}
+.header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+.dialog.dialog.dialog .icon {
+  background: transparent;
+  color: #969696;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.dialog.dialog.dialog .icon:hover:not(:disabled) {
+  color: #fff;
+  background: transparent;
+}
+.name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #484848;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.dialog.dialog.dialog .name input {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #eee;
+  padding: 0;
+  min-width: 0;
+  width: 100%;
+  font: inherit;
+  cursor: text;
+  user-select: text;
+}
+.dialog h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 24px 0 10px;
+}
+.folder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+}
+.folder span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.folder svg {
+  flex-shrink: 0;
+  color: #aaa;
+}
+.dialog.dialog.dialog .add {
+  padding: 8px 0;
+  background: transparent;
+  color: #aaa;
+  display: flex;
+  gap: 10px;
+}
+.dialog.dialog.dialog .add:hover:not(:disabled) {
+  color: white;
+  background: transparent;
+}
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 26px;
+}
+.footer > div {
+  display: flex;
+  gap: 8px;
+}
+.dialog.dialog.dialog .remove {
+  background: transparent;
+  color: #ef8d88;
+  padding: 8px 0;
+  font-size: 12px;
+}
+.dialog.dialog.dialog .remove:hover:not(:disabled) {
+  background: transparent;
+  color: #ffb2ad;
+}
+.dialog.dialog.dialog .save {
+  background: #eee;
+  color: #181818;
+}
+.dialog.dialog.dialog .save:hover:not(:disabled) {
+  background: white;
+}
+.dialog.dialog.dialog .cancel:hover:not(:disabled) {
+  background: #444;
+}
+.picker,
+.trust {
+  margin-top: 14px;
+  border: 1px solid #484848;
+  border-radius: 10px;
+  padding: 12px;
+}
+.dialog.dialog.dialog .picker input {
+  cursor: text;
+  user-select: text;
+  background: #303030;
+  color: #eee;
+  font: inherit;
+}
+.trust p {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: #bbb;
+}
+.trust button + button {
+  margin-left: 8px;
+}
+.error {
+  color: #e7aaa4;
+  font-size: 12px;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.folder small {
+  display: block;
+  font-size: 11px;
+  color: #949494;
+}
+/* Compact screenshot-aligned folder panel and footer. */
+.header {
+  margin-bottom: 18px;
+}
+.name {
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 8px 12px;
+}
+.name:focus-within {
+  border-color: #7ba9df;
+  box-shadow: 0 0 0 1px #7ba9df;
+}
+.dialog.dialog.dialog .name input:focus-visible {
+  outline: 0;
+}
+.dialog h3 {
+  margin-top: 20px;
+}
+.folders {
+  border: 1px solid #444;
+  border-radius: 10px;
+  padding: 4px 12px;
+}
+.folder {
+  min-height: 34px;
+  padding: 6px 0;
+}
+.dialog.dialog.dialog .add {
+  width: 100%;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.footer {
+  margin-top: 24px;
+}
+.dialog.dialog.dialog .remove {
+  background: #432c2b;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+.dialog.dialog.dialog .remove:hover:not(:disabled) {
+  background: #513331;
+}
+.dialog.dialog.dialog .cancel {
+  background: transparent;
+  color: #bcbcbc;
+}
+.dialog.dialog.dialog .cancel:hover:not(:disabled) {
+  background: #303030;
+}

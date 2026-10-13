@@ -6,7 +6,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AdapterInvocationContext, ToolAdapter } from "@zet-harness/plugin-api";
 
 import { McpError, McpStdioClient, isMcpError } from "./mcp-client.js";
-import { connectMcpServer, createMcpPlugin, mcpServerCapability } from "./mcp-tools.js";
+import {
+  connectMcpServer,
+  createMcpPlugin,
+  createMcpToolAdapter,
+  mcpServerCapability,
+} from "./mcp-tools.js";
 
 /**
  * A real MCP server subprocess.
@@ -288,6 +293,23 @@ describe("the stdio client", () => {
 });
 
 describe("translating MCP tools into the normal registry", () => {
+  it("keeps remote diagnostic strings outside model-facing adapter failures", async () => {
+    const client = new McpStdioClient(registration());
+    await client.initialize();
+    try {
+      const adapter = createMcpToolAdapter(client, registration(), {
+        name: "nope",
+        inputSchema: { type: "object" },
+      });
+      await expect(adapter.invoke({}, invocationContext())).rejects.toThrow(
+        "MCP tool request failed.",
+      );
+      // Raw diagnostic access remains available to trusted transport callers.
+      await expect(client.callTool("nope", {})).rejects.toThrow("Unknown tool");
+    } finally {
+      await client.close();
+    }
+  });
   it("produces namespaced tool ids", async () => {
     const connection = await connectMcpServer(registration());
     try {

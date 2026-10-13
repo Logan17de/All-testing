@@ -233,7 +233,11 @@ describe("external client ingress (9.11)", () => {
       scopes: ["read", "messages"],
     });
     const token = session.body["token"] as string;
-    const project = await local("POST", "/api/projects", { name: "Launch" });
+    const project = await local("POST", "/api/projects", {
+      name: "Launch",
+      workspacePath: root,
+      trusted: true,
+    });
     const projectId = (project.body["project"] as { readonly projectId: string }).projectId;
     const conversation = await local("POST", `/api/projects/${projectId}/conversations`, {
       title: "Planning",

@@ -1,0 +1,141 @@
+.appShell .graphGuide {
+  width: min(920px, 100%);
+  margin: 0 auto;
+}
+.graphGuide__header {
+  margin: 35px 0;
+}
+.graphGuide__header h1 {
+  max-width: 650px;
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.14;
+  letter-spacing: -0.045em;
+  margin: 0 0 18px;
+}
+.graphGuide__header > p:not(.eyebrow) {
+  max-width: 600px;
+  color: var(--app-muted);
+  font-size: 16px;
+  line-height: 1.75;
+}
+.graphGuide .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.graphGuide__contents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 22px;
+  padding: 20px 0;
+  border-block: 1px solid var(--app-border);
+  font-size: 13px;
+}
+.graphGuide section {
+  padding: 34px 0;
+  border-bottom: 1px solid var(--app-border);
+  scroll-margin-top: 20px;
+}
+.graphGuide section h2 {
+  margin: 0 0 18px;
+  font-size: 24px;
+  letter-spacing: -0.025em;
+}
+.graphGuide section p,
+.graphGuide section li,
+.graphGuide__note p {
+  color: var(--app-muted);
+  font-size: 14px;
+  line-height: 1.85;
+}
+.graphGuide section strong {
+  color: var(--app-text);
+  font-weight: 550;
+}
+.graphGuide section li {
+  padding-left: 5px;
+  margin: 9px 0;
+}
+.graphGuide__example {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 24px 0;
+}
+.graphGuide__example > span {
+  border: 1px solid var(--app-border);
+  background: var(--app-panel);
+  border-radius: 10px;
+  padding: 18px 24px;
+  min-width: 155px;
+}
+.graphGuide__example strong,
+.graphGuide__example small {
+  display: block;
+}
+.graphGuide__example small {
+  color: var(--app-muted);
+  font-size: 12px;
+  margin-top: 6px;
+}
+.graphGuide table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.graphGuide th,
+.graphGuide td {
+  padding: 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--app-border);
+  line-height: 1.6;
+}
+.graphGuide th {
+  background: var(--app-panel);
+}
+.graphGuide__shortcuts {
+  margin: 22px 0 0;
+}
+.graphGuide__shortcuts > div {
+  display: flex;
+  gap: 20px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--app-border);
+  font-size: 13px;
+}
+.graphGuide__shortcuts dt {
+  flex: 0 0 130px;
+}
+.graphGuide__shortcuts dd {
+  margin: 0;
+  color: var(--app-muted);
+}
+.graphGuide__note {
+  margin-top: 30px;
+  padding: 22px;
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  background: var(--app-panel);
+}
+.graphGuide__note h2 {
+  font-size: 16px;
+  margin-top: 0;
+}
+@media (max-width: 600px) {
+  .graphGuide__example {
+    gap: 10px;
+  }
+  .graphGuide__example > span {
+    min-width: 0;
+    flex: 1;
+    padding: 15px;
+  }
+  .graphGuide__shortcuts > div {
+    flex-direction: column;
+    gap: 5px;
+  }
+  .graphGuide__shortcuts dt {
+    flex-basis: auto;
+  }
+}

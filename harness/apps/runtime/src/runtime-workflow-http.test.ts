@@ -1,4 +1,7 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SQLITE_MEMORY_PATH } from "@zet-harness/db";
@@ -8,6 +11,7 @@ import { buildWorkflow } from "./runtime-workflows.js";
 
 const daemons: RuntimeDaemon[] = [];
 const servers: Server[] = [];
+const folders: string[] = [];
 let savedGitHubApi: string | undefined;
 
 beforeEach(() => {
@@ -25,6 +29,11 @@ afterEach(async () => {
   }
   if (savedGitHubApi === undefined) delete process.env["GITHUB_API_URL"];
   else process.env["GITHUB_API_URL"] = savedGitHubApi;
+  for (const folder of folders.splice(0)) {
+    if (dirname(folder) !== tmpdir() || !folder.startsWith(join(tmpdir(), "zet-workflow-http-")))
+      throw new Error("Unexpected workflow fixture cleanup path.");
+    await rm(folder, { recursive: true, force: true });
+  }
 });
 
 interface Reply {
@@ -77,15 +86,17 @@ const completion = (message: Record<string, unknown>, finish: string) => ({
 /** A model endpoint that answers from a script and remembers the tools it was offered. */
 async function scriptedModel(script: readonly Record<string, unknown>[]) {
   const offered: string[][] = [];
+  const requests: { messages?: { role: string; content?: string; tool_call_id?: string }[] }[] = [];
   let turn = 0;
   const url = await listen((_request, body) => {
     const request = JSON.parse(body) as { tools?: { function: { name: string } }[] };
+    requests.push(JSON.parse(body) as (typeof requests)[number]);
     offered.push((request.tools ?? []).map((tool) => tool.function.name));
     const next = script[turn] ?? completion({ content: "Done." }, "stop");
     turn += 1;
     return { body: next };
   });
-  return { baseUrl: `${url}/v1`, offered };
+  return { baseUrl: `${url}/v1`, offered, requests };
 }
 
 async function startDaemon() {
@@ -122,7 +133,14 @@ async function startDaemon() {
       credential: "none",
       contextWindowTokens: 32_000,
     });
-    const project = await send("POST", "/api/projects", { name: "Chat" });
+    const workspacePath = await mkdtemp(join(tmpdir(), "zet-workflow-http-"));
+    folders.push(workspacePath);
+    const project = await send("POST", "/api/projects", {
+      name: "Chat",
+      workspacePath,
+      trusted: true,
+    });
+    expect(project.status).toBe(201);
     const projectId = (project.body["project"] as { readonly projectId: string }).projectId;
     const started = await send("POST", `/api/projects/${projectId}/conversations`, {
       title: "Hello",
@@ -190,10 +208,46 @@ describe("ready-made workflows", () => {
       role: "assistant",
       parts: [{ kind: "text", text: "Hello! How can I help?" }],
     });
-    // A plain chat hands the model no GitHub tools.
-    expect(model.offered[0]?.some((name) => name.startsWith("github_"))).toBe(false);
+    // Ordinary chat offers enabled host-granted plugin tools by default.
+    expect(model.offered[0]?.some((name) => name.startsWith("github_"))).toBe(true);
     expect(model.offered[0]).toContain("harness_goals_list");
   });
+
+  it.each(["harness_goals_list", "harness_memory_list"])(
+    "round-trips %s through the actual HTTP model and workflow tool node",
+    async (name) => {
+      const model = await scriptedModel([
+        completion(
+          {
+            content: null,
+            tool_calls: [
+              { id: "fixture_read", type: "function", function: { name, arguments: "{}" } },
+            ],
+          },
+          "tool_calls",
+        ),
+        completion({ content: "Local tool result received." }, "stop"),
+      ]);
+      const { send, conversation, say, finish, messages } = await startDaemon();
+      const conversationId = await conversation(model.baseUrl);
+      await say(conversationId, "Read the local project records.");
+      const reply = await send("POST", `/api/conversations/${conversationId}/reply`, {
+        workflow: "chat",
+      });
+      expect(reply.status).toBe(201);
+      expect(await finish(String(reply.body["runId"]))).toBe("completed");
+      expect(model.offered[0]).toContain(name);
+      const outbound = model.requests[1]?.messages?.find(
+        (message) => message.role === "tool" && message.tool_call_id === "fixture_read",
+      );
+      expect(JSON.parse(outbound?.content ?? "null")).toMatchObject({ ok: true });
+      const branch = await messages(conversationId);
+      expect(branch.at(-1)).toMatchObject({
+        role: "assistant",
+        parts: [{ kind: "text", text: "Local tool result received." }],
+      });
+    },
+  );
 
   it("answers with GitHub when the GitHub component is wired in", async () => {
     const githubRequests: string[] = [];

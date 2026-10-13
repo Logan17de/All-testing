@@ -16,16 +16,18 @@ const port = Number(process.env.HARNESS_SMOKE_PORT ?? 3210);
 const healthUrl = `http://${host}:${port}/api/health`;
 const startupTimeoutMs = 45_000;
 const pollIntervalMs = 250;
+const production = process.argv.includes("--production");
 
 let output = "";
 
 const server = spawn(
   process.execPath,
-  [nextBin, "dev", "apps/web", "-H", host, "-p", String(port)],
+  [nextBin, production ? "start" : "dev", "apps/web", "-H", host, "-p", String(port)],
   {
     cwd: root,
     env: {
       ...process.env,
+      NODE_ENV: production ? "production" : "development",
       NEXT_TELEMETRY_DISABLED: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -85,7 +87,7 @@ async function waitForHealth() {
 
 try {
   await waitForHealth();
-  console.log(`STARTUP_OK ${healthUrl}`);
+  console.log(`STARTUP_OK ${healthUrl} mode=${production ? "production" : "development"}`);
 } finally {
   await stopServer();
 }

@@ -25,18 +25,56 @@ const ERROR_CODES: readonly ModelTransportErrorCode[] = [
   "MODEL_STREAM_TRUNCATED",
 ];
 const TRANSPORT_ERRORS = new WeakSet<object>();
+const RESPONSE_STAGES = [
+  "responses.stream-content-type",
+  "responses.json-body",
+  "responses.media-missing",
+  "responses.media-textplain",
+  "responses.media-octetstream",
+  "responses.media-html",
+  "responses.media-other",
+  "responses.stream-framing",
+  "responses.event-json",
+  "responses.event-shape",
+  "responses.after-completion",
+  "responses.text-delta",
+  "responses.failed",
+  "responses.provider-error",
+  "responses.subscription-usage-limit",
+  "responses.subscription-usage-unavailable",
+  "responses.incomplete",
+  "responses.incomplete-output-limit",
+  "responses.incomplete-content-filter",
+  "responses.completed-shape",
+  "responses.empty-output",
+  "responses.finalized-items",
+  "responses.finalized-item-shape",
+  "responses.finalized-item-gap",
+  "responses.finalized-item-conflict",
+  "responses.output-item",
+  "responses.reasoning-state",
+  "responses.message-shape",
+  "responses.message-content",
+  "responses.function-call",
+  "responses.function-arguments",
+  "responses.usage",
+  "responses.output-budget",
+] as const;
+export type ModelResponseStage = (typeof RESPONSE_STAGES)[number];
 
 /** Safe by construction: no provider body, URL, credentials, or nested exception is exposed. */
 export class ModelTransportError extends Error {
   readonly code: ModelTransportErrorCode;
   readonly status?: number;
   readonly retryable: boolean;
+  readonly stage?: ModelResponseStage;
 
-  constructor(code: ModelTransportErrorCode, status?: number) {
+  constructor(code: ModelTransportErrorCode, status?: number, stage?: ModelResponseStage) {
     const safeCode = ERROR_CODES.includes(code) ? code : "MODEL_RESPONSE_INVALID";
     super(safeCode);
     this.name = "ModelTransportError";
     this.code = safeCode;
+    if (stage !== undefined && RESPONSE_STAGES.includes(stage)) this.stage = stage;
     if (status !== undefined && Number.isInteger(status) && status >= 100 && status <= 599) {
       this.status = status;
     }
@@ -53,11 +91,13 @@ export class ModelTransportError extends Error {
     readonly code: ModelTransportErrorCode;
     readonly status?: number;
     readonly retryable: boolean;
+    readonly stage?: ModelResponseStage;
   } {
     return {
       code: this.code,
       ...(this.status === undefined ? {} : { status: this.status }),
       retryable: this.retryable,
+      ...(this.stage === undefined ? {} : { stage: this.stage }),
     };
   }
 }

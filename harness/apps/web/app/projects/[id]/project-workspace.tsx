@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { workspaceRequest } from "../../../lib/workspace-client";
 import { MemoryPanel } from "./memory-panel";
+import { ProjectFolderSettings } from "./project-folder-settings";
 import {
   BLOCKABLE_TODO_STATUSES,
   GOAL_QUICK_ACTIONS,
@@ -66,7 +67,6 @@ export function ProjectWorkspace({ projectId }: { readonly projectId: string }) 
   const [state, setState] = useState<WorkspaceState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [conversationTitle, setConversationTitle] = useState("");
   const [goalTitle, setGoalTitle] = useState("");
   const [todoTitles, setTodoTitles] = useState<Readonly<Record<string, string>>>({});
   const [blocking, setBlocking] = useState<{
@@ -102,13 +102,6 @@ export function ProjectWorkspace({ projectId }: { readonly projectId: string }) 
     }
     setVersion((current) => current + 1);
     return true;
-  };
-
-  const createConversation = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
-    if (await change(`projects/${projectId}/conversations`, { title: conversationTitle })) {
-      setConversationTitle("");
-    }
   };
 
   const createGoal = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -161,11 +154,18 @@ export function ProjectWorkspace({ projectId }: { readonly projectId: string }) 
         </p>
       )}
 
+      <ProjectFolderSettings
+        projectId={projectId}
+        workspacePath={state.project.workspacePath}
+        archived={archived}
+      />
       <div className="workspaceGrid">
         <section className="panel" aria-label="Conversations">
           <h2 className="panelTitle">Conversations</h2>
           {state.conversations.length === 0 ? (
-            <p className="muted">No conversations yet.</p>
+            <p className="muted">
+              No chats. Use the pencil next to this project in the sidebar to create a chat.
+            </p>
           ) : (
             <ul className="todoList">
               {state.conversations.map((conversation) => (
@@ -180,32 +180,6 @@ export function ProjectWorkspace({ projectId }: { readonly projectId: string }) 
                 </li>
               ))}
             </ul>
-          )}
-          {archived ? null : (
-            <form
-              aria-label="New conversation"
-              onSubmit={(event) => {
-                void createConversation(event);
-              }}
-            >
-              <label className="field">
-                <span className="field__label">New conversation</span>
-                <input
-                  className="field__input"
-                  value={conversationTitle}
-                  maxLength={200}
-                  placeholder="Title (optional)"
-                  onChange={(event) => {
-                    setConversationTitle(event.target.value);
-                  }}
-                />
-              </label>
-              <div className="btnRow">
-                <button className="btn" type="submit" disabled={busy}>
-                  Start conversation
-                </button>
-              </div>
-            </form>
           )}
         </section>
 
@@ -248,6 +222,9 @@ export function ProjectWorkspace({ projectId }: { readonly projectId: string }) 
                       ))}
               </div>
 
+              {todos.length === 0 ? (
+                <p className="muted small">No todos for this goal yet.</p>
+              ) : null}
               <ul className="todoList">
                 {todos.map((todo) => (
                   <li

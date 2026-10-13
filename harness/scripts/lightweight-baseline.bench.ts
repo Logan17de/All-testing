@@ -204,18 +204,23 @@ const database = new SqliteDatabase({ path: join(databaseDirectory, "baseline.sq
 let insertSequence = 0;
 let insertStatement: ReturnType<ReturnType<SqliteDatabase["connection"]>["prepare"]>;
 
-beforeAll(async () => {
-  await collectRuntimeSamples();
-  compiledIr = await compileFixture();
+beforeAll(
+  async () => {
+    await collectRuntimeSamples();
+    compiledIr = await compileFixture();
 
-  database.open();
-  database
-    .connection()
-    .exec("CREATE TABLE baseline_commits (sequence INTEGER PRIMARY KEY, payload TEXT NOT NULL)");
-  insertStatement = database
-    .connection()
-    .prepare("INSERT INTO baseline_commits(sequence, payload) VALUES (?, 'baseline')");
-});
+    database.open();
+    database
+      .connection()
+      .exec("CREATE TABLE baseline_commits (sequence INTEGER PRIMARY KEY, payload TEXT NOT NULL)");
+    insertStatement = database
+      .connection()
+      .prepare("INSERT INTO baseline_commits(sequence, payload) VALUES (?, 'baseline')");
+    // Five sequential child samples each have a 10-second process deadline.
+    // The aggregate setup budget must cover those deadlines plus local setup.
+  },
+  runtimeSampleCount * 10_000 + 10_000,
+);
 
 afterAll(async () => {
   await database.drainWrites();

@@ -1,13 +1,22 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SQLITE_MEMORY_PATH } from "@zet-harness/db";
 
 import { RuntimeDaemon } from "./runtime-daemon.js";
 
+let workspace: string;
+beforeEach(async () => {
+  workspace = await realpath(await mkdtemp(join(tmpdir(), "zet-http-workspace-")));
+});
+
 const daemons: RuntimeDaemon[] = [];
 
 afterEach(async () => {
   for (const daemon of daemons.splice(0)) await daemon.stop();
+  await rm(workspace, { recursive: true, force: true });
 });
 
 interface Reply {
@@ -55,7 +64,11 @@ async function startDaemon(): Promise<{
 describe("memory endpoints", () => {
   it("remembers, lists, changes, pins and forgets", async () => {
     const { send } = await startDaemon();
-    const created = await send("POST", "/api/projects", { name: "Harness" });
+    const created = await send("POST", "/api/projects", {
+      name: "Harness",
+      workspacePath: workspace,
+      trusted: true,
+    });
     expect(created.status).toBe(201);
     const projectId = (created.body["project"] as { readonly projectId: string }).projectId;
 
@@ -118,7 +131,11 @@ describe("memory endpoints", () => {
 
   it("refuses unknown ids, unknown fields and bad values", async () => {
     const { send } = await startDaemon();
-    const created = await send("POST", "/api/projects", { name: "Harness" });
+    const created = await send("POST", "/api/projects", {
+      name: "Harness",
+      workspacePath: workspace,
+      trusted: true,
+    });
     const projectId = (created.body["project"] as { readonly projectId: string }).projectId;
 
     const missingProject = await send(

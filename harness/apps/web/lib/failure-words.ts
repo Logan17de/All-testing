@@ -9,15 +9,22 @@
 
 export const MODEL_FAILURE_REASONS: Readonly<Record<string, string>> = {
   MODEL_CREDENTIAL_UNAVAILABLE:
-    "No key was available: store a provider API key or set the environment variable before starting the runtime.",
+    "Authentication is unavailable. Check the account connection or configured API credentials on Models.",
   MODEL_NETWORK_ERROR: "The endpoint could not be reached. Is the server running at that URL?",
   MODEL_TIMEOUT: "The endpoint took too long to answer.",
-  MODEL_RESPONSE_INVALID: "Something answered, but not in the Chat Completions format.",
+  MODEL_RESPONSE_INVALID:
+    "The provider responded, but the harness could not read the response. Check the run's diagnostic code and provider configuration.",
   MODEL_RESPONSE_LIMIT: "The endpoint's answer was larger than the harness accepts.",
   MODEL_STREAM_TRUNCATED: "The endpoint stopped part way through its answer.",
   MODEL_REQUEST_UNSUPPORTED: "The endpoint does not support what this step asked for.",
   MODEL_CONFIGURATION_INVALID: "The runtime could not use this endpoint URL.",
   MODEL_NOT_REGISTERED: "The runtime has not loaded this model yet. Restart the runtime.",
+  CONTEXT_WINDOW_UNKNOWN:
+    "This model has no configured context budget. Configure its budget before retrying.",
+  CONTEXT_BUDGET_EXCEEDED:
+    "The conversation exceeds this model's context budget. Shorten the input or start a new chat.",
+  CHATGPT_LOGIN_REQUIRED:
+    "The ChatGPT connection is no longer available. Reconnect from Models before retrying.",
   AGENT_NO_MODEL:
     "No connected model could take this step: connect one on Models, or pick a different model for this chat.",
   AGENT_CONVERSATION_NOT_FOUND: "The conversation this step answers is gone.",
@@ -33,7 +40,7 @@ export const MODEL_FAILURE_REASONS: Readonly<Record<string, string>> = {
 /** What an HTTP status from a model endpoint means, in the same words everywhere. */
 export function httpFailureReason(status: number): string {
   if (status === 401 || status === 403) {
-    return `The endpoint refused the key (HTTP ${String(status)}).`;
+    return `The provider rejected authentication (HTTP ${String(status)}). Check the account connection or API credentials on Models.`;
   }
   if (status === 402) {
     return "The provider says this account cannot pay for the request (HTTP 402). Check your credit or billing with them.";
@@ -65,6 +72,19 @@ export function describeFailure(error: unknown): string | null {
   const cause = record["cause"];
   if (typeof cause === "object" && cause !== null) {
     const inner = cause as Record<string, unknown>;
+    const stage = inner["stage"];
+    if (stage === "responses.incomplete-output-limit") {
+      return "The model reached its output limit before finishing. Increase the graph step's output budget or shorten the request.";
+    }
+    if (stage === "responses.subscription-usage-limit") {
+      return "The connected ChatGPT account has reached its shared usage limit. Check usage before retrying.";
+    }
+    if (stage === "responses.subscription-usage-unavailable") {
+      return "ChatGPT subscription usage is currently unavailable for this request. Check the account's access before retrying.";
+    }
+    if (stage === "responses.incomplete-content-filter") {
+      return "The provider stopped this response because of its content policy. Review the request before retrying.";
+    }
     const code = inner["code"];
     if (typeof code === "string") {
       const status = inner["status"];

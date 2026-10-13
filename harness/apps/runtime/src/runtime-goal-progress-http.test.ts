@@ -1,13 +1,22 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SQLITE_MEMORY_PATH } from "@zet-harness/db";
 
 import { RuntimeDaemon } from "./runtime-daemon.js";
 
+let workspace: string;
+beforeEach(async () => {
+  workspace = await realpath(await mkdtemp(join(tmpdir(), "zet-http-workspace-")));
+});
+
 const daemons: RuntimeDaemon[] = [];
 
 afterEach(async () => {
   for (const daemon of daemons.splice(0)) await daemon.stop();
+  await rm(workspace, { recursive: true, force: true });
 });
 
 async function startDaemon(): Promise<string> {
@@ -51,7 +60,10 @@ describe("goal progress over HTTP", () => {
     const base = await startDaemon();
     const token = await sessionToken(base);
     const projectId = field(
-      await send(base, "POST", "/api/projects", { body: { name: "Site" }, token }),
+      await send(base, "POST", "/api/projects", {
+        body: { name: "Site", workspacePath: workspace, trusted: true },
+        token,
+      }),
       "project",
       "projectId",
     );

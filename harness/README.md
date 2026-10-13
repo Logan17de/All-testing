@@ -82,6 +82,10 @@ The visual/editor representation is source code, not runtime state. The schedule
 
 ## Setting up
 
+For chat defaults, archiving, restoration and automatic deletion, see [Chat settings and archived chats](docs/chat-settings.md).
+
+For workspace layout, keyboard shortcuts and notifications, see [General settings](docs/general-settings.md).
+
 A harness runs with no configuration at all. To settle where things live and which port it uses:
 
 ```bash
@@ -117,6 +121,7 @@ two histories really happened is not a choice a restore should make quietly.
 - [`PLUGINS.md`](./PLUGINS.md) — plugin architecture and extension direction.
 - [`RUNTIME.md`](./RUNTIME.md) — durable runtime ownership and process boundaries.
 - [`GRAPH.md`](./GRAPH.md) — visual graph/source/IR design notes.
+- [`docs/graph-guide.md`](./docs/graph-guide.md) — hands-on graph editor guide: connect, disconnect, resize, recover edits, and run workflows. Also available at `/editor/guide`.
 - [`GAPS.md`](./GAPS.md) — historical gap review and deferred decisions.
 - Research reports — reference inputs only; accepted decisions are promoted into `PLAN.md`/`TODO.md`.
 
@@ -146,7 +151,7 @@ Phase 11 Packaging + optional scale-out     🚧 4/9 (start, setup, backup, grap
 
 To try it, run `npm start` and open `http://127.0.0.1:3000`: the first screen asks for the
 workspace folder, then for a model — use an OpenAI API credential or a local model,
-or use Ollama. For native Codex and ChatGPT login open `/codex` or use `npm run codex -- help`; see
+or use Ollama. Open `/agent` for the standalone coding workspace or use `npm run agent -- help`; see
 [Supported coding paths](./CODEX-CAPABILITIES.md) and the
 [independent acceptance checklist](./CODEX-ACCEPTANCE.md). More in [Running the harness](./PLUGINS.md#running-the-harness) and
 [Building and running a graph](./PLUGINS.md#building-and-running-a-graph). Plugins can be
