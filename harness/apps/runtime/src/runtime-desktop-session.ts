@@ -25,6 +25,7 @@ export interface DesktopWindow {
 }
 export type DesktopAction =
   | { kind: "move" | "click"; x: number; y: number }
+  | { kind: "observed-click"; artifactId: string; x: number; y: number }
   | {
       kind: "key";
       key:
@@ -190,6 +191,8 @@ export class RuntimeDesktopSession {
     | undefined;
   #artifacts = new Map<string, DesktopCapture>();
   #artifactScopes = new Map<string, DesktopCaptureScope>();
+  #observationEpoch = new Map<string, number>();
+  #inputEpoch = 0;
   #inventory: { monitors: DesktopMonitor[]; windows: DesktopWindow[] } = {
     monitors: [],
     windows: [],
@@ -298,6 +301,8 @@ export class RuntimeDesktopSession {
       void this.options.driver?.removeCapture(capture).catch(() => undefined);
     this.#artifacts.clear();
     this.#artifactScopes.clear();
+    this.#observationEpoch.clear();
+    this.#inputEpoch = 0;
     this.#released.clear();
     return this.status();
   }
@@ -386,6 +391,7 @@ export class RuntimeDesktopSession {
       const artifactId = randomUUID();
       this.#artifacts.set(artifactId, capture);
       this.#artifactScopes.set(artifactId, Object.freeze(structuredClone(scope)));
+      this.#observationEpoch.set(artifactId, this.#inputEpoch);
       this.#record("local-capture");
       return {
         artifactId,
@@ -407,7 +413,9 @@ export class RuntimeDesktopSession {
     if (this.#busy) throw new Error("Desktop session is busy.");
     const snapshot = structuredClone(action);
     const keys =
-      snapshot.kind === "move" || snapshot.kind === "click"
+      snapshot.kind === "observed-click"
+        ? ["kind", "artifactId", "x", "y"]
+        : snapshot.kind === "move" || snapshot.kind === "click"
         ? ["kind", "x", "y"]
         : snapshot.kind === "key"
           ? ["kind", "key"]
@@ -416,7 +424,7 @@ export class RuntimeDesktopSession {
             : ["kind", "windowId"];
     if (Object.keys(snapshot).some((key) => !keys.includes(key)))
       throw new Error("Unsupported desktop action field.");
-    if (snapshot.kind === "move" || snapshot.kind === "click") {
+    if (snapshot.kind === "move" || snapshot.kind === "click" || snapshot.kind === "observed-click") {
       const m = session.monitor;
       if (
         !Number.isInteger(snapshot.x) ||
@@ -427,6 +435,20 @@ export class RuntimeDesktopSession {
         snapshot.y >= m.y + m.height
       )
         throw new Error("Input is outside selected monitor.");
+      if (snapshot.kind === "observed-click") {
+        const scope = this.#artifactScopes.get(snapshot.artifactId);
+        const latest = [...this.#artifacts.keys()].at(-1);
+        if (
+          !scope ||
+          latest !== snapshot.artifactId ||
+          this.#observationEpoch.get(snapshot.artifactId) !== this.#inputEpoch ||
+          snapshot.x < scope.x ||
+          snapshot.y < scope.y ||
+          snapshot.x >= scope.x + scope.width ||
+          snapshot.y >= scope.y + scope.height
+        )
+          throw new Error("Desktop screenshot is stale or input is outside the observed frame.");
+      }
     } else if (snapshot.kind === "text") {
       if (
         typeof snapshot.text !== "string" ||
@@ -476,9 +498,45 @@ export class RuntimeDesktopSession {
           ),
         );
       if (!authorized()) throw new Error("Desktop invocation scope expired.");
+      if (snapshot.kind === "observed-click") {
+        // Coordinates are bound to the latest screenshot and its actual capture
+        // rectangle, not just a model-invented screen position. Recheck the
+        // selected target *after* the user approves this exact action.
+        if (
+          !this.#artifacts.has(snapshot.artifactId) ||
+          this.#observationEpoch.get(snapshot.artifactId) !== this.#inputEpoch ||
+          [...this.#artifacts.keys()].at(-1) !== snapshot.artifactId
+        )
+          throw new Error("Desktop observation expired.");
+        const inventory = await this.#bounded(session.controller.signal, () =>
+          this.options.driver!.inventory(session.controller.signal),
+        );
+        const monitor = inventory.monitors.find((item) => item.id === session.monitor.id);
+        if (
+          !monitor ||
+          monitor.x !== session.monitor.x ||
+          monitor.y !== session.monitor.y ||
+          monitor.width !== session.monitor.width ||
+          monitor.height !== session.monitor.height
+        )
+          throw new Error("Observed monitor changed.");
+        if (session.window) {
+          const current = inventory.windows.find((item) => item.id === session.window!.id);
+          if (!current || !current.focused || !sameDesktopWindow(session.window, current))
+            throw new Error("Observed window changed.");
+          const scope = windowCaptureScope(session.monitor, current);
+          if (!sameCaptureScope(this.#artifactScopes.get(snapshot.artifactId), scope))
+            throw new Error("Observed capture scope changed.");
+        }
+      }
+      const driverAction: DesktopAction =
+        snapshot.kind === "observed-click"
+          ? { kind: "click", x: snapshot.x, y: snapshot.y }
+          : snapshot;
       await this.#bounded(session.controller.signal, () =>
-        this.options.driver!.act(snapshot, session.controller.signal),
+        this.options.driver!.act(driverAction, session.controller.signal),
       );
+      this.#inputEpoch++;
     } finally {
       this.#busy = false;
     }
