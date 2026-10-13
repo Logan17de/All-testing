@@ -202,3 +202,77 @@ it("cleans a late screenshot after stop and keeps audit free of typed content", 
     expect.objectContaining({ localPath: "late-private-path", width: 1920, height: 1080 }),
   );
 });
+
+it("ties physical clicks to a fresh screenshot and revokes the frame after input", async () => {
+  const { session, driver } = fixture();
+  await session.inventory();
+  const armed = session.arm({ task: "Inspect selected window", monitorId: "left", windowId: "123" });
+  try {
+    await expect(
+      session.act(armed.generation, {
+        kind: "observed-click",
+        artifactId: "forged",
+        x: -100,
+        y: 10,
+      }),
+    ).rejects.toThrow("stale");
+    const frame = await session.capture(armed.generation);
+    await expect(
+      session.act(armed.generation, {
+        kind: "observed-click",
+        artifactId: frame.artifactId,
+        x: 0,
+        y: 10,
+      }),
+    ).rejects.toThrow("outside");
+    await session.act(armed.generation, {
+      kind: "observed-click",
+      artifactId: frame.artifactId,
+      x: -100,
+      y: 10,
+    });
+    expect(driver.act).toHaveBeenLastCalledWith(
+      { kind: "click", x: -100, y: 10 },
+      expect.any(AbortSignal),
+    );
+    await expect(
+      session.act(armed.generation, {
+        kind: "observed-click",
+        artifactId: frame.artifactId,
+        x: -100,
+        y: 10,
+      }),
+    ).rejects.toThrow("stale");
+  } finally {
+    session.stop();
+  }
+});
+
+it("refuses an observed click when the window identity changed during consent", async () => {
+  const { session, driver, approve } = fixture();
+  await session.inventory();
+  const armed = session.arm({ task: "Observe window identity", monitorId: "left", windowId: "123" });
+  try {
+    const frame = await session.capture(armed.generation);
+    approve.mockImplementationOnce(async () => {
+      driver.inventory.mockResolvedValueOnce({
+        monitors: [{ id: "left", x: -1920, y: 0, width: 1920, height: 1080, scale: 1.5 }],
+        windows: [{ id: "123", title: "Replaced", processId: 99, processStartedAt: "200",
+          windowClass: "FixtureClass", focused: true,
+          bounds: { x: -1920, y: 0, width: 1920, height: 1080 } }],
+      });
+      return true;
+    });
+    await expect(
+      session.act(armed.generation, {
+        kind: "observed-click",
+        artifactId: frame.artifactId,
+        x: -100,
+        y: 10,
+      }),
+    ).rejects.toThrow("changed");
+    expect(driver.act).not.toHaveBeenCalled();
+  } finally {
+    session.stop();
+  }
+});
