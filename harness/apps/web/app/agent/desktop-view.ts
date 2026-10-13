@@ -107,6 +107,47 @@ export function monitorContains(
   );
 }
 
+
+export interface DesktopPreviewArea {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Map a click in the rendered local preview to exact physical desktop pixels. */
+export function previewPointToDesktop(
+  scope: DesktopPreviewArea,
+  imageWidth: number,
+  imageHeight: number,
+  displayedWidth: number,
+  displayedHeight: number,
+  clickX: number,
+  clickY: number,
+): { x: number; y: number } | undefined {
+  if (
+    ![scope.x, scope.y, scope.width, scope.height, imageWidth, imageHeight].every(
+      Number.isSafeInteger,
+    ) ||
+    scope.width <= 0 ||
+    scope.height <= 0 ||
+    imageWidth !== scope.width ||
+    imageHeight !== scope.height ||
+    ![displayedWidth, displayedHeight, clickX, clickY].every(Number.isFinite) ||
+    displayedWidth <= 0 ||
+    displayedHeight <= 0 ||
+    clickX < 0 ||
+    clickY < 0 ||
+    clickX >= displayedWidth ||
+    clickY >= displayedHeight
+  )
+    return undefined;
+  return {
+    x: scope.x + Math.floor((clickX / displayedWidth) * scope.width),
+    y: scope.y + Math.floor((clickY / displayedHeight) * scope.height),
+  };
+}
+
 export interface DesktopConsent {
   id: string;
   generation: number;
