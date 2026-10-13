@@ -367,6 +367,7 @@ export class RuntimeCodingService {
         "harness.memory.list",
         "harness.memory.remember",
         "harness.memory.update",
+        "harness.memory.session-search",
       ].map((id) => ({
         id,
         title: id,
