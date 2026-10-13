@@ -14,12 +14,16 @@ for /f "delims=" %%V in ('npm --version') do set "ZET_NPM_VERSION=%%V"
 node -e "const [a,b,c]=process.argv[1].split('.').map(Number);process.exit(a===12 && (b>0 || c>=2) ? 0 : 1)" "%ZET_NPM_VERSION%"
 if errorlevel 1 goto :need_npm
 echo.
-echo [1/2] Installing pinned project dependencies...
+echo [1/3] Installing pinned project dependencies...
 call npm ci --no-audit --no-fund
 if errorlevel 1 goto :failed
 echo.
-echo [2/2] Compiling the runtime and UI...
+echo [2/3] Compiling the runtime and UI...
 call npm run build
+if errorlevel 1 goto :failed
+echo.
+echo [3/3] Installing the pinned Chromium browser for isolated browser sessions...
+node "node_modules\playwright-core\cli.js" install chromium
 if errorlevel 1 goto :failed
 echo.
 echo Preparation complete. Run "Start Zet Harness.cmd" to open the local app.
