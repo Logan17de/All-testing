@@ -206,7 +206,11 @@ it("cleans a late screenshot after stop and keeps audit free of typed content", 
 it("ties physical clicks to a fresh screenshot and revokes the frame after input", async () => {
   const { session, driver } = fixture();
   await session.inventory();
-  const armed = session.arm({ task: "Inspect selected window", monitorId: "left", windowId: "123" });
+  const armed = session.arm({
+    task: "Inspect selected window",
+    monitorId: "left",
+    windowId: "123",
+  });
   try {
     await expect(
       session.act(armed.generation, {
@@ -251,15 +255,27 @@ it("ties physical clicks to a fresh screenshot and revokes the frame after input
 it("refuses an observed click when the window identity changed during consent", async () => {
   const { session, driver, approve } = fixture();
   await session.inventory();
-  const armed = session.arm({ task: "Observe window identity", monitorId: "left", windowId: "123" });
+  const armed = session.arm({
+    task: "Observe window identity",
+    monitorId: "left",
+    windowId: "123",
+  });
   try {
     const frame = await session.capture(armed.generation);
     approve.mockImplementationOnce(() => {
       driver.inventory.mockResolvedValueOnce({
         monitors: [{ id: "left", x: -1920, y: 0, width: 1920, height: 1080, scale: 1.5 }],
-        windows: [{ id: "123", title: "Replaced", processId: 99, processStartedAt: "200",
-          windowClass: "FixtureClass", focused: true,
-          bounds: { x: -1920, y: 0, width: 1920, height: 1080 } }],
+        windows: [
+          {
+            id: "123",
+            title: "Replaced",
+            processId: 99,
+            processStartedAt: "200",
+            windowClass: "FixtureClass",
+            focused: true,
+            bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+          },
+        ],
       });
       return Promise.resolve(true);
     });

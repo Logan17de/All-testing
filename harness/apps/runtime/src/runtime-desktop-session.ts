@@ -416,15 +416,19 @@ export class RuntimeDesktopSession {
       snapshot.kind === "observed-click"
         ? ["kind", "artifactId", "x", "y"]
         : snapshot.kind === "move" || snapshot.kind === "click"
-        ? ["kind", "x", "y"]
-        : snapshot.kind === "key"
-          ? ["kind", "key"]
-          : snapshot.kind === "text"
-            ? ["kind", "text"]
-            : ["kind", "windowId"];
+          ? ["kind", "x", "y"]
+          : snapshot.kind === "key"
+            ? ["kind", "key"]
+            : snapshot.kind === "text"
+              ? ["kind", "text"]
+              : ["kind", "windowId"];
     if (Object.keys(snapshot).some((key) => !keys.includes(key)))
       throw new Error("Unsupported desktop action field.");
-    if (snapshot.kind === "move" || snapshot.kind === "click" || snapshot.kind === "observed-click") {
+    if (
+      snapshot.kind === "move" ||
+      snapshot.kind === "click" ||
+      snapshot.kind === "observed-click"
+    ) {
       const m = session.monitor;
       if (
         !Number.isInteger(snapshot.x) ||

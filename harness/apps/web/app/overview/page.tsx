@@ -98,10 +98,10 @@ export default async function HomePage() {
         <div className="panel">
           <p className="panelTitle">Runtime connection unavailable</p>
           <p className="muted">
-            On Windows, run <code>Start Zet Harness.cmd</code> from the application folder.
-            For manual starts, use <code>npm start -- --production</code> after building. The
-            runtime is expected at <code>{runtimeOrigin()}</code>; set{" "}
-            <code>HARNESS_RUNTIME_URL</code> when using a different local port.
+            On Windows, run <code>Start Zet Harness.cmd</code> from the application folder. For
+            manual starts, use <code>npm start -- --production</code> after building. The runtime is
+            expected at <code>{runtimeOrigin()}</code>; set <code>HARNESS_RUNTIME_URL</code> when
+            using a different local port.
           </p>
         </div>
       )}
@@ -111,8 +111,8 @@ export default async function HomePage() {
             Your workspace needs a model
           </h2>
           <p className="muted">
-            Connect a local or supported provider model first. Chat and graph workflows
-            remain available to explore, but inference needs a configured model.
+            Connect a local or supported provider model first. Chat and graph workflows remain
+            available to explore, but inference needs a configured model.
           </p>
           <p>
             <Link href="/models">Connect a model</Link>

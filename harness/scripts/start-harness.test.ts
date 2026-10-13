@@ -106,7 +106,9 @@ setTimeout(() => process.exit(Number(process.env.FIXTURE_BUILD_EXIT ?? "0")), 30
       const child = spawn(process.execPath, [join(root, "scripts", "start-harness.mjs"), ...args], {
         cwd: root,
         env: {
-          ...process.env,
+          ...Object.fromEntries(
+            Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "npm_execpath"),
+          ),
           npm_execpath: npmCli,
           PORT: String(webPort),
           ZET_RUNTIME_PORT: String(runtimePort),

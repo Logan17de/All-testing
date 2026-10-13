@@ -560,8 +560,10 @@ export function createAgentNodeExecutor(
         ? []
         : createGoalActionTools({ database, projectId, now, createId })),
       ...(memories && options.projectContext !== false
-        ? [...createMemoryActionTools({ database, projectId, runId, now, createId }),
-           createSessionSearchTool(database, projectId)]
+        ? [
+            ...createMemoryActionTools({ database, projectId, runId, now, createId }),
+            createSessionSearchTool(database, projectId),
+          ]
         : []),
     ];
     for (const tool of builtins) builtinOwners.add(tool);

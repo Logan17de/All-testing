@@ -22,7 +22,13 @@ import {
 } from "./desktop-view";
 
 type Value = Record<string, unknown>;
-type Capture = { artifactId: string; width: number; height: number; generation: number; scope: { x: number; y: number; width: number; height: number } };
+type Capture = {
+  artifactId: string;
+  width: number;
+  height: number;
+  generation: number;
+  scope: { x: number; y: number; width: number; height: number };
+};
 const object = (value: unknown): Value =>
   value && typeof value === "object" ? (value as Value) : {};
 
@@ -311,9 +317,15 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
                     ![scope.x, scope.y, scope.width, scope.height].every(Number.isSafeInteger) ||
                     scope.width !== result.width ||
                     scope.height !== result.height
-                  ) throw new Error("The companion did not identify a valid capture frame.");
+                  )
+                    throw new Error("The companion did not identify a valid capture frame.");
                   setCapture({
-                    scope: { x: scope.x as number, y: scope.y as number, width: result.width, height: result.height },
+                    scope: {
+                      x: scope.x as number,
+                      y: scope.y as number,
+                      width: result.width,
+                      height: result.height,
+                    },
                     artifactId: result.artifactId,
                     width: result.width,
                     height: result.height,
@@ -348,7 +360,9 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
                   setX(String(point.x));
                   setY(String(point.y));
                   setKind("observed-click");
-                  setMessage("Point selected. Review the coordinates and request host approval below.");
+                  setMessage(
+                    "Point selected. Review the coordinates and request host approval below.",
+                  );
                 }}
               >
                 <Image
@@ -359,8 +373,11 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
                   unoptimized
                   style={{ width: "100%", height: "auto" }}
                 />
-                {kind === "observed-click" && Number.isInteger(Number(x)) && Number.isInteger(Number(y)) &&
-                Number(x) >= capture.scope.x && Number(y) >= capture.scope.y &&
+                {kind === "observed-click" &&
+                Number.isInteger(Number(x)) &&
+                Number.isInteger(Number(y)) &&
+                Number(x) >= capture.scope.x &&
+                Number(y) >= capture.scope.y &&
                 Number(x) < capture.scope.x + capture.scope.width &&
                 Number(y) < capture.scope.y + capture.scope.height ? (
                   <span
@@ -374,9 +391,10 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
                 ) : null}
               </button>
               <p className="muted">
-                Select a point on the screenshot to prepare an observed click. It will not execute until you request the action and approve it separately.
-                This preview stays between your browser and the local runtime. It is not attached to
-                a model request automatically.
+                Select a point on the screenshot to prepare an observed click. It will not execute
+                until you request the action and approve it separately. This preview stays between
+                your browser and the local runtime. It is not attached to a model request
+                automatically.
               </p>
               <button disabled>Manual screenshot transfer is unavailable</button>
               <p>
@@ -459,7 +477,9 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
                     params.y = Number(y);
                     if (kind === "observed-click") {
                       if (!capture || capture.generation !== status?.generation)
-                        throw new Error("Capture the selected window/monitor before an observed click.");
+                        throw new Error(
+                          "Capture the selected window/monitor before an observed click.",
+                        );
                       params.artifactId = capture.artifactId;
                     }
                   } else if (kind === "key") params.key = key;

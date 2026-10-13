@@ -107,7 +107,6 @@ export function monitorContains(
   );
 }
 
-
 export interface DesktopPreviewArea {
   x: number;
   y: number;

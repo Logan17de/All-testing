@@ -8,18 +8,12 @@
       "ubuntu-latest": {
         "workflowRunId": 37323221544,
         "commitSha": "c0040de2557c2c297cf0e97f721c56dba6a39e92",
-        "metrics": [
-          "startupMedianMs",
-          "directRuntimeDependencies"
-        ]
+        "metrics": ["startupMedianMs", "directRuntimeDependencies"]
       },
       "windows-latest": {
         "workflowRunId": 37316460475,
         "commitSha": "455482b7d4a00caf31d125886342eaa0daf3b89e",
-        "metrics": [
-          "startupMedianMs",
-          "directRuntimeDependencies"
-        ]
+        "metrics": ["startupMedianMs", "directRuntimeDependencies"]
       }
     },
     "standaloneDependencyChange": {

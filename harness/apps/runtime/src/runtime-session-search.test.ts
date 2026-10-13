@@ -1,20 +1,31 @@
 import { expect, it } from "vitest";
 import type { JsonObject } from "@zet-harness/plugin-api";
-import { SqliteDatabase, SQLITE_MEMORY_PATH, runSqliteMigrations } from "@zet-harness/db";
-import { createSortableId } from "@zet-harness/db/sortable-id";
-import { createProject } from "@zet-harness/db/durable-project-records";
 import {
+  SqliteDatabase,
+  SQLITE_MEMORY_PATH,
+  runSqliteMigrations,
+  DURABLE_GRAPH_IDENTITY_MIGRATION,
+  DURABLE_RUNS_MIGRATION,
+} from "@zet-harness/db";
+import { createSortableId } from "@zet-harness/db/sortable-id";
+import { DURABLE_PROJECTS_MIGRATION, createProject } from "@zet-harness/db/durable-project-records";
+import {
+  DURABLE_CONVERSATIONS_MIGRATION,
   appendMessage,
   createConversation,
 } from "@zet-harness/db/durable-conversation-records";
-import { RUNTIME_DATABASE_MIGRATIONS } from "./runtime-daemon.js";
 import { createSessionSearchTool } from "./runtime-session-search.js";
 
 it("searches prior chat text only in the current project, excluding reasoning and tool output", async () => {
   const db = new SqliteDatabase({ path: SQLITE_MEMORY_PATH });
   db.open();
   try {
-    runSqliteMigrations(db.connection(), RUNTIME_DATABASE_MIGRATIONS);
+    runSqliteMigrations(db.connection(), [
+      DURABLE_GRAPH_IDENTITY_MIGRATION,
+      DURABLE_RUNS_MIGRATION,
+      DURABLE_PROJECTS_MIGRATION,
+      DURABLE_CONVERSATIONS_MIGRATION,
+    ]);
     const p1 = createProject(db.connection(), {
       projectId: createSortableId(),
       name: "Primary",

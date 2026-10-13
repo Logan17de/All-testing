@@ -7,10 +7,7 @@ import type { ToolAdapter } from "@zet-harness/plugin-api";
  * tool outputs, provider state, image references or another project's chats.
  * The existing project-memory tools remain the curated durable store.
  */
-export function createSessionSearchTool(
-  database: SqliteDatabase,
-  projectId: string,
-): ToolAdapter {
+export function createSessionSearchTool(database: SqliteDatabase, projectId: string): ToolAdapter {
   return {
     manifest: {
       id: "harness.memory.session-search",
@@ -49,7 +46,9 @@ export function createSessionSearchTool(
         input.query.length > 120 ||
         /[\x00-\x1f\x7f]/u.test(input.query) ||
         (input.limit !== undefined &&
-          (!Number.isSafeInteger(input.limit) || (input.limit as number) < 1 || (input.limit as number) > 10))
+          (!Number.isSafeInteger(input.limit) ||
+            (input.limit as number) < 1 ||
+            (input.limit as number) > 10))
       ) {
         return { value: { ok: false, error: { code: "SEARCH_INPUT_INVALID" } } };
       }
