@@ -116,6 +116,14 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Install pinned Chromium for native browser
+        if: runner.os == 'Windows'
+        run: node node_modules/playwright-core/cli.js install chromium
+
+      - name: Native Windows Chromium page smoke
+        if: runner.os == 'Windows'
+        run: node scripts/browser-windows-smoke.mjs
+
       - name: Windows launcher preflight
         if: runner.os == 'Windows'
         shell: cmd
