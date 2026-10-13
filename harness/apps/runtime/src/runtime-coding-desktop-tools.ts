@@ -43,7 +43,7 @@ export function createRuntimeCodingDesktopTools(options: {
           operation === "share"
             ? "Request separate human consent to send one local screenshot only to this exact turn/session/model/account. Bounded reuse expires with task/run. Never returns pixels or file paths."
             : operation === "input"
-              ? "Propose one exact physical input in the selected monitor/window. Each call requires human consent; never types credentials automatically."
+              ? "Propose one exact physical input in the selected monitor/window. Each call requires human consent. Model clicks must use kind=observed-click with the artifactId of the most recent screenshot; bare clicks are refused. Never type credentials."
               : "Read only the explicitly armed desktop task. Capture stays local until separate screenshot transmission consent.",
         inputSchema: {
           type: "object",
@@ -115,6 +115,8 @@ export function createRuntimeCodingDesktopTools(options: {
           if (operation === "input") {
             if (!input.action || typeof input.action !== "object" || Array.isArray(input.action))
               throw new Error("Invalid desktop action.");
+            if ((input.action as Record<string, unknown>).kind === "click")
+              throw new Error("Model clicks require an observed screenshot artifactId.");
             await options.controller.session.act(
               generation,
               input.action as unknown as DesktopAction,
