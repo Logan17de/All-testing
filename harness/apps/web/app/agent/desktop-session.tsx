@@ -354,13 +354,14 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
               Action{" "}
               <select value={kind} onChange={(event) => setKind(event.target.value)}>
                 <option value="move">Move pointer</option>
-                <option value="click">Click</option>
+                <option value="click">Click (manual)</option>
+                <option value="observed-click">Click in latest screenshot</option>
                 <option value="key">Press key</option>
                 <option value="text">Type text</option>
                 <option value="focus">Focus selected window</option>
               </select>
             </label>{" "}
-            {kind === "move" || kind === "click" ? (
+            {kind === "move" || kind === "click" || kind === "observed-click" ? (
               <>
                 <label>
                   X{" "}
@@ -401,7 +402,7 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
               onClick={() => {
                 void run(async () => {
                   const params: Value = { kind };
-                  if (kind === "move" || kind === "click") {
+                  if (kind === "move" || kind === "click" || kind === "observed-click") {
                     const monitor = status?.monitors.find(
                       (item) => item.id === status.selection?.monitorId,
                     );
@@ -409,6 +410,11 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
                       throw new Error("Choose integer coordinates inside the selected monitor.");
                     params.x = Number(x);
                     params.y = Number(y);
+                    if (kind === "observed-click") {
+                      if (!capture || capture.generation !== status?.generation)
+                        throw new Error("Capture the selected window/monitor before an observed click.");
+                      params.artifactId = capture.artifactId;
+                    }
                   } else if (kind === "key") params.key = key;
                   else if (kind === "text") params.text = typedText;
                   else {
@@ -420,6 +426,7 @@ export function DesktopSession({ initialTask = "" }: { initialTask?: string }) {
                   }
                   await action("act", { generation: status?.generation, action: params });
                   setTypedText("");
+                  if (kind === "observed-click") setCapture(null);
                   setMessage(
                     "One desktop action was requested. The host remains responsible for consent.",
                   );
