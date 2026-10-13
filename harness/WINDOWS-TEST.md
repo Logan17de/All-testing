@@ -13,9 +13,10 @@ and sensitive project folders out of initial testing.
    Administrator**.
 3. Install official **Node.js 24.20.x** and **npm 12.0.2** (or later 12.x) if
    they are not already available on PATH.
-4. Double-click **Prepare Zet Harness.cmd**. It runs `npm ci` and builds the
-   web and runtime from pinned sources. A network connection is needed for the
-   first install. If it fails, inspect its command output before proceeding.
+4. Double-click **Prepare Zet Harness.cmd**. It runs `npm ci`, builds the
+   web/runtime from pinned sources and downloads the matching Playwright Chromium
+   browser. A network connection is needed for the initial installation.
+   If any stage fails, inspect its command output before proceeding.
 5. Double-click **Start Zet Harness.cmd**. After both local services are
    ready, open **http://127.0.0.1:3000**. Keep the console open while testing.
    Ctrl+C stops both services.
