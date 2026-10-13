@@ -152,7 +152,7 @@ jobs:
   package-windows-test:
     name: Package Windows test kit
     needs: verify
-    if: github.ref == 'refs/heads/zet-harness-v1'
+    if: github.ref == 'refs/heads/zet-harness-v1' || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'zet-harness-v1')
     runs-on: windows-latest
     permissions:
       contents: read
