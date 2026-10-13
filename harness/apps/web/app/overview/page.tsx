@@ -29,6 +29,7 @@ export default async function HomePage() {
   const running = health.ok && health.data.status === "ok";
   const installedCount = plugins.ok ? plugins.data.installed.length : 0;
   const enabledCount = plugins.ok ? plugins.data.activated.length : 0;
+  const configuredModels = setup.ok ? setup.data.setup.modelsConfigured : 0;
 
   return (
     <main className="page">
@@ -76,6 +77,12 @@ export default async function HomePage() {
 
       {running ? (
         <div className="stats">
+          <Link className="stat" href="/models">
+            <span className="statValue">{configuredModels}</span>
+            <span className="statLabel">
+              {configuredModels === 1 ? "model" : "models"} configured
+            </span>
+          </Link>
           <Link className="stat" href="/plugins">
             <span className="statValue">{installedCount}</span>
             <span className="statLabel">
@@ -89,12 +96,28 @@ export default async function HomePage() {
         </div>
       ) : (
         <div className="panel">
+          <p className="panelTitle">Runtime connection unavailable</p>
           <p className="muted">
-            Start it with <code>npm run start --workspace @zet-harness/runtime</code>. It is
-            expected at <code>{runtimeOrigin()}</code>; set <code>HARNESS_RUNTIME_URL</code> to
-            point elsewhere.
+            On Windows, run <code>Start Zet Harness.cmd</code> from the application folder.
+            For manual starts, use <code>npm start -- --production</code> after building. The
+            runtime is expected at <code>{runtimeOrigin()}</code>; set{" "}
+            <code>HARNESS_RUNTIME_URL</code> when using a different local port.
           </p>
         </div>
+      )}
+      {running && setup.ok && configuredModels === 0 && (
+        <section className="panel" aria-labelledby="overview-connect-model">
+          <h2 className="panelTitle" id="overview-connect-model">
+            Your workspace needs a model
+          </h2>
+          <p className="muted">
+            Connect a local or supported provider model first. Chat and graph workflows
+            remain available to explore, but inference needs a configured model.
+          </p>
+          <p>
+            <Link href="/models">Connect a model</Link>
+          </p>
+        </section>
       )}
     </main>
   );
